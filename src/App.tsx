@@ -234,6 +234,56 @@ export default function App() {
 
   const fetchSupabaseUsers = useCallback(async () => {
     try {
+      const [profilesRes, betsRes] = await Promise.all([
+        supabase.from('profiles').select('*'),
+        supabase.from('bets').select('*').order('created_at', { ascending: false })
+      ])
+
+      if (profilesRes.data && profilesRes.data.length > 0) {
+        const betsByUser: Record<string, any[]> = {}
+        betsRes.data?.forEach(b => {
+          if (!betsByUser[b.user_id]) betsByUser[b.user_id] = []
+          betsByUser[b.user_id].push(b)
+        })
+
+        setAccounts(prev => {
+          const remoteAccounts: UserAccount[] = profilesRes.data.map(p => {
+            const isOwner = (p.username || '').toLowerCase() === ADMIN_USERNAME.toLowerCase()
+            const existing = prev.find(a => a.id === p.id || a.username.toLowerCase() === (p.username || '').toLowerCase())
+            const userBets = betsByUser[p.id] || existing?.bets || []
+            return {
+              id: p.id,
+              username: p.username,
+              role: (isOwner ? 'admin' : (p.role || 'user')) as 'admin' | 'user',
+              avatar: isOwner ? '👑' : (p.avatar || '🟣'),
+              title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
+              bal: Number(p.bal ?? 10000),
+              bets: userBets,
+              log: existing ? existing.log : [{ t: new Date(p.created_at || Date.now()).getTime(), x: 'Вход через Twitch', d: Number(p.bal ?? 10000) }],
+              createdAt: new Date(p.created_at || Date.now()).getTime(),
+              isBlocked: Boolean(p.is_blocked),
+              stats: existing ? existing.stats : { totalBets: userBets.length, wonBets: 0, lostBets: 0, totalProfit: 0 },
+              achievements: isOwner ? ['Владелец Платформы', 'Создатель Линии'] : ['Игрок Twitch']
+            }
+          })
+
+          const combined = [...remoteAccounts]
+          prev.forEach(p => {
+            if (!combined.some(c => c.username.toLowerCase() === p.username.toLowerCase())) {
+              combined.push(p)
+            }
+          })
+
+          return purgeEmptyAccounts(combined)
+        })
+        return
+      }
+    } catch (e) {
+      console.warn('Failed to fetch from profiles table, trying storage:', e)
+    }
+
+    // Fallback to public storage registry
+    try {
       const res = await fetch(`${USERS_REGISTRY_URL}?v=${Date.now()}`)
       if (res.ok) {
         const remoteUsers = await res.json()
@@ -267,16 +317,32 @@ export default function App() {
 
             return purgeEmptyAccounts(combined)
           })
-          return
         }
       }
     } catch (e) {
-      console.warn('Failed to fetch remote users registry:', e)
+      console.warn('Failed to fetch remote users registry fallback:', e)
     }
   }, [])
 
   useEffect(() => {
     fetchSupabaseUsers()
+  }, [fetchSupabaseUsers])
+
+  // Supabase Realtime synchronization across all players and admin
+  useEffect(() => {
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        fetchSupabaseUsers()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bets' }, () => {
+        fetchSupabaseUsers()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [fetchSupabaseUsers])
 
   useEffect(() => {
@@ -339,6 +405,18 @@ export default function App() {
     setCurrentUserId(accountId)
     setAuthModalOpen(false)
     notify(isOwner ? `Добро пожаловать, Владелец ${name}! Вы вошли через Twitch со статусом ADMIN 👑` : `Вход выполнен через Twitch: ${name}! Стартовый баланс 10 000 SV₽ 🟣`)
+
+    // Sync into Supabase profiles table
+    supabase.from('profiles').upsert({
+      id: accountId,
+      username: name,
+      avatar: isOwner ? '👑' : (u.user_metadata?.picture || u.user_metadata?.avatar_url || avatar),
+      role: isOwner ? 'admin' : 'user',
+      bal: isOwner ? 35000 : 10000,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'id', ignoreDuplicates: true }).then(() => {
+      fetchSupabaseUsers()
+    }, err => console.error('Failed to sync profile to Supabase:', err))
   }
 
   const handleOAuthLogin = async (provider: 'github' | 'twitch' | 'discord') => {
@@ -387,9 +465,17 @@ export default function App() {
 
   const mutate = (fn: (s: any) => void, message?: string) => {
     const next = structuredClone(S)
+    const oldBal = S.bal
     fn(next)
     setS(next)
     if (message) notify(message)
+
+    if (currentUser && next.bal !== oldBal) {
+      supabase.from('profiles').update({
+        bal: next.bal,
+        updated_at: new Date().toISOString()
+      }).eq('id', currentUser.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
+    }
   }
 
   const addVirtualMoney = (amount: number = 5000) => {
@@ -425,7 +511,7 @@ export default function App() {
     setErr('')
   }
 
-  const handlePlaceBet = (e: FormEvent) => {
+  const handlePlaceBet = async (e: FormEvent) => {
     e.preventDefault()
     if (!currentUser) {
       setAuthModalOpen(true)
@@ -449,9 +535,34 @@ export default function App() {
     busy.current = true
     setTimeout(() => { busy.current = false }, 350)
     setS(next)
+
+    // Sync real bet and balance into Supabase database
+    const ev = allEvents.find(event => event.id === selectedBet.evId)
+    const outcomeTitle = selectedBet.outcomeTitle || 'Исход'
+    const oddsVal = selectedBet.odds || 1.85
+
+    supabase.from('bets').insert({
+      user_id: currentUser.id,
+      username: currentUser.username,
+      event_id: selectedBet.evId,
+      match_title: ev?.title || selectedBet.evId,
+      pick: outcomeTitle,
+      pick_name: outcomeTitle,
+      odds: oddsVal,
+      stake: v,
+      status: 'pending'
+    }).then(() => {
+      fetchSupabaseUsers()
+    }, err => console.error('Failed to sync bet to Supabase:', err))
+
+    supabase.from('profiles').update({
+      bal: next.bal,
+      updated_at: new Date().toISOString()
+    }).eq('id', currentUser.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
+
     setSelectedBet(null)
     setErr('')
-    notify(`Ставка ${fmt(v)} принята!`)
+    notify(`Ставка ${fmt(v)} принята и сохранена в базе! ✅`)
   }
 
   // Crash Game Logic
@@ -741,17 +852,19 @@ export default function App() {
 
   // Admin Surveillance & Actions
   const handleAdminTopUp = (targetId: string, amount: number) => {
+    let newBal = 0
     setAccounts(prev => prev.map(a => {
       if (a.id === targetId) {
-        const nextBal = r2(a.bal + amount)
+        newBal = r2(a.bal + amount)
         const nextLog = [{ t: Date.now(), x: `Пополнение от Администратора (+${fmt(amount)})`, d: amount }, ...a.log]
-        return { ...a, bal: nextBal, log: nextLog }
+        return { ...a, bal: newBal, log: nextLog }
       }
       return a
     }))
     if (currentUserId === targetId) {
       mutate(s => { s.bal = r2(s.bal + amount) })
     }
+    supabase.from('profiles').update({ bal: newBal, updated_at: new Date().toISOString() }).eq('id', targetId).then(null, err => console.error(err))
     notify(`Пользователю начислено +${fmt(amount)}`)
   }
 
@@ -765,18 +878,21 @@ export default function App() {
     if (currentUserId === targetId) {
       mutate(s => { s.bal = 0 })
     }
+    supabase.from('profiles').update({ bal: 0, updated_at: new Date().toISOString() }).eq('id', targetId).then(null, err => console.error(err))
     notify(`Баланс пользователя обнулён`)
   }
 
   const handleAdminToggleBlock = (targetId: string) => {
+    let nextBlocked = false
     setAccounts(prev => prev.map(a => {
       if (a.id === targetId) {
-        const nextBlocked = !a.isBlocked
+        nextBlocked = !a.isBlocked
         notify(`Пользователь ${a.username} ${nextBlocked ? 'заблокирован ⛔' : 'разблокирован ✅'}`)
         return { ...a, isBlocked: nextBlocked }
       }
       return a
     }))
+    supabase.from('profiles').update({ is_blocked: nextBlocked, updated_at: new Date().toISOString() }).eq('id', targetId).then(null, err => console.error(err))
   }
 
   const handleAdminDeleteUser = (targetId: string) => {
@@ -790,6 +906,7 @@ export default function App() {
       if (currentUserId === targetId) {
         setCurrentUserId(null)
       }
+      supabase.from('profiles').delete().eq('id', targetId).then(null, err => console.error(err))
       notify(`Игрок ${target?.username} удален!`)
     }
   }
@@ -2616,13 +2733,26 @@ export default function App() {
                     </thead>
                     <tbody>
                       {inspectingUser.bets.map((b: any) => {
-                        const ev = allEvents.find(e => e.id === b.ev)
+                        const ev = allEvents.find(e => e.id === b.ev || e.id === b.event_id)
+                        const title = b.match_title || ev?.title || b.ev || 'Матч'
+                        const pick = b.pick_name || b.pick || ''
+                        const oddsVal = typeof b.odds === 'number' ? b.odds.toFixed(2) : String(b.odds || '-')
+                        const isWon = b.status === 'won' || b.state === 'won'
+                        const isLost = b.status === 'lost' || b.state === 'lost'
+                        const statusLabel = isWon ? 'Выигрыш' : isLost ? 'Проигрыш' : 'В игре'
                         return (
                           <tr key={b.id}>
-                            <td>{ev?.title || b.ev}</td>
-                            <td>{fmt(b.stake)}</td>
-                            <td>{b.odds.toFixed(2)}</td>
-                            <td>{b.state === 'won' ? 'Выигрыш' : b.state === 'lost' ? 'Проигрыш' : 'В игре'}</td>
+                            <td>
+                              <div><b>{title}</b></div>
+                              {pick && <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Выбор: {pick}</div>}
+                            </td>
+                            <td style={{ fontWeight: 700 }}>{fmt(Number(b.stake || 0))}</td>
+                            <td>{oddsVal}</td>
+                            <td>
+                              <span style={{ color: isWon ? 'var(--green)' : isLost ? '#ef4444' : '#f59e0b', fontWeight: 700 }}>
+                                {statusLabel}
+                              </span>
+                            </td>
                           </tr>
                         )
                       })}
