@@ -48,6 +48,7 @@ import {
   type UserAccount
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
+import { supabase, ADMIN_GITHUB_USERNAME } from './supabase'
 
 const KEY_STATE = 'svinline.v3.state'
 const KEY_EVENTS = 'svinline.v3.custom_events'
@@ -183,6 +184,74 @@ export default function App() {
   useEffect(() => {
     setAccounts(prev => prev.map(a => a.id === currentUserId ? { ...a, bal: S.bal } : a))
   }, [S.bal, currentUserId])
+
+  // Supabase Auth listener (detects GitHub/Twitch logins and admin ownership)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        syncSupabaseUser(session.user)
+      }
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        syncSupabaseUser(session.user)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const syncSupabaseUser = (u: any) => {
+    const ghUser = u.user_metadata?.user_name || u.user_metadata?.preferred_username || ''
+    const isOwner = ghUser.toLowerCase() === ADMIN_GITHUB_USERNAME.toLowerCase()
+    const name = ghUser || u.user_metadata?.name || u.user_metadata?.full_name || u.email?.split('@')[0] || 'Игрок'
+    const provider = u.app_metadata?.provider || 'oauth'
+
+    setAccounts(prev => {
+      const existing = prev.find(a => a.id === u.id)
+      if (existing) {
+        return prev.map(a => a.id === u.id ? {
+          ...a,
+          role: isOwner ? 'admin' : a.role,
+          title: isOwner ? 'Владелец репозитория (Admin)' : a.title
+        } : a)
+      }
+
+      const newAcc: UserAccount = {
+        id: u.id,
+        username: name,
+        role: isOwner ? 'admin' : 'user',
+        avatar: isOwner ? '👑' : provider === 'twitch' ? '🟣' : '🐗',
+        title: isOwner ? 'Владелец репозитория (Admin)' : `Игрок (${provider})`,
+        bal: 10000,
+        bets: [],
+        log: [{ t: Date.now(), x: `Вход через ${provider} • Стартовый баланс`, d: 10000 }],
+        createdAt: Date.now(),
+        isBlocked: false,
+        stats: { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 },
+        achievements: isOwner ? ['Владелец Репозитория', 'Создатель Линии'] : [`Игрок ${provider}`]
+      }
+      return [...prev, newAcc]
+    })
+
+    setCurrentUserId(u.id)
+    notify(isOwner ? `Добро пожаловать, Владелец ${name}! Выдан статус ADMIN 👑` : `Вход выполнен через ${provider}: ${name}!`)
+  }
+
+  const handleOAuthLogin = async (provider: 'github' | 'twitch' | 'discord') => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: window.location.origin + window.location.pathname
+        }
+      })
+      if (error) notify(`Ошибка авторизации: ${error.message}`)
+    } catch (e: any) {
+      notify(`Ошибка входа через ${provider}: ${e.message}`)
+    }
+  }
 
   useEffect(() => {
     if (!msg) return
@@ -2140,6 +2209,86 @@ export default function App() {
 
               {authTab === 'login' ? (
                 <form onSubmit={handleLogin}>
+                  {/* OAuth Buttons (GitHub for Owner, Twitch/Discord for Players) */}
+                  <div style={{ marginBottom: 18 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
+                      Вход через сервисы:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="wl-btn-orange"
+                        style={{
+                          background: '#24292e',
+                          color: '#fff',
+                          border: '1px solid #444d56',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 10,
+                          height: 42,
+                          borderRadius: 8,
+                          fontSize: 14
+                        }}
+                        onClick={() => handleOAuthLogin('github')}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                        </svg>
+                        <span>Войти через <b>GitHub</b> (Владелец: egor4kill)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="wl-btn-orange"
+                        style={{
+                          background: '#9146ff',
+                          color: '#fff',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 10,
+                          height: 42,
+                          borderRadius: 8,
+                          fontSize: 14
+                        }}
+                        onClick={() => handleOAuthLogin('twitch')}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
+                        </svg>
+                        <span>Войти через <b>Twitch</b> (Игрок)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="wl-btn-orange"
+                        style={{
+                          background: '#5865f2',
+                          color: '#fff',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 10,
+                          height: 38,
+                          borderRadius: 8,
+                          fontSize: 13
+                        }}
+                        onClick={() => handleOAuthLogin('discord')}
+                      >
+                        <span>Войти через <b>Discord</b></span>
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0 10px' }}>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                      <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>ИЛИ ПО ЛОГИНУ</span>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                    </div>
+                  </div>
+
                   <div className="wl-form-group">
                     <label className="wl-form-label">Имя пользователя / Логин:</label>
                     <input
