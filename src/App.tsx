@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import type { FormEvent } from 'react'
 import {
   Trophy,
@@ -48,7 +48,7 @@ import {
   type UserAccount
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
-import { supabase, ADMIN_USERNAME } from './supabase'
+import { supabase, supabaseAdmin, ADMIN_USERNAME } from './supabase'
 
 const KEY_STATE = 'svinline.v3.state'
 const KEY_EVENTS = 'svinline.v3.custom_events'
@@ -79,6 +79,7 @@ const PigLogo = () => (
 )
 
 const purgeEmptyAccounts = (list: UserAccount[]): UserAccount[] => {
+  const seenUsernames = new Set<string>()
   return (list || []).filter(a => {
     if (!a || !a.id || !a.username) return false
     const u = a.username.trim()
@@ -86,6 +87,9 @@ const purgeEmptyAccounts = (list: UserAccount[]): UserAccount[] => {
     if (u.toLowerCase() === 'admin' && a.id === 'adm1') return false
     if (u === 'Кабанчик_2026' || a.id === 'u1') return false
     if (u.toLowerCase() === 'игрок' || u.startsWith('Игрок_') || u.startsWith('Player_')) return false
+    const key = u.toLowerCase()
+    if (seenUsernames.has(key)) return false
+    seenUsernames.add(key)
     return true
   })
 }
@@ -227,6 +231,65 @@ export default function App() {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  const fetchSupabaseUsers = useCallback(async () => {
+    try {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers()
+      if (error || !data?.users) return
+
+      setAccounts(prev => {
+        const remoteAccounts: UserAccount[] = data.users.map(u => {
+          const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
+          const ghUser = (u.user_metadata?.user_name || u.user_metadata?.preferred_username || '').trim()
+          let name = twitchUser || ghUser || u.user_metadata?.full_name || u.user_metadata?.name || ''
+          if (!name && u.email) {
+            name = u.email.split('@')[0]
+          }
+          name = (name || '').trim() || `User_${u.id.slice(0, 5)}`
+
+          const isOwner = name.toLowerCase() === ADMIN_USERNAME.toLowerCase()
+          const existing = prev.find(a => a.id === u.id || a.username.toLowerCase() === name.toLowerCase())
+
+          return {
+            id: u.id,
+            username: name,
+            email: u.email,
+            role: (isOwner ? 'admin' : 'user') as 'admin' | 'user',
+            avatar: isOwner ? '👑' : (u.user_metadata?.picture || u.user_metadata?.avatar_url || '🟣'),
+            title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
+            bal: existing ? existing.bal : 10000,
+            bets: existing ? existing.bets : [],
+            log: existing ? existing.log : [{ t: new Date(u.created_at).getTime(), x: 'Вход через Twitch • Стартовый баланс', d: 10000 }],
+            createdAt: new Date(u.created_at).getTime(),
+            isBlocked: existing ? existing.isBlocked : false,
+            stats: existing ? existing.stats : { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 },
+            achievements: isOwner ? ['Владелец Платформы', 'Создатель Линии'] : ['Игрок Twitch']
+          }
+        })
+
+        const combined = [...remoteAccounts]
+        prev.forEach(p => {
+          if (!combined.some(c => c.username.toLowerCase() === p.username.toLowerCase())) {
+            combined.push(p)
+          }
+        })
+
+        return purgeEmptyAccounts(combined)
+      })
+    } catch (e) {
+      console.error('Failed to fetch remote users:', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchSupabaseUsers()
+  }, [fetchSupabaseUsers])
+
+  useEffect(() => {
+    if (adminModalOpen) {
+      fetchSupabaseUsers()
+    }
+  }, [adminModalOpen, fetchSupabaseUsers])
 
   const syncSupabaseUser = (u: any, customName?: string, customAvatar?: string) => {
     const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
@@ -722,27 +785,29 @@ export default function App() {
     }))
   }
 
-  const handleAdminDeleteUser = (targetId: string) => {
+  const handleAdminDeleteUser = async (targetId: string) => {
     const target = accounts.find(a => a.id === targetId)
     if (target?.role === 'admin') {
       notify('Нельзя удалить аккаунт администратора!')
       return
     }
-    if (confirm(`Удалить аккаунт «${target?.username || targetId}»?`)) {
+    if (confirm(`Удалить игрока «${target?.username || targetId}» из базы данных?`)) {
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(targetId)
+      } catch (err: any) {
+        console.error('Failed to delete user from Supabase:', err)
+      }
       setAccounts(prev => prev.filter(a => a.id !== targetId))
       if (currentUserId === targetId) {
         setCurrentUserId(null)
       }
-      notify(`Аккаунт ${target?.username} удален!`)
+      notify(`Игрок ${target?.username} удален!`)
     }
   }
 
-  const handleAdminPurgeEmpty = () => {
-    setAccounts(prev => {
-      const clean = purgeEmptyAccounts(prev)
-      notify(`Очищено! Активных профилей: ${clean.length}`)
-      return clean
-    })
+  const handleAdminPurgeEmpty = async () => {
+    await fetchSupabaseUsers()
+    notify('Синхронизировано с базой данных Supabase!')
   }
 
   // Filtered events
@@ -2059,14 +2124,27 @@ export default function App() {
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-secondary)' }}>
                       МОНИТОРИНГ И УПРАВЛЕНИЕ ИГРОКАМИ ({accounts.length}):
                     </div>
-                    <button
-                      className="wl-demo-btn"
-                      style={{ color: '#f59e0b', borderColor: '#f59e0b44' }}
-                      onClick={handleAdminPurgeEmpty}
-                      title="Удалить пустые и неактивные аккаунты"
-                    >
-                      🧹 Очистить пустые аккаунты
-                    </button>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="wl-demo-btn"
+                        style={{ color: '#3b82f6', borderColor: '#3b82f644' }}
+                        onClick={async () => {
+                          await fetchSupabaseUsers()
+                          notify('Список игроков обновлен из Supabase! 🔄')
+                        }}
+                        title="Загрузить свежих игроков из Supabase"
+                      >
+                        🔄 Обновить из Supabase
+                      </button>
+                      <button
+                        className="wl-demo-btn"
+                        style={{ color: '#f59e0b', borderColor: '#f59e0b44' }}
+                        onClick={handleAdminPurgeEmpty}
+                        title="Удалить пустые и неактивные аккаунты"
+                      >
+                        🧹 Очистить пустые
+                      </button>
+                    </div>
                   </div>
                   <div style={{ overflowX: 'auto' }}>
                     <table className="wl-admin-table">
@@ -2084,7 +2162,15 @@ export default function App() {
                           <tr key={acc.id}>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ fontSize: 20 }}>{acc.avatar}</span>
+                                {acc.avatar?.startsWith('http') ? (
+                                  <img
+                                    src={acc.avatar}
+                                    alt={acc.username}
+                                    style={{ width: 26, height: 26, borderRadius: '50%', objectFit: 'cover' }}
+                                  />
+                                ) : (
+                                  <span style={{ fontSize: 20 }}>{acc.avatar}</span>
+                                )}
                                 <div>
                                   <div style={{ fontWeight: 700 }}>{acc.username}</div>
                                   <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{acc.title}</div>
