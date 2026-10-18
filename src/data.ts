@@ -17,6 +17,7 @@ export type Ev = {
 export type UserAccount = {
   id: string
   username: string
+  email?: string
   password?: string
   role: 'user' | 'admin'
   avatar: string
@@ -43,38 +44,8 @@ export type PlatformAuditLog = {
   type: 'auth' | 'bet' | 'admin' | 'game'
 }
 
-export const DEFAULT_ACCOUNTS: UserAccount[] = [
-  {
-    id: 'u1',
-    username: 'Кабанчик_2026',
-    password: '123',
-    role: 'user',
-    avatar: '🐗',
-    title: 'VIP-Хряк I степени',
-    bal: 10000,
-    bets: [],
-    log: [{ t: Date.now() - 3600000, x: 'Стартовый баланс', d: 10000 }],
-    createdAt: Date.now() - 86400000 * 2,
-    isBlocked: false,
-    stats: { totalBets: 12, wonBets: 8, lostBets: 4, totalProfit: 4200 },
-    achievements: ['Первая грязь', 'Мастер коэффициента 1.01', 'Удачный хрюк']
-  },
-  {
-    id: 'adm1',
-    username: 'admin',
-    password: 'admin',
-    role: 'admin',
-    avatar: '👑',
-    title: 'Главный Администратор (Шеф-Хряк)',
-    bal: 1000000,
-    bets: [],
-    log: [{ t: Date.now() - 3600000, x: 'Резервный фонд кассы SVINLINE', d: 1000000 }],
-    createdAt: Date.now() - 86400000 * 30,
-    isBlocked: false,
-    stats: { totalBets: 99, wonBets: 99, lostBets: 0, totalProfit: 999999 },
-    achievements: ['Создатель Линии', 'Властелин Корыта', 'Абсолютный Боров']
-  }
-]
+export const DEFAULT_ACCOUNTS: UserAccount[] = []
+
 
 export const CATS = [
   'Свинские соревнования',

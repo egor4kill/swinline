@@ -80,16 +80,31 @@ const PigLogo = () => (
 
 export default function App() {
   // 1. Account & Auth & Admin States
-  const [accounts, setAccounts] = useState<UserAccount[]>(() => loadJSON(KEY_ACCOUNTS, DEFAULT_ACCOUNTS))
-  const [currentUserId, setCurrentUserId] = useState<string | null>(() => loadJSON(KEY_CURRENT_USER, 'u1'))
+  const [accounts, setAccounts] = useState<UserAccount[]>(() => {
+    const raw = loadJSON(KEY_ACCOUNTS, DEFAULT_ACCOUNTS)
+    // Strictly sanitize: remove dummy admin 'adm1', purge fake 'admin' accounts, enforce owner-only admin role
+    return raw
+      .filter((a: any) => a.id !== 'adm1' && a.username?.toLowerCase() !== 'admin')
+      .map((a: any) => {
+        if (a.role === 'admin' && a.username?.toLowerCase() !== ADMIN_GITHUB_USERNAME.toLowerCase()) {
+          return { ...a, role: 'user' as const, title: 'Игрок SVINLINE' }
+        }
+        return a
+      })
+  })
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
+    const id = loadJSON(KEY_CURRENT_USER, null)
+    if (id === 'adm1') return null
+    return id
+  })
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login')
   const [loginUser, setLoginUser] = useState('')
   const [loginPass, setLoginPass] = useState('')
   const [regUser, setRegUser] = useState('')
+  const [regEmail, setRegEmail] = useState('')
   const [regPass, setRegPass] = useState('')
   const [regAvatar, setRegAvatar] = useState('🐗')
-  const [regRole, setRegRole] = useState<'user' | 'admin'>('user')
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [adminModalOpen, setAdminModalOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'users' | 'create' | 'matches' | 'audit' | 'bank'>('users')
@@ -202,28 +217,47 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  const syncSupabaseUser = (u: any) => {
-    const ghUser = u.user_metadata?.user_name || u.user_metadata?.preferred_username || ''
-    const isOwner = ghUser.toLowerCase() === ADMIN_GITHUB_USERNAME.toLowerCase()
-    const name = ghUser || u.user_metadata?.name || u.user_metadata?.full_name || u.email?.split('@')[0] || 'Игрок'
+  const syncSupabaseUser = (u: any, customName?: string, customAvatar?: string) => {
     const provider = u.app_metadata?.provider || 'oauth'
+    const ghUser = (u.user_metadata?.user_name || u.user_metadata?.preferred_username || '').trim()
+    const twitchUser = (provider === 'twitch' ? (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name) : '').trim()
+    const discordUser = (provider === 'discord' ? (u.user_metadata?.full_name || u.user_metadata?.custom_claims?.global_name || u.user_metadata?.name) : '').trim()
+
+    // Strict owner verification: MUST be github provider AND username must match ADMIN_GITHUB_USERNAME
+    const isOwner = provider === 'github' && ghUser.toLowerCase() === ADMIN_GITHUB_USERNAME.toLowerCase()
+
+    let name = customName || ghUser || twitchUser || discordUser || u.user_metadata?.full_name || u.user_metadata?.name || ''
+    if (!name && u.email) {
+      name = u.email.split('@')[0]
+    }
+    name = (name || '').trim()
+
+    // Prevent empty dummy accounts
+    if (!name) {
+      name = `Игрок_${u.id.slice(0, 5)}`
+    }
+
+    const avatar = customAvatar || (isOwner ? '👑' : provider === 'twitch' ? '🟣' : provider === 'discord' ? '🎮' : '🐗')
 
     setAccounts(prev => {
       const existing = prev.find(a => a.id === u.id)
       if (existing) {
         return prev.map(a => a.id === u.id ? {
           ...a,
-          role: isOwner ? 'admin' : a.role,
-          title: isOwner ? 'Владелец репозитория (Admin)' : a.title
+          username: name || a.username,
+          // CRITICAL: NEVER allow admin unless verified GitHub owner
+          role: isOwner ? 'admin' : (a.role === 'admin' ? 'user' : a.role),
+          title: isOwner ? 'Владелец репозитория (Admin)' : (a.title.includes('Admin') ? 'Игрок SVINLINE' : a.title),
+          avatar: isOwner ? '👑' : a.avatar
         } : a)
       }
 
       const newAcc: UserAccount = {
         id: u.id,
         username: name,
-        role: isOwner ? 'admin' : 'user',
-        avatar: isOwner ? '👑' : provider === 'twitch' ? '🟣' : '🐗',
-        title: isOwner ? 'Владелец репозитория (Admin)' : `Игрок (${provider})`,
+        role: isOwner ? 'admin' : 'user', // strictly only isOwner can be admin!
+        avatar,
+        title: isOwner ? 'Владелец репозитория (Admin)' : `Игрок (${provider === 'email' ? 'SVINLINE' : provider.toUpperCase()})`,
         bal: 10000,
         bets: [],
         log: [{ t: Date.now(), x: `Вход через ${provider} • Стартовый баланс`, d: 10000 }],
@@ -236,7 +270,7 @@ export default function App() {
     })
 
     setCurrentUserId(u.id)
-    notify(isOwner ? `Добро пожаловать, Владелец ${name}! Выдан статус ADMIN 👑` : `Вход выполнен через ${provider}: ${name}!`)
+    notify(isOwner ? `Добро пожаловать, Владелец ${name}! Выдан статус ADMIN 👑` : `Вход выполнен: ${name}!`)
   }
 
   const handleOAuthLogin = async (provider: 'github' | 'twitch' | 'discord') => {
@@ -322,6 +356,15 @@ export default function App() {
 
   const handlePlaceBet = (e: FormEvent) => {
     e.preventDefault()
+    if (!currentUser) {
+      setAuthModalOpen(true)
+      notify('Для совершения ставки необходимо войти в аккаунт!')
+      return
+    }
+    if (currentUser.isBlocked) {
+      notify('Ваш аккаунт заблокирован администратором!')
+      return
+    }
     if (busy.current || !selectedBet) return
     const v = parseFloat(stake)
     const next = structuredClone(S)
@@ -342,6 +385,15 @@ export default function App() {
 
   // Crash Game Logic
   const startCrashGame = () => {
+    if (!currentUser) {
+      setAuthModalOpen(true)
+      notify('Для игры необходимо войти в аккаунт!')
+      return
+    }
+    if (currentUser.isBlocked) {
+      notify('Ваш аккаунт заблокирован администратором!')
+      return
+    }
     const v = parseFloat(crashStake)
     if (!isFinite(v) || v <= 0) {
       notify('Укажите корректную сумму ставки')
@@ -399,6 +451,15 @@ export default function App() {
 
   // Roulette Spin Logic
   const spinRoulette = () => {
+    if (!currentUser) {
+      setAuthModalOpen(true)
+      notify('Для игры необходимо войти в аккаунт!')
+      return
+    }
+    if (currentUser.isBlocked) {
+      notify('Ваш аккаунт заблокирован администратором!')
+      return
+    }
     if (spinning) return
     if (S.bal < 100) {
       notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽».')
@@ -471,14 +532,40 @@ export default function App() {
   }
 
   // Auth Handlers
-  const handleLogin = (e: FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
-    const target = accounts.find(a => a.username.toLowerCase() === loginUser.trim().toLowerCase())
+    const input = loginUser.trim()
+    const pass = loginPass.trim()
+    if (!input || !pass) {
+      notify('Введите логин или email и пароль!')
+      return
+    }
+
+    // 1. Try Supabase Email Login if input is email or matches stored account email
+    const emailToTry = input.includes('@') ? input : accounts.find(a => a.username.toLowerCase() === input.toLowerCase())?.email || ''
+    if (emailToTry) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: emailToTry,
+          password: pass
+        })
+        if (!error && data.user) {
+          syncSupabaseUser(data.user)
+          setAuthModalOpen(false)
+          setLoginUser('')
+          setLoginPass('')
+          return
+        }
+      } catch {}
+    }
+
+    // 2. Fallback to existing registered player accounts
+    const target = accounts.find(a => (a.username.toLowerCase() === input.toLowerCase() || (a as any).email === input))
     if (!target) {
       notify('Пользователь не найден!')
       return
     }
-    if (target.password && target.password !== loginPass) {
+    if (target.password && target.password !== pass) {
       notify('Неверный пароль!')
       return
     }
@@ -493,24 +580,66 @@ export default function App() {
     notify(`Добро пожаловать, ${target.username}! 👋`)
   }
 
-  const handleRegister = (e: FormEvent) => {
+  const handleRegister = async (e: FormEvent) => {
     e.preventDefault()
     const u = regUser.trim()
-    if (!u) {
-      notify('Введите имя пользователя!')
+    const email = regEmail.trim()
+    const pass = regPass.trim()
+    if (!u || !pass) {
+      notify('Введите никнейм и пароль!')
+      return
+    }
+    if (pass.length < 4) {
+      notify('Пароль должен содержать минимум 4 символа!')
       return
     }
     if (accounts.some(a => a.username.toLowerCase() === u.toLowerCase())) {
-      notify('Пользователь с таким именем уже существует!')
+      notify('Пользователь с таким никнеймом уже существует!')
       return
     }
+
+    // Real cloud registration via Supabase if email provided
+    if (email) {
+      if (!email.includes('@')) {
+        notify('Введите корректный email адрес!')
+        return
+      }
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password: pass,
+          options: {
+            data: { username: u, name: u, avatar: regAvatar }
+          }
+        })
+        if (error) {
+          notify(`Ошибка регистрации в Supabase: ${error.message}`)
+          return
+        }
+        if (data.user) {
+          syncSupabaseUser(data.user, u, regAvatar)
+          setAuthModalOpen(false)
+          setRegUser('')
+          setRegEmail('')
+          setRegPass('')
+          notify(`Аккаунт ${u} успешно создан! Стартовый баланс: 10 000 SV₽! 🎉`)
+          return
+        }
+      } catch (err: any) {
+        notify(`Ошибка: ${err.message}`)
+        return
+      }
+    }
+
+    // Standard player account (strictly role: 'user', never admin)
     const newAccount: UserAccount = {
       id: 'u_' + Date.now(),
       username: u,
-      password: regPass || '123',
-      role: regRole,
+      email: email || undefined,
+      password: pass,
+      role: 'user', // NEVER admin. Admin is exclusively for GitHub owner.
       avatar: regAvatar,
-      title: regRole === 'admin' ? 'Администратор Линии' : 'Новичок SVINLINE',
+      title: 'Игрок SVINLINE',
       bal: 10000,
       bets: [],
       log: [{ t: Date.now(), x: 'Регистрация и стартовый баланс', d: 10000 }],
@@ -523,11 +652,15 @@ export default function App() {
     setCurrentUserId(newAccount.id)
     setAuthModalOpen(false)
     setRegUser('')
+    setRegEmail('')
     setRegPass('')
     notify(`Аккаунт ${u} успешно зарегистрирован! Начислено 10 000 SV₽! 🎉`)
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut()
+    } catch {}
     setCurrentUserId(null)
     setProfileModalOpen(false)
     notify('Вы вышли из профиля. Режим гостя.')
@@ -2290,12 +2423,12 @@ export default function App() {
                   </div>
 
                   <div className="wl-form-group">
-                    <label className="wl-form-label">Имя пользователя / Логин:</label>
+                    <label className="wl-form-label">Имя пользователя или Email:</label>
                     <input
                       type="text"
                       className="wl-form-input"
                       value={loginUser}
-                      placeholder="Кабанчик_2026 или admin"
+                      placeholder="Введите логин или email"
                       onChange={e => setLoginUser(e.target.value)}
                       required
                     />
@@ -2312,33 +2445,12 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ margin: '14px 0', padding: 10, background: '#171b26', borderRadius: 8, fontSize: 12 }}>
-                    <div style={{ color: 'var(--tx-muted)', marginBottom: 6 }}>Быстрый вход:</div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        type="button"
-                        className="wl-demo-btn"
-                        onClick={() => { setLoginUser('Кабанчик_2026'); setLoginPass('123') }}
-                      >
-                        🐗 Кабанчик (123)
-                      </button>
-                      <button
-                        type="button"
-                        className="wl-demo-btn"
-                        style={{ color: '#f59e0b' }}
-                        onClick={() => { setLoginUser('admin'); setLoginPass('admin') }}
-                      >
-                        👑 admin (admin)
-                      </button>
-                    </div>
-                  </div>
-
                   <button
                     type="submit"
                     className="wl-btn-orange"
-                    style={{ width: '100%', height: 44, borderRadius: 8, fontSize: 15 }}
+                    style={{ width: '100%', height: 44, borderRadius: 8, fontSize: 15, marginTop: 12 }}
                   >
-                    Войти в систему
+                    Войти в аккаунт
                   </button>
                 </form>
               ) : (
@@ -2355,21 +2467,31 @@ export default function App() {
                     />
                   </div>
                   <div className="wl-form-group">
+                    <label className="wl-form-label">Электронная почта (Email):</label>
+                    <input
+                      type="email"
+                      className="wl-form-input"
+                      value={regEmail}
+                      placeholder="player@example.com"
+                      onChange={e => setRegEmail(e.target.value)}
+                    />
+                  </div>
+                  <div className="wl-form-group">
                     <label className="wl-form-label">Пароль:</label>
                     <input
                       type="password"
                       className="wl-form-input"
                       value={regPass}
-                      placeholder="Минимум 3 символа"
+                      placeholder="Минимум 4 символа"
                       onChange={e => setRegPass(e.target.value)}
                       required
                     />
                   </div>
 
                   <div className="wl-form-group">
-                    <label className="wl-form-label">Выберите аватар:</label>
+                    <label className="wl-form-label">Выберите аватар игрока:</label>
                     <div style={{ display: 'flex', gap: 8, fontSize: 22, margin: '6px 0', flexWrap: 'wrap' }}>
-                      {['🐗', '🐷', '🐽', '👑', '🍔', '🚀', '⚡', '🕶️'].map(av => (
+                      {['🐗', '🐷', '🐽', '⚡', '🍔', '🚀', '🕶️', '🎯'].map(av => (
                         <button
                           key={av}
                           type="button"
@@ -2387,22 +2509,14 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Тип аккаунта:</label>
-                    <select
-                      className="wl-form-input"
-                      value={regRole}
-                      onChange={e => setRegRole(e.target.value as any)}
-                    >
-                      <option value="user">Обычный игрок (баланс 10 000 SV₽)</option>
-                      <option value="admin">Администратор платформы (полный доступ)</option>
-                    </select>
+                  <div style={{ background: '#121722', border: '1px solid #232a3b', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: 'var(--tx-secondary)', margin: '8px 0 12px', lineHeight: 1.5 }}>
+                    🛡️ <b>Управление доступом:</b> При регистрации создаётся персональный аккаунт игрока с балансом 10 000 SV₽. Статус <b>Администратора</b> закреплён исключительно за владельцем репозитория при авторизации через GitHub.
                   </div>
 
                   <button
                     type="submit"
                     className="wl-btn-green"
-                    style={{ width: '100%', height: 44, borderRadius: 8, fontSize: 15, marginTop: 8 }}
+                    style={{ width: '100%', height: 44, borderRadius: 8, fontSize: 15, marginTop: 4 }}
                   >
                     Зарегистрироваться (+10 000 SV₽)
                   </button>
