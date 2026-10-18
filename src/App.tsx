@@ -31,7 +31,8 @@ import {
   Zap,
   Check,
   TrendingUp,
-  AlertTriangle
+  AlertTriangle,
+  Users
 } from 'lucide-react'
 import {
   CATS,
@@ -88,6 +89,16 @@ const ROULETTE_SECTORS = [
   { mul: 0,   label: 'x0',   title: 'Корыто пусто',color: '#ef4444', bg: '#2b0d10', emoji: '🐽' },
   { mul: 1.5, label: 'x1.5', title: 'Хрюк-бонус', color: '#eab308', bg: '#2b2308', emoji: '🥓' },
   { mul: 10.0,label: 'x10',  title: 'ДЖЕКПОТ 👑', color: '#fbbf24', bg: '#3a2804', emoji: '👑' }
+]
+
+const CRASH_COMMUNITY_PLAYERS = [
+  { name: 'lowrensy', avatar: 'https://static-cdn.jtvnw.net/jtv_user_pictures/6d72a4ce-1517-408b-8d79-2490b31fa178-profile_image-300x300.png' },
+  { name: 'PorkMaster', avatar: '🐗' },
+  { name: 'CyberKaban', avatar: '🕶️' },
+  { name: 'HamsterPro', avatar: '⚡' },
+  { name: 'OinkBoy', avatar: '🐷' },
+  { name: 'LuckySvin', avatar: '🚀' },
+  { name: 'BaconGod', avatar: '🥓' }
 ]
 
 const getTwitchAvatar = (username?: string, currentAvatar?: string | null): string => {
@@ -260,12 +271,23 @@ export default function App() {
   const [wonSectorIdx, setWonSectorIdx] = useState<number | null>(null)
   const [rouletteResult, setRouletteResult] = useState<string | null>(null)
 
-  // 7. Games 24/7 Crash Game State
-  const [crashStake, setCrashStake] = useState('200')
-  const [crashState, setCrashState] = useState<'idle' | 'running' | 'crashed' | 'won'>('idle')
+  // 7. Shared Multiplayer Crash Game State
+  const [crashPhase, setCrashPhase] = useState<'betting' | 'flying' | 'crashed'>('betting')
   const [crashMultiplier, setCrashMultiplier] = useState(1.00)
-  const [crashHistory, setCrashHistory] = useState<number[]>([1.45, 2.80, 1.15, 6.20, 1.05, 3.42, 1.95])
-  const crashTimerRef = useRef<any>(null)
+  const [crashCountdown, setCrashCountdown] = useState(6.0)
+  const [crashHistory, setCrashHistory] = useState<number[]>([1.45, 2.80, 1.15, 6.20, 1.05, 3.42, 1.95, 2.15])
+  const [crashRoundId, setCrashRoundId] = useState(1042)
+  const [crashStake, setCrashStake] = useState('200')
+  const [crashAutoCashout, setCrashAutoCashout] = useState('')
+  const [myCrashBet, setMyCrashBet] = useState<{
+    stake: number
+    autoCashout?: number
+    cashedOutMul?: number
+    winAmount?: number
+  } | null>(null)
+  const [liveCrashBets, setLiveCrashBets] = useState<any[]>([])
+  const crashTargetRef = useRef<number>(2.40)
+  const crashStartTimeRef = useRef<number>(Date.now())
 
   // 8. Admin Form State for New Match
   const [newMatchTitle, setNewMatchTitle] = useState('')
@@ -713,20 +735,132 @@ export default function App() {
     notify(`Ставка ${fmt(v)} принята и сохранена в базе! ✅`)
   }
 
-  // Crash Game Logic
-  const startCrashGame = () => {
+  // Shared Multiplayer Crash Master Loop
+  useEffect(() => {
+    let timeoutId: any = null
+
+    const intervalId = setInterval(() => {
+      setCrashPhase(phase => {
+        if (phase === 'betting') {
+          setCrashCountdown(prev => {
+            const next = r2(prev - 0.05)
+            if (next <= 0) {
+              // Time to fly!
+              const r = Math.random()
+              const target = r < 0.03 ? 1.00 : r2(Math.max(1.01, Math.min(25.0, 0.96 / (1 - r * 0.96))))
+              crashTargetRef.current = target
+              crashStartTimeRef.current = Date.now()
+              setCrashMultiplier(1.00)
+
+              // Initialize community live bets
+              setLiveCrashBets(prevBets => {
+                const userBet = prevBets.find(b => b.isUser)
+                const botCount = 3 + Math.floor(Math.random() * 3)
+                const shuffled = [...CRASH_COMMUNITY_PLAYERS].sort(() => Math.random() - 0.5).slice(0, botCount)
+                const bots = shuffled.map(p => ({
+                  id: 'bot_' + p.name,
+                  name: p.name,
+                  avatar: p.avatar,
+                  stake: [100, 200, 500, 1000, 2500][Math.floor(Math.random() * 5)],
+                  targetMul: r2(1.2 + Math.random() * 3.8),
+                  isUser: false
+                }))
+                return userBet ? [userBet, ...bots] : bots
+              })
+
+              return 0
+            }
+            return next
+          })
+          return crashCountdown <= 0.05 ? 'flying' : 'betting'
+        }
+
+        if (phase === 'flying') {
+          const elapsed = (Date.now() - crashStartTimeRef.current) / 1000
+          const currentMul = r2(1.00 + 0.06 * elapsed + 0.022 * Math.pow(elapsed, 1.8))
+
+          if (currentMul >= crashTargetRef.current) {
+            // CRASH!
+            const finalMul = crashTargetRef.current
+            setCrashMultiplier(finalMul)
+            setCrashHistory(prev => [finalMul, ...prev.slice(0, 11)])
+
+            // Mark remaining players as crashed
+            setLiveCrashBets(prev => prev.map(b => (!b.cashedOutMul ? { ...b, crashed: true } : b)))
+
+            // Auto-schedule next round after 3.2s
+            timeoutId = setTimeout(() => {
+              setCrashRoundId(r => r + 1)
+              setCrashMultiplier(1.00)
+              setCrashCountdown(6.0)
+              setMyCrashBet(null)
+              setLiveCrashBets([])
+              setCrashPhase('betting')
+            }, 3200)
+
+            return 'crashed'
+          } else {
+            setCrashMultiplier(currentMul)
+
+            // Update bot cashouts in real-time
+            setLiveCrashBets(prev => prev.map(b => {
+              if (!b.isUser && !b.cashedOutMul && b.targetMul && currentMul >= b.targetMul) {
+                return { ...b, cashedOutMul: b.targetMul, winAmount: r2(b.stake * b.targetMul) }
+              }
+              return b
+            }))
+
+            // Check auto-cashout for real user
+            setMyCrashBet(currentBet => {
+              if (currentBet && !currentBet.cashedOutMul && currentBet.autoCashout && currentMul >= currentBet.autoCashout) {
+                const winAmount = r2(currentBet.stake * currentBet.autoCashout)
+                mutate(s => {
+                  s.bal = r2(s.bal + winAmount)
+                  s.log.unshift({ t: Date.now(), x: `Авто-вывод в Хряк-Крэш (x${currentBet.autoCashout})`, d: winAmount })
+                }, `Авто-вывод ${fmt(winAmount)} по x${currentBet.autoCashout}! 🎉`)
+
+                setLiveCrashBets(bets => bets.map(b => b.isUser ? { ...b, cashedOutMul: currentBet.autoCashout, winAmount } : b))
+                return { ...currentBet, cashedOutMul: currentBet.autoCashout, winAmount }
+              }
+              return currentBet
+            })
+
+            return 'flying'
+          }
+        }
+
+        return phase
+      })
+    }, 50)
+
+    return () => {
+      clearInterval(intervalId)
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [crashCountdown])
+
+  const placeCrashBet = () => {
     if (!currentUser) {
       setAuthModalOpen(true)
-      notify('Для игры необходимо войти в аккаунт!')
+      notify('Для игры необходимо войти через Twitch!')
       return
     }
     if (currentUser.isBlocked) {
       notify('Ваш аккаунт заблокирован администратором!')
       return
     }
+    if (crashPhase !== 'betting') {
+      notify('Приём ставок на текущий раунд завершён. Дождитесь следующего!')
+      return
+    }
+    if (myCrashBet) {
+      notify('Вы уже сделали ставку на этот раунд!')
+      return
+    }
+
     const v = parseFloat(crashStake)
-    if (!isFinite(v) || v <= 0) {
-      notify('Укажите корректную сумму ставки')
+    if (!isFinite(v) || isNaN(v) || v < 10) {
+      notify('Минимальная ставка — 10 SV₽')
       return
     }
     if (v > S.bal) {
@@ -734,49 +868,62 @@ export default function App() {
       return
     }
 
-    // Deduct stake
+    const autoMul = parseFloat(crashAutoCashout)
+    const validAuto = isFinite(autoMul) && autoMul >= 1.05 ? r2(autoMul) : undefined
+
     mutate(s => {
       s.bal = r2(s.bal - v)
-      s.log.unshift({ t: Date.now(), x: `Ставка в Хряк-Крэш 24/7`, d: -v })
+      s.log.unshift({ t: Date.now(), x: `Ставка в общем раунде Хряк-Крэш #${crashRoundId}`, d: -v })
     })
 
-    setCrashMultiplier(1.00)
-    setCrashState('running')
+    setMyCrashBet({
+      stake: v,
+      autoCashout: validAuto
+    })
 
-    let current = 1.00
-    if (crashTimerRef.current) clearInterval(crashTimerRef.current)
+    setLiveCrashBets(prev => [
+      {
+        id: currentUser.id,
+        name: currentUser.username,
+        avatar: currentUser.avatar,
+        stake: v,
+        isUser: true
+      },
+      ...prev.filter(b => b.id !== currentUser.id)
+    ])
 
-    // Dynamic hazard rate: the crash point does not exist in memory beforehand
-    crashTimerRef.current = setInterval(() => {
-      // Dynamic hazard rate per 70ms tick:
-      const tickRisk = 0.012 + Math.min(0.08, (current - 1.0) * 0.0075)
-      const rolled = Math.random()
+    notify(`Ставка ${fmt(v)} на общий раунд #${crashRoundId} принята! 🚀`)
+  }
 
-      if (rolled < tickRisk || current >= 25.0) {
-        clearInterval(crashTimerRef.current)
-        const finalMul = r2(current)
-        setCrashMultiplier(finalMul)
-        setCrashState('crashed')
-        setCrashHistory(prev => [finalMul, ...prev.slice(0, 10)])
-      } else {
-        current = r2(current + 0.03 + (current * 0.022))
-        setCrashMultiplier(current)
-      }
-    }, 70)
+  const cancelCrashBet = () => {
+    if (crashPhase !== 'betting' || !myCrashBet) return
+    const refund = myCrashBet.stake
+    mutate(s => {
+      s.bal = r2(s.bal + refund)
+      s.log.unshift({ t: Date.now(), x: `Отмена ставки в Хряк-Крэш #${crashRoundId}`, d: refund })
+    })
+    setMyCrashBet(null)
+    setLiveCrashBets(prev => prev.filter(b => !b.isUser))
+    notify(`Ставка ${fmt(refund)} возвращена на баланс!`)
   }
 
   const cashoutCrash = () => {
-    if (crashState !== 'running') return
-    if (crashTimerRef.current) clearInterval(crashTimerRef.current)
+    if (crashPhase !== 'flying' || !myCrashBet || myCrashBet.cashedOutMul) return
 
     const mul = r2(crashMultiplier)
-    const winAmount = r2(parseFloat(crashStake) * mul)
-    setCrashState('won')
-    setCrashHistory(prev => [mul, ...prev.slice(0, 10)])
+    const winAmount = r2(myCrashBet.stake * mul)
+
+    setMyCrashBet(prev => prev ? { ...prev, cashedOutMul: mul, winAmount } : null)
+
+    setLiveCrashBets(prev => prev.map(b => b.isUser ? {
+      ...b,
+      cashedOutMul: mul,
+      winAmount
+    } : b))
 
     mutate(s => {
       s.bal = r2(s.bal + winAmount)
-      s.log.unshift({ t: Date.now(), x: `Выигрыш в Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
+      s.log.unshift({ t: Date.now(), x: `Выигрыш в общем раунде Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
     }, `Забрано ${fmt(winAmount)} по коэффициенту ${mul.toFixed(2)}x! 🎉`)
   }
 
@@ -1489,7 +1636,7 @@ export default function App() {
 
           {/* B. GAMES 24/7 (CRASH & ROULETTE) */}
           {view === 'games24' && (
-            <div style={{ maxWidth: 880, margin: '0 auto' }}>
+            <div style={{ maxWidth: 1060, margin: '0 auto' }}>
               {/* Game Mode Switcher */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
                 <button
@@ -1497,7 +1644,7 @@ export default function App() {
                   onClick={() => setGamesTab('crash')}
                 >
                   <Zap size={16} color="var(--org)" />
-                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7</span>
+                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7 (Общий)</span>
                 </button>
                 <button
                   className={`wl-round-btn ${gamesTab === 'roulette' ? 'active' : ''}`}
@@ -1508,7 +1655,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* CRASH GAME ARENA */}
+              {/* SHARED MULTIPLAYER CRASH GAME ARENA */}
               {gamesTab === 'crash' && (() => {
                 const progress = Math.min(1, Math.max(0, (crashMultiplier - 1.0) / 8.0))
                 const curX = 40 + progress * 480
@@ -1517,10 +1664,10 @@ export default function App() {
                 const controlY = 230
                 const curvePath = `M 40 230 Q ${controlX} ${controlY}, ${curX} ${curY}`
                 const areaPath = `M 40 230 Q ${controlX} ${controlY}, ${curX} ${curY} L ${curX} 230 Z`
-                const isHigh = crashMultiplier >= 10.0 && crashState === 'running'
-                const multiplierColor = crashState === 'crashed'
+                const isHigh = crashMultiplier >= 10.0 && crashPhase === 'flying'
+                const multiplierColor = crashPhase === 'crashed'
                   ? '#ef4444'
-                  : crashState === 'won'
+                  : myCrashBet?.cashedOutMul
                   ? 'var(--green)'
                   : crashMultiplier >= 10.0
                   ? '#fbbf24'
@@ -1531,169 +1678,318 @@ export default function App() {
                   : '#ffffff'
 
                 return (
-                  <div className={`wl-crash-arena ${crashState} ${crashMultiplier > 3.2 && crashState === 'running' ? 'shaking' : ''}`}>
-                    {/* History of crash points */}
-                    <div>
-                      <div style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700, marginBottom: 6 }}>
-                        ПОСЛЕДНИЕ РАУНДЫ:
-                      </div>
-                      <div className="wl-crash-history-pills">
-                        {crashHistory.map((h, i) => (
-                          <span
-                            key={i}
-                            className="wl-crash-history-pill"
-                            style={{
-                              color: h >= 2.0 ? 'var(--green)' : h < 1.2 ? '#ef4444' : 'var(--org)',
-                              borderColor: h >= 2.0 ? 'rgba(16, 185, 129, 0.4)' : undefined,
-                              boxShadow: h >= 10.0 ? '0 0 10px rgba(251, 191, 36, 0.4)' : undefined
-                            }}
-                          >
-                            {h.toFixed(2)}x
+                  <div className="wl-crash-layout">
+                    {/* Left Column: Multiplayer Flight Canvas & Controls */}
+                    <div className={`wl-crash-arena ${crashPhase} ${crashMultiplier > 3.2 && crashPhase === 'flying' ? 'shaking' : ''}`}>
+                      {/* Round Header & Past History Pills */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 900, color: 'var(--org)', background: 'rgba(255,85,0,0.12)', border: '1px solid rgba(255,85,0,0.3)', padding: '4px 10px', borderRadius: 8, letterSpacing: '0.04em' }}>
+                            РАУНД #{crashRoundId}
                           </span>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* SVG Flight Canvas with Rocket & Curve */}
-                    <div className="wl-crash-display">
-                      <svg className="wl-crash-svg-container" viewBox="0 0 600 260" preserveAspectRatio="none">
-                        <defs>
-                          <linearGradient id="crashAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#ff5500" stopOpacity="0.3" />
-                            <stop offset="100%" stopColor="#ff5500" stopOpacity="0.0" />
-                          </linearGradient>
-                          <linearGradient id="crashLineGrad" x1="0" y1="0" x2="1" y2="0">
-                            <stop offset="0%" stopColor="#f59e0b" />
-                            <stop offset="100%" stopColor="#ff5500" />
-                          </linearGradient>
-                        </defs>
-
-                        {/* Coordinate Grid */}
-                        <line x1="30" y1="230" x2="570" y2="230" stroke="#1f2738" strokeWidth="2" />
-                        <line x1="30" y1="170" x2="570" y2="170" stroke="#141a27" strokeDasharray="4 4" />
-                        <line x1="30" y1="110" x2="570" y2="110" stroke="#141a27" strokeDasharray="4 4" />
-                        <line x1="30" y1="50" x2="570" y2="50" stroke="#141a27" strokeDasharray="4 4" />
-
-                        <text x="565" y="234" fill="#3a455a" fontSize="10" fontWeight="700">1.0x</text>
-                        <text x="565" y="174" fill="#3a455a" fontSize="10" fontWeight="700">2.0x</text>
-                        <text x="565" y="114" fill="#3a455a" fontSize="10" fontWeight="700">5.0x</text>
-                        <text x="565" y="54" fill="#3a455a" fontSize="10" fontWeight="700">10x</text>
-
-                        {/* Trajectory & Neon Trail */}
-                        {crashState !== 'idle' && (
-                          <>
-                            <path d={areaPath} fill="url(#crashAreaGrad)" />
-                            <path
-                              d={curvePath}
-                              fill="none"
-                              stroke={crashState === 'crashed' ? '#ef4444' : 'url(#crashLineGrad)'}
-                              strokeWidth="4"
-                              strokeLinecap="round"
+                          <span style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 800 }}>
+                            ИСТОРИЯ:
+                          </span>
+                        </div>
+                        <div className="wl-crash-history-pills">
+                          {crashHistory.map((h, i) => (
+                            <span
+                              key={i}
+                              className="wl-crash-history-pill"
                               style={{
-                                filter: crashState === 'crashed' ? 'drop-shadow(0 0 8px #ef4444)' : 'drop-shadow(0 0 10px #ff5500)'
+                                color: h >= 2.0 ? 'var(--green)' : h < 1.2 ? '#ef4444' : 'var(--org)',
+                                borderColor: h >= 2.0 ? 'rgba(16, 185, 129, 0.4)' : undefined,
+                                boxShadow: h >= 10.0 ? '0 0 10px rgba(251, 191, 36, 0.4)' : undefined
                               }}
-                            />
-                          </>
-                        )}
-
-                        {/* Flying Rocket Pig / Crash Burst / Victory Cashout */}
-                        {crashState === 'running' && (
-                          <g transform={`translate(${curX}, ${curY}) rotate(${-8 - progress * 26})`}>
-                            <text x="-32" y="8" fontSize="24" className="wl-thruster-flame">🔥</text>
-                            <text x="-14" y="10" fontSize="34" className="wl-rocket-pig">🐷🚀</text>
-                          </g>
-                        )}
-
-                        {crashState === 'crashed' && (
-                          <g transform={`translate(${curX}, ${curY})`}>
-                            <circle cx="0" cy="0" r="16" className="wl-crash-shockwave" />
-                            <text x="-22" y="14" fontSize="42">💥</text>
-                          </g>
-                        )}
-
-                        {crashState === 'won' && (
-                          <g transform={`translate(${curX}, ${curY})`}>
-                            <text x="-20" y="12" fontSize="40">💰✨</text>
-                          </g>
-                        )}
-                      </svg>
-
-                      {/* Giant Multiplier HUD */}
-                      <div
-                        className={`wl-crash-multiplier ${isHigh ? 'high' : ''}`}
-                        style={{ color: multiplierColor }}
-                      >
-                        {crashMultiplier.toFixed(2)}x
+                            >
+                              {h.toFixed(2)}x
+                            </span>
+                          ))}
+                        </div>
                       </div>
 
-                      <div className="wl-crash-status">
-                        {crashState === 'idle' && (
-                          <span style={{ color: 'var(--tx-muted)', background: 'rgba(255,255,255,0.05)', padding: '4px 14px', borderRadius: 999 }}>
-                            Сделайте ставку и запустите ракету 🚀
-                          </span>
+                      {/* SVG Shared Flight Canvas */}
+                      <div className="wl-crash-display">
+                        <svg className="wl-crash-svg-container" viewBox="0 0 600 260" preserveAspectRatio="none">
+                          <defs>
+                            <linearGradient id="crashAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#ff5500" stopOpacity="0.3" />
+                              <stop offset="100%" stopColor="#ff5500" stopOpacity="0.0" />
+                            </linearGradient>
+                            <linearGradient id="crashLineGrad" x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0%" stopColor="#f59e0b" />
+                              <stop offset="100%" stopColor="#ff5500" />
+                            </linearGradient>
+                          </defs>
+
+                          {/* Coordinate Grid */}
+                          <line x1="30" y1="230" x2="570" y2="230" stroke="#1f2738" strokeWidth="2" />
+                          <line x1="30" y1="170" x2="570" y2="170" stroke="#141a27" strokeDasharray="4 4" />
+                          <line x1="30" y1="110" x2="570" y2="110" stroke="#141a27" strokeDasharray="4 4" />
+                          <line x1="30" y1="50" x2="570" y2="50" stroke="#141a27" strokeDasharray="4 4" />
+
+                          <text x="565" y="234" fill="#3a455a" fontSize="10" fontWeight="700">1.0x</text>
+                          <text x="565" y="174" fill="#3a455a" fontSize="10" fontWeight="700">2.0x</text>
+                          <text x="565" y="114" fill="#3a455a" fontSize="10" fontWeight="700">5.0x</text>
+                          <text x="565" y="54" fill="#3a455a" fontSize="10" fontWeight="700">10x</text>
+
+                          {/* Trajectory & Neon Trail during flying/crashed */}
+                          {crashPhase !== 'betting' && (
+                            <>
+                              <path d={areaPath} fill="url(#crashAreaGrad)" />
+                              <path
+                                d={curvePath}
+                                fill="none"
+                                stroke={crashPhase === 'crashed' ? '#ef4444' : 'url(#crashLineGrad)'}
+                                strokeWidth="4"
+                                strokeLinecap="round"
+                                style={{
+                                  filter: crashPhase === 'crashed' ? 'drop-shadow(0 0 8px #ef4444)' : 'drop-shadow(0 0 10px #ff5500)'
+                                }}
+                              />
+                            </>
+                          )}
+
+                          {/* Rocket Pig waiting at launchpad in betting phase */}
+                          {crashPhase === 'betting' && (
+                            <g transform="translate(40, 230) rotate(-6)">
+                              <text x="-14" y="10" fontSize="32" className="wl-rocket-pig">🐷🚀</text>
+                            </g>
+                          )}
+
+                          {/* Flying Rocket Pig with Thruster */}
+                          {crashPhase === 'flying' && (
+                            <g transform={`translate(${curX}, ${curY}) rotate(${-8 - progress * 26})`}>
+                              <text x="-32" y="8" fontSize="24" className="wl-thruster-flame">🔥</text>
+                              <text x="-14" y="10" fontSize="34" className="wl-rocket-pig">🐷🚀</text>
+                            </g>
+                          )}
+
+                          {/* Crash Burst & Shockwave */}
+                          {crashPhase === 'crashed' && (
+                            <g transform={`translate(${curX}, ${curY})`}>
+                              <circle cx="0" cy="0" r="16" className="wl-crash-shockwave" />
+                              <text x="-22" y="14" fontSize="42">💥</text>
+                            </g>
+                          )}
+                        </svg>
+
+                        {/* Multiplier / Countdown HUD */}
+                        {crashPhase === 'betting' ? (
+                          <div style={{ position: 'absolute', top: '48%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none' }}>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--tx-muted)', letterSpacing: '0.08em', marginBottom: 4 }}>
+                              СЛЕДУЮЩИЙ РАУНД ЧЕРЕЗ:
+                            </div>
+                            <div style={{ fontSize: 48, fontWeight: 900, fontFamily: 'var(--font-d)', color: 'var(--org)', textShadow: '0 0 20px rgba(255,85,0,0.5)' }}>
+                              {crashCountdown.toFixed(1)}s
+                            </div>
+                            <div className="wl-crash-countdown-bar-wrap" style={{ width: 220, margin: '8px auto 0' }}>
+                              <div className="wl-crash-countdown-bar" style={{ width: `${Math.max(0, Math.min(100, (crashCountdown / 6.0) * 100))}%` }} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className={`wl-crash-multiplier ${isHigh ? 'high' : ''}`}
+                            style={{ color: multiplierColor }}
+                          >
+                            {crashMultiplier.toFixed(2)}x
+                          </div>
                         )}
-                        {crashState === 'running' && (
-                          <span style={{ color: 'var(--org)', background: 'rgba(255,85,0,0.15)', border: '1px solid rgba(255,85,0,0.3)', padding: '4px 14px', borderRadius: 999 }}>
-                            🚀 ХРЯК В ПОЛЁТЕ! УСПЕЙТЕ ЗАБРАТЬ!
-                          </span>
-                        )}
-                        {crashState === 'crashed' && (
-                          <span style={{ color: '#ef4444', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', padding: '4px 14px', borderRadius: 999 }}>
-                            💥 КРЭШ! СВИН УПАЛ В ЛУЖУ
-                          </span>
-                        )}
-                        {crashState === 'won' && (
-                          <span style={{ color: 'var(--green)', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', padding: '4px 14px', borderRadius: 999 }}>
-                            🎉 ВЫИГРЫШ ЗАБРАН!
-                          </span>
-                        )}
+
+                        <div className="wl-crash-status">
+                          {crashPhase === 'betting' && (
+                            <span style={{ color: myCrashBet ? 'var(--green)' : 'var(--org)', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
+                              {myCrashBet ? '✅ ВАША СТАВКА ПРИНЯТА НА РАУНД' : '⏳ ПРИЁМ СТАВОК НА ОБЩИЙ РАУНД 🚀'}
+                            </span>
+                          )}
+                          {crashPhase === 'flying' && (
+                            <span style={{ color: 'var(--org)', background: 'rgba(255,85,0,0.15)', border: '1px solid rgba(255,85,0,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
+                              🚀 ХРЯК В ПОЛЁТЕ! ВСЕ ОНЛАЙН В ОДНОЙ РАКЕТЕ!
+                            </span>
+                          )}
+                          {crashPhase === 'crashed' && (
+                            <span style={{ color: '#ef4444', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
+                              💥 КРЭШ НА {crashMultiplier.toFixed(2)}x! СВИН УПАЛ В ЛУЖУ
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Multiplayer Control Bar */}
+                      <div style={{ background: '#161a24', padding: 16, borderRadius: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 150 }}>
+                          <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА SV₽:</label>
+                          <input
+                            type="text"
+                            className="wl-stake-input"
+                            value={crashStake}
+                            disabled={crashPhase !== 'betting'}
+                            onChange={e => setCrashStake(e.target.value.replace(',', '.'))}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {['100', '200', '500', '1000'].map(val => (
+                            <button
+                              key={val}
+                              className="wl-quick-btn"
+                              style={{ padding: '8px 12px' }}
+                              disabled={crashPhase !== 'betting'}
+                              onClick={() => setCrashStake(val)}
+                            >
+                              +{val}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div style={{ width: 120 }}>
+                          <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>АВТО-ВЫВОД (X):</label>
+                          <input
+                            type="text"
+                            className="wl-stake-input"
+                            placeholder="Напр. 2.00"
+                            value={crashAutoCashout}
+                            disabled={crashPhase !== 'betting'}
+                            onChange={e => setCrashAutoCashout(e.target.value.replace(',', '.'))}
+                          />
+                        </div>
+
+                        <div style={{ width: '100%', maxWidth: 260 }}>
+                          {crashPhase === 'betting' && (
+                            !myCrashBet ? (
+                              <button
+                                className="wl-btn-orange"
+                                style={{ width: '100%', height: 48, fontSize: 15, fontWeight: 800, borderRadius: 10 }}
+                                onClick={placeCrashBet}
+                              >
+                                ПОСТАВИТЬ НА РАУНД 🚀
+                              </button>
+                            ) : (
+                              <button
+                                className="wl-btn-cancel"
+                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, background: '#3b1d22', color: '#ff7878', border: '1px solid #ef4444' }}
+                                onClick={cancelCrashBet}
+                              >
+                                ОТМЕНИТЬ ({fmt(myCrashBet.stake)}) ✖
+                              </button>
+                            )
+                          )}
+
+                          {crashPhase === 'flying' && (
+                            myCrashBet && !myCrashBet.cashedOutMul ? (
+                              <button
+                                className="wl-btn-green pulse"
+                                style={{ width: '100%', height: 48, fontSize: 15, fontWeight: 800, borderRadius: 10 }}
+                                onClick={cashoutCrash}
+                              >
+                                ЗАБРАТЬ {fmt(r2(myCrashBet.stake * crashMultiplier))} 💰
+                              </button>
+                            ) : myCrashBet && myCrashBet.cashedOutMul ? (
+                              <button
+                                disabled
+                                className="wl-btn-green"
+                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.9, cursor: 'default' }}
+                              >
+                                ЗАБРАНО {fmt(myCrashBet.winAmount)} (x{myCrashBet.cashedOutMul.toFixed(2)}) ✅
+                              </button>
+                            ) : (
+                              <button
+                                disabled
+                                className="wl-btn-orange"
+                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.5, cursor: 'not-allowed' }}
+                              >
+                                РАУНД В ПРОЦЕССЕ... 🚀
+                              </button>
+                            )
+                          )}
+
+                          {crashPhase === 'crashed' && (
+                            myCrashBet && myCrashBet.cashedOutMul ? (
+                              <button
+                                disabled
+                                className="wl-btn-green"
+                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.9, cursor: 'default' }}
+                              >
+                                ВЫИГРЫШ {fmt(myCrashBet.winAmount)} 🏆
+                              </button>
+                            ) : myCrashBet && !myCrashBet.cashedOutMul ? (
+                              <button
+                                disabled
+                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, background: '#2c1417', color: '#ef4444', border: '1px solid #ef4444', opacity: 0.85, cursor: 'default' }}
+                              >
+                                СТАВКА СГОРЕЛА 💥
+                              </button>
+                            ) : (
+                              <button
+                                disabled
+                                className="wl-btn-orange"
+                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.5, cursor: 'not-allowed' }}
+                              >
+                                КРЭШ НА {crashMultiplier.toFixed(2)}x 💥
+                              </button>
+                            )
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Crash Control Bar */}
-                    <div style={{ background: '#161a24', padding: 16, borderRadius: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: 200 }}>
-                        <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА SV₽:</label>
-                        <input
-                          type="text"
-                          className="wl-stake-input"
-                          value={crashStake}
-                          disabled={crashState === 'running'}
-                          onChange={e => setCrashStake(e.target.value.replace(',', '.'))}
-                        />
+                    {/* Right Column: Live Online Multiplayer Bets Sidebar */}
+                    <div className="wl-crash-sidebar">
+                      <div className="wl-crash-sidebar-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Users size={16} color="var(--org)" />
+                          <span>ОНЛАЙН СТАВКИ ({liveCrashBets.length})</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--tx-muted)', fontWeight: 700 }}>
+                          Банк: {fmt(liveCrashBets.reduce((acc, b) => acc + (b.stake || 0), 0))}
+                        </div>
                       </div>
 
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {['100', '200', '500', '1000'].map(val => (
-                          <button
-                            key={val}
-                            className="wl-quick-btn"
-                            style={{ padding: '8px 14px' }}
-                            disabled={crashState === 'running'}
-                            onClick={() => setCrashStake(val)}
-                          >
-                            +{val}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div style={{ width: '100%', maxWidth: 280 }}>
-                        {crashState !== 'running' ? (
-                          <button
-                            className="wl-btn-orange"
-                            style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
-                            onClick={startCrashGame}
-                          >
-                            СТАРТ РАУНДА 🚀
-                          </button>
+                      <div className="wl-crash-sidebar-list">
+                        {liveCrashBets.length === 0 ? (
+                          <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--tx-muted)', fontSize: 12 }}>
+                            {crashPhase === 'betting' ? 'Делайте ставки на общий раунд! 🚀' : 'В этом раунде нет ставок'}
+                          </div>
                         ) : (
-                          <button
-                            className="wl-btn-green"
-                            style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
-                            onClick={cashoutCrash}
-                          >
-                            ЗАБРАТЬ {fmt(r2(parseFloat(crashStake) * crashMultiplier))}
-                          </button>
+                          liveCrashBets.map(b => {
+                            const isWon = Boolean(b.cashedOutMul)
+                            const isCrashed = Boolean(b.crashed || (crashPhase === 'crashed' && !b.cashedOutMul))
+                            return (
+                              <div
+                                key={b.id}
+                                className={`wl-crash-bet-card ${b.isUser ? 'me' : ''} ${isWon ? 'won' : ''} ${isCrashed ? 'crashed' : ''}`}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                                  <UserAvatar avatar={b.avatar} name={b.name} size={26} />
+                                  <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <div style={{ fontWeight: 800, fontSize: 12, color: b.isUser ? 'var(--org)' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {b.name} {b.isUser && '(Вы)'}
+                                    </div>
+                                    {b.targetMul && !b.cashedOutMul && (
+                                      <div style={{ fontSize: 10, color: 'var(--tx-muted)' }}>
+                                        авто: x{b.targetMul.toFixed(2)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 12 }}>
+                                    {fmt(b.stake)}
+                                  </div>
+                                  <div style={{ fontSize: 11, fontWeight: 800 }}>
+                                    {isWon ? (
+                                      <span style={{ color: 'var(--green)' }}>+{fmt(b.winAmount)} (x{b.cashedOutMul.toFixed(2)})</span>
+                                    ) : isCrashed ? (
+                                      <span style={{ color: '#ef4444' }}>0 SV₽ 💥</span>
+                                    ) : (
+                                      <span style={{ color: 'var(--org)' }}>🚀 В игре</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })
                         )}
                       </div>
                     </div>
