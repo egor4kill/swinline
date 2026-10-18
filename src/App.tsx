@@ -48,7 +48,7 @@ import {
   type UserAccount
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
-import { supabase, ADMIN_GITHUB_USERNAME } from './supabase'
+import { supabase, ADMIN_USERNAME } from './supabase'
 
 const KEY_STATE = 'svinline.v3.state'
 const KEY_EVENTS = 'svinline.v3.custom_events'
@@ -95,8 +95,8 @@ export default function App() {
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
     const raw = loadJSON(KEY_ACCOUNTS, DEFAULT_ACCOUNTS)
     return purgeEmptyAccounts(raw).map((a: any) => {
-      if (a.role === 'admin' && a.username?.toLowerCase() !== ADMIN_GITHUB_USERNAME.toLowerCase()) {
-        return { ...a, role: 'user' as const, title: 'Игрок SVINLINE' }
+      if (a.role === 'admin' && a.username?.toLowerCase() !== ADMIN_USERNAME.toLowerCase()) {
+        return { ...a, role: 'user' as const, title: 'Игрок (Twitch)' }
       }
       return a
     })
@@ -229,67 +229,59 @@ export default function App() {
   }, [])
 
   const syncSupabaseUser = (u: any, customName?: string, customAvatar?: string) => {
-    // Determine active provider: check if user specifically initiated a provider login
-    const lastProvider = localStorage.getItem('svinline_last_auth_provider')
-    const provider = lastProvider || u.app_metadata?.provider || 'oauth'
-
-    const ghUser = (u.user_metadata?.user_name || (provider === 'github' ? u.user_metadata?.preferred_username : '') || '').trim()
     const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
-    const discordUser = (u.user_metadata?.full_name || u.user_metadata?.custom_claims?.global_name || u.user_metadata?.name || '').trim()
+    const ghUser = (u.user_metadata?.user_name || u.user_metadata?.preferred_username || '').trim()
 
-    // Strict owner verification: MUST be github provider AND username must match ADMIN_GITHUB_USERNAME
-    // If provider is 'twitch' or 'discord', isOwner is ALWAYS FALSE.
-    const isOwner = provider === 'github' && ghUser.toLowerCase() === ADMIN_GITHUB_USERNAME.toLowerCase()
-
-    let name = customName || (provider === 'twitch' ? (twitchUser || ghUser) : provider === 'discord' ? (discordUser || ghUser) : ghUser) || u.user_metadata?.full_name || u.user_metadata?.name || ''
+    let name = customName || twitchUser || ghUser || u.user_metadata?.full_name || u.user_metadata?.name || ''
     if (!name && u.email) {
       name = u.email.split('@')[0]
     }
     name = (name || '').trim()
 
-    // Prevent empty dummy accounts
     if (!name) {
-      notify('Не удалось определить имя пользователя из профиля')
+      notify('Не удалось определить никнейм из профиля Twitch')
       return
     }
 
-    const avatar = customAvatar || (isOwner ? '👑' : provider === 'twitch' ? '🟣' : provider === 'discord' ? '🎮' : '🐗')
-    // Separate account ID by provider: allows the owner to test normal Player mode on Twitch!
-    const accountId = isOwner ? `${u.id}_owner` : `${u.id}_${provider}`
+    // OWNER CHECK: If username is egor4kill (via Twitch or GitHub), grant full ADMIN status!
+    const isOwner = name.toLowerCase() === ADMIN_USERNAME.toLowerCase()
+    const avatar = customAvatar || (isOwner ? '👑' : '🟣')
+    const accountId = u.id
 
     setAccounts(prev => {
       const clean = purgeEmptyAccounts(prev)
-      const existing = clean.find(a => a.id === accountId)
+      const existing = clean.find(a => a.id === accountId || a.username.toLowerCase() === name.toLowerCase())
       if (existing) {
-        return clean.map(a => a.id === accountId ? {
+        return clean.map(a => (a.id === accountId || a.username.toLowerCase() === name.toLowerCase()) ? {
           ...a,
-          username: name || a.username,
-          // If not GitHub owner, ALWAYS strictly 'user'
+          id: accountId,
+          username: name,
           role: isOwner ? 'admin' : 'user',
-          title: isOwner ? 'Владелец репозитория (Admin)' : `Игрок (${provider.toUpperCase()})`,
-          avatar: isOwner ? '👑' : avatar
+          title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
+          avatar: isOwner ? '👑' : (a.avatar && a.avatar !== '👑' ? a.avatar : '🟣')
         } : a)
       }
 
       const newAcc: UserAccount = {
         id: accountId,
         username: name,
-        role: isOwner ? 'admin' : 'user', // strictly only isOwner can be admin!
+        role: isOwner ? 'admin' : 'user',
         avatar,
-        title: isOwner ? 'Владелец репозитория (Admin)' : `Игрок (${provider === 'email' ? 'SVINLINE' : provider.toUpperCase()})`,
+        title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
         bal: 10000,
         bets: [],
-        log: [{ t: Date.now(), x: `Вход через ${provider} • Стартовый баланс`, d: 10000 }],
+        log: [{ t: Date.now(), x: 'Вход через Twitch • Стартовый баланс', d: 10000 }],
         createdAt: Date.now(),
         isBlocked: false,
         stats: { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 },
-        achievements: isOwner ? ['Владелец Репозитория', 'Создатель Линии'] : [`Игрок ${provider}`]
+        achievements: isOwner ? ['Владелец Платформы', 'Создатель Линии'] : ['Игрок Twitch']
       }
       return [...clean, newAcc]
     })
 
     setCurrentUserId(accountId)
-    notify(isOwner ? `Добро пожаловать, Владелец ${name}! Выдан статус ADMIN 👑` : `Вход выполнен: ${name} (${provider})!`)
+    setAuthModalOpen(false)
+    notify(isOwner ? `Добро пожаловать, Владелец ${name}! Вы вошли через Twitch со статусом ADMIN 👑` : `Вход выполнен через Twitch: ${name}! Стартовый баланс 10 000 SV₽ 🟣`)
   }
 
   const handleOAuthLogin = async (provider: 'github' | 'twitch' | 'discord') => {
@@ -926,20 +918,27 @@ export default function App() {
                 </button>
               </>
             ) : (
-              <>
-                <button
-                  className="wl-btn-orange"
-                  onClick={() => { setAuthTab('login'); setAuthModalOpen(true) }}
-                >
-                  Войти
-                </button>
-                <button
-                  className="wl-btn-green"
-                  onClick={() => { setAuthTab('register'); setAuthModalOpen(true) }}
-                >
-                  Регистрация
-                </button>
-              </>
+              <button
+                className="wl-btn-orange"
+                style={{
+                  background: 'linear-gradient(135deg, #9146ff, #772ce8)',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontWeight: 700,
+                  padding: '9px 18px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  boxShadow: '0 2px 12px rgba(145, 70, 255, 0.4)'
+                }}
+                onClick={() => handleOAuthLogin('twitch')}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
+                </svg>
+                <span>Войти через Twitch</span>
+              </button>
             )}
           </div>
         </div>
@@ -2378,269 +2377,135 @@ export default function App() {
         </div>
       )}
 
-      {/* AUTH MODAL (LOGIN & REGISTER) */}
+      {/* AUTH MODAL (TWITCH-FIRST) */}
       {authModalOpen && (
         <div className="wl-modal-overlay" onClick={() => setAuthModalOpen(false)}>
-          <div className="wl-modal-card" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
-            <div className="wl-modal-header">
-              <span style={{ fontWeight: 800, fontSize: 17 }}>
-                {authTab === 'login' ? 'Вход в SVINLINE' : 'Регистрация нового игрока'}
+          <div className="wl-modal-card" style={{ maxWidth: 420, textAlign: 'center', padding: '24px 20px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontWeight: 800, fontSize: 18, color: '#fff' }}>
+                Вход в SVINLINE
               </span>
-              <button onClick={() => setAuthModalOpen(false)} style={{ color: 'var(--tx-muted)' }}>
-                <X size={18} />
+              <button onClick={() => setAuthModalOpen(false)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} />
               </button>
             </div>
 
-            <div className="wl-modal-body">
-              <div className="wl-auth-tabs">
-                <button
-                  className={`wl-auth-tab ${authTab === 'login' ? 'active' : ''}`}
-                  onClick={() => setAuthTab('login')}
-                >
-                  Вход
-                </button>
-                <button
-                  className={`wl-auth-tab ${authTab === 'register' ? 'active' : ''}`}
-                  onClick={() => setAuthTab('register')}
-                >
-                  Регистрация
-                </button>
+            <div style={{ margin: '8px 0 20px' }}>
+              <div style={{
+                width: 68,
+                height: 68,
+                borderRadius: '50%',
+                background: 'rgba(145, 70, 255, 0.15)',
+                border: '2px solid #9146ff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 14px',
+                color: '#9146ff'
+              }}>
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
+                </svg>
               </div>
 
-              {authTab === 'login' ? (
-                <form onSubmit={handleLogin}>
-                  {/* OAuth Buttons (Twitch / Discord for Players) */}
-                  <div style={{ marginBottom: 18 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
-                      Быстрый вход через сервисы:
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <button
-                        type="button"
-                        className="wl-btn-orange"
-                        style={{
-                          background: '#9146ff',
-                          color: '#fff',
-                          border: 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 10,
-                          height: 44,
-                          borderRadius: 8,
-                          fontSize: 14,
-                          fontWeight: 700
-                        }}
-                        onClick={() => handleOAuthLogin('twitch')}
-                      >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
-                        </svg>
-                        <span>Войти через <b>Twitch</b></span>
-                      </button>
+              <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px', color: '#fff' }}>
+                Авторизация через Twitch
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--tx-secondary)', margin: 0, lineHeight: 1.5 }}>
+                Войдите под своим Twitch-аккаунтом для доступа к линии ставок и мини-играм.
+              </p>
+            </div>
 
-                      <button
-                        type="button"
-                        className="wl-btn-orange"
-                        style={{
-                          background: '#5865f2',
-                          color: '#fff',
-                          border: 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 10,
-                          height: 38,
-                          borderRadius: 8,
-                          fontSize: 13
-                        }}
-                        onClick={() => handleOAuthLogin('discord')}
-                      >
-                        <span>Войти через <b>Discord</b></span>
-                      </button>
-                    </div>
+            {/* Main Twitch Button */}
+            <button
+              type="button"
+              style={{
+                background: 'linear-gradient(135deg, #9146ff, #772ce8)',
+                color: '#fff',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 12,
+                width: '100%',
+                height: 52,
+                borderRadius: 12,
+                fontSize: 16,
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 4px 20px rgba(145, 70, 255, 0.45)',
+                transition: 'all 0.2s',
+                marginBottom: 18
+              }}
+              onClick={() => handleOAuthLogin('twitch')}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
+              </svg>
+              <span>Войти через Twitch</span>
+            </button>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0 10px' }}>
-                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                      <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>ИЛИ ПО ЛОГИНУ И ПАРОЛЮ</span>
-                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                    </div>
-                  </div>
-
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Имя пользователя или Email:</label>
-                    <input
-                      type="text"
-                      className="wl-form-input"
-                      value={loginUser}
-                      placeholder="Введите логин или email"
-                      onChange={e => setLoginUser(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Пароль:</label>
-                    <input
-                      type="password"
-                      className="wl-form-input"
-                      value={loginPass}
-                      placeholder="Введите пароль"
-                      onChange={e => setLoginPass(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="wl-btn-orange"
-                    style={{ width: '100%', height: 44, borderRadius: 8, fontSize: 15, marginTop: 12 }}
-                  >
-                    Войти в аккаунт
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleRegister}>
-                  {/* OAuth for Registration */}
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
-                      Быстрая регистрация через сервисы:
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <button
-                        type="button"
-                        className="wl-btn-orange"
-                        style={{
-                          background: '#9146ff',
-                          color: '#fff',
-                          border: 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 10,
-                          height: 44,
-                          borderRadius: 8,
-                          fontSize: 14,
-                          fontWeight: 700
-                        }}
-                        onClick={() => handleOAuthLogin('twitch')}
-                      >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
-                        </svg>
-                        <span>Зарегистрироваться через <b>Twitch</b> (+10 000 SV₽)</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="wl-btn-orange"
-                        style={{
-                          background: '#5865f2',
-                          color: '#fff',
-                          border: 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 10,
-                          height: 38,
-                          borderRadius: 8,
-                          fontSize: 13
-                        }}
-                        onClick={() => handleOAuthLogin('discord')}
-                      >
-                        <span>Зарегистрироваться через <b>Discord</b></span>
-                      </button>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0 10px' }}>
-                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                      <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>ИЛИ РЕГИСТРАЦИЯ ПО EMAIL</span>
-                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                    </div>
-                  </div>
-
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Придумайте никнейм:</label>
-                    <input
-                      type="text"
-                      className="wl-form-input"
-                      value={regUser}
-                      placeholder="Например: Хряк_Снайпер"
-                      onChange={e => setRegUser(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Электронная почта (Email):</label>
-                    <input
-                      type="email"
-                      className="wl-form-input"
-                      value={regEmail}
-                      placeholder="player@example.com"
-                      onChange={e => setRegEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Пароль:</label>
-                    <input
-                      type="password"
-                      className="wl-form-input"
-                      value={regPass}
-                      placeholder="Минимум 4 символа"
-                      onChange={e => setRegPass(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Выберите аватар игрока:</label>
-                    <div style={{ display: 'flex', gap: 8, fontSize: 22, margin: '6px 0', flexWrap: 'wrap' }}>
-                      {['🐗', '🐷', '🐽', '⚡', '🍔', '🚀', '🕶️', '🎯'].map(av => (
-                        <button
-                          key={av}
-                          type="button"
-                          onClick={() => setRegAvatar(av)}
-                          style={{
-                            padding: 6,
-                            borderRadius: 8,
-                            background: regAvatar === av ? 'var(--org)' : '#1a1f2c',
-                            border: '1px solid var(--border)'
-                          }}
-                        >
-                          {av}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div style={{ background: '#121722', border: '1px solid #232a3b', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: 'var(--tx-secondary)', margin: '8px 0 12px', lineHeight: 1.5 }}>
-                    🛡️ <b>Управление доступом:</b> При регистрации создаётся персональный аккаунт игрока с балансом 10 000 SV₽. Статус <b>Администратора</b> закреплён исключительно за владельцем репозитория при авторизации через GitHub.
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="wl-btn-green"
-                    style={{ width: '100%', height: 44, borderRadius: 8, fontSize: 15, marginTop: 4 }}
-                  >
-                    Зарегистрироваться (+10 000 SV₽)
-                  </button>
-                </form>
-              )}
-
-              {/* Discreet Owner GitHub Login Link */}
-              <div style={{ textAlign: 'center', marginTop: 14, paddingTop: 10, borderTop: '1px solid #1a202c' }}>
-                <button
-                  type="button"
-                  onClick={() => handleOAuthLogin('github')}
-                  style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 11, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                  title="Вход для владельца репозитория"
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                  </svg>
-                  <span>Вход для владельца (GitHub)</span>
-                </button>
+            {/* Benefits box */}
+            <div style={{
+              background: '#141822',
+              border: '1px solid #242c3d',
+              borderRadius: 10,
+              padding: '12px 14px',
+              fontSize: 12,
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              color: 'var(--tx-secondary)',
+              lineHeight: 1.4
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>🟣</span>
+                <span><b>Мгновенный вход:</b> имя и аватар берутся прямо из Twitch</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>💰</span>
+                <span><b>Стартовый бонус:</b> +10 000 SV₽ каждому новому игроку</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>👑</span>
+                <span><b>Владелец ({ADMIN_USERNAME}):</b> автоматический статус Администратора</span>
               </div>
             </div>
+
+            {/* Fallback accordion for login */}
+            <details style={{ marginTop: 14, textAlign: 'left', fontSize: 12, color: 'var(--tx-muted)' }}>
+              <summary style={{ cursor: 'pointer', userSelect: 'none', padding: '6px 0', color: 'var(--tx-muted)' }}>
+                Резервный вход (по логину / email)
+              </summary>
+              <form onSubmit={handleLogin} style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input
+                  type="text"
+                  className="wl-form-input"
+                  style={{ height: 38, fontSize: 13 }}
+                  value={loginUser}
+                  placeholder="Логин или email"
+                  onChange={e => setLoginUser(e.target.value)}
+                  required
+                />
+                <input
+                  type="password"
+                  className="wl-form-input"
+                  style={{ height: 38, fontSize: 13 }}
+                  value={loginPass}
+                  placeholder="Пароль"
+                  onChange={e => setLoginPass(e.target.value)}
+                  required
+                />
+                <button
+                  type="submit"
+                  className="wl-btn-orange"
+                  style={{ height: 36, fontSize: 13, borderRadius: 6 }}
+                >
+                  Войти
+                </button>
+              </form>
+            </details>
           </div>
         </div>
       )}

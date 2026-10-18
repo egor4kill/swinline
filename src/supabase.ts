@@ -11,5 +11,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   }
 })
 
-// GitHub username of the repository owner who automatically gets full ADMIN role
-export const ADMIN_GITHUB_USERNAME = 'egor4kill'
+// Owner username who automatically gets full ADMIN role (works via Twitch and GitHub)
+export const ADMIN_USERNAME = 'egor4kill'
+export const ADMIN_GITHUB_USERNAME = ADMIN_USERNAME
