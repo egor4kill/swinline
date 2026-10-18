@@ -217,8 +217,10 @@ export default function App() {
       }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        setCurrentUserId(null)
+      } else if (session?.user) {
         syncSupabaseUser(session.user)
       }
     })
@@ -227,15 +229,19 @@ export default function App() {
   }, [])
 
   const syncSupabaseUser = (u: any, customName?: string, customAvatar?: string) => {
-    const provider = u.app_metadata?.provider || 'oauth'
-    const ghUser = (u.user_metadata?.user_name || u.user_metadata?.preferred_username || '').trim()
-    const twitchUser = (provider === 'twitch' ? (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name) : '').trim()
-    const discordUser = (provider === 'discord' ? (u.user_metadata?.full_name || u.user_metadata?.custom_claims?.global_name || u.user_metadata?.name) : '').trim()
+    // Determine active provider: check if user specifically initiated a provider login
+    const lastProvider = localStorage.getItem('svinline_last_auth_provider')
+    const provider = lastProvider || u.app_metadata?.provider || 'oauth'
+
+    const ghUser = (u.user_metadata?.user_name || (provider === 'github' ? u.user_metadata?.preferred_username : '') || '').trim()
+    const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
+    const discordUser = (u.user_metadata?.full_name || u.user_metadata?.custom_claims?.global_name || u.user_metadata?.name || '').trim()
 
     // Strict owner verification: MUST be github provider AND username must match ADMIN_GITHUB_USERNAME
+    // If provider is 'twitch' or 'discord', isOwner is ALWAYS FALSE.
     const isOwner = provider === 'github' && ghUser.toLowerCase() === ADMIN_GITHUB_USERNAME.toLowerCase()
 
-    let name = customName || ghUser || twitchUser || discordUser || u.user_metadata?.full_name || u.user_metadata?.name || ''
+    let name = customName || (provider === 'twitch' ? (twitchUser || ghUser) : provider === 'discord' ? (discordUser || ghUser) : ghUser) || u.user_metadata?.full_name || u.user_metadata?.name || ''
     if (!name && u.email) {
       name = u.email.split('@')[0]
     }
@@ -248,23 +254,25 @@ export default function App() {
     }
 
     const avatar = customAvatar || (isOwner ? '👑' : provider === 'twitch' ? '🟣' : provider === 'discord' ? '🎮' : '🐗')
+    // Separate account ID by provider: allows the owner to test normal Player mode on Twitch!
+    const accountId = isOwner ? `${u.id}_owner` : `${u.id}_${provider}`
 
     setAccounts(prev => {
       const clean = purgeEmptyAccounts(prev)
-      const existing = clean.find(a => a.id === u.id)
+      const existing = clean.find(a => a.id === accountId)
       if (existing) {
-        return clean.map(a => a.id === u.id ? {
+        return clean.map(a => a.id === accountId ? {
           ...a,
           username: name || a.username,
-          // CRITICAL: NEVER allow admin unless verified GitHub owner
-          role: isOwner ? 'admin' : (a.role === 'admin' ? 'user' : a.role),
-          title: isOwner ? 'Владелец репозитория (Admin)' : (a.title.includes('Admin') ? 'Игрок SVINLINE' : a.title),
-          avatar: isOwner ? '👑' : a.avatar
+          // If not GitHub owner, ALWAYS strictly 'user'
+          role: isOwner ? 'admin' : 'user',
+          title: isOwner ? 'Владелец репозитория (Admin)' : `Игрок (${provider.toUpperCase()})`,
+          avatar: isOwner ? '👑' : avatar
         } : a)
       }
 
       const newAcc: UserAccount = {
-        id: u.id,
+        id: accountId,
         username: name,
         role: isOwner ? 'admin' : 'user', // strictly only isOwner can be admin!
         avatar,
@@ -280,12 +288,15 @@ export default function App() {
       return [...clean, newAcc]
     })
 
-    setCurrentUserId(u.id)
-    notify(isOwner ? `Добро пожаловать, Владелец ${name}! Выдан статус ADMIN 👑` : `Вход выполнен: ${name}!`)
+    setCurrentUserId(accountId)
+    notify(isOwner ? `Добро пожаловать, Владелец ${name}! Выдан статус ADMIN 👑` : `Вход выполнен: ${name} (${provider})!`)
   }
 
   const handleOAuthLogin = async (provider: 'github' | 'twitch' | 'discord') => {
     try {
+      localStorage.setItem('svinline_last_auth_provider', provider)
+      // Sign out current session first so it doesn't inherit or re-use old GitHub admin session
+      await supabase.auth.signOut()
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
@@ -672,6 +683,8 @@ export default function App() {
     try {
       await supabase.auth.signOut()
     } catch {}
+    localStorage.removeItem('svinline_last_auth_provider')
+    localStorage.removeItem(KEY_CURRENT_USER)
     setCurrentUserId(null)
     setProfileModalOpen(false)
     notify('Вы вышли из профиля. Режим гостя.')
