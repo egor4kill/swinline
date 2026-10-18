@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2a1405" />
+      <stop offset="85%" stop-color="#121620" />
+      <stop offset="100%" stop-color="#0a0c12" />
+    </radialGradient>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff7700" />
+      <stop offset="100%" stop-color="#ff3300" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Rounded Stadium Icon Frame -->
+  <rect x="3" y="3" width="94" height="94" rx="26" fill="url(#bg)" stroke="url(#ring)" stroke-width="4.5" />
+
+  <!-- Pig Mascot -->
+  <g transform="translate(0, 2)">
+    <!-- Ears -->
+    <path d="M22 30 L30 8 L46 24Z" fill="#ff7da7" stroke="#e05484" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M78 30 L70 8 L54 24Z" fill="#ff7da7" stroke="#e05484" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M27 25 L31 14 L40 23Z" fill="#ffb8cc"/>
+    <path d="M73 25 L69 14 L60 23Z" fill="#ffb8cc"/>
+
+    <!-- Head -->
+    <circle cx="50" cy="54" r="38" fill="#ffb6c9" stroke="#e885a0" stroke-width="2.5"/>
+
+    <!-- Snout -->
+    <ellipse cx="50" cy="65" rx="18" ry="13.5" fill="#ff7da7" stroke="#e05484" stroke-width="1.5"/>
+    <ellipse cx="44" cy="65" rx="3.5" ry="5" fill="#66142a"/>
+    <ellipse cx="56" cy="65" rx="3.5" ry="5" fill="#66142a"/>
+
+    <!-- Eyes -->
+    <circle cx="34" cy="44" r="5" fill="#0f1118"/>
+    <circle cx="66" cy="44" r="5" fill="#0f1118"/>
+    <circle cx="36" cy="42" r="1.8" fill="#ffffff"/>
+    <circle cx="68" cy="42" r="1.8" fill="#ffffff"/>
+
+    <!-- Cute Blush Cheeks -->
+    <ellipse cx="23" cy="57" rx="6" ry="3.5" fill="#ff4d79" opacity="0.6"/>
+    <ellipse cx="77" cy="57" rx="6" ry="3.5" fill="#ff4d79" opacity="0.6"/>
+
+    <!-- Expressive Brow Marks -->
+    <path d="M29 36 L40 39M71 36 L60 39" stroke="#33141f" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>
