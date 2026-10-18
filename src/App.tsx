@@ -48,7 +48,7 @@ import {
   type UserAccount
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
-import { supabase, supabaseAdmin, ADMIN_USERNAME } from './supabase'
+import { supabase, USERS_REGISTRY_URL, ADMIN_USERNAME } from './supabase'
 
 const KEY_STATE = 'svinline.v3.state'
 const KEY_EVENTS = 'svinline.v3.custom_events'
@@ -234,50 +234,44 @@ export default function App() {
 
   const fetchSupabaseUsers = useCallback(async () => {
     try {
-      const { data, error } = await supabaseAdmin.auth.admin.listUsers()
-      if (error || !data?.users) return
+      const res = await fetch(`${USERS_REGISTRY_URL}?v=${Date.now()}`)
+      if (res.ok) {
+        const remoteUsers = await res.json()
+        if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
+          setAccounts(prev => {
+            const combined: UserAccount[] = remoteUsers.map(u => {
+              const isOwner = (u.username || '').toLowerCase() === ADMIN_USERNAME.toLowerCase()
+              const existing = prev.find(a => a.id === u.id || a.username.toLowerCase() === (u.username || '').toLowerCase())
+              return {
+                id: u.id,
+                username: u.username,
+                email: u.email,
+                role: (isOwner ? 'admin' : 'user') as 'admin' | 'user',
+                avatar: isOwner ? '👑' : (u.avatar || '🟣'),
+                title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
+                bal: existing ? existing.bal : (u.bal ?? 10000),
+                bets: existing ? existing.bets : (u.bets ?? []),
+                log: existing ? existing.log : (u.log ?? [{ t: u.createdAt || Date.now(), x: 'Вход через Twitch', d: 10000 }]),
+                createdAt: u.createdAt || Date.now(),
+                isBlocked: existing ? existing.isBlocked : false,
+                stats: existing ? existing.stats : (u.stats ?? { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 }),
+                achievements: isOwner ? ['Владелец Платформы', 'Создатель Линии'] : (u.achievements ?? ['Игрок Twitch'])
+              }
+            })
 
-      setAccounts(prev => {
-        const remoteAccounts: UserAccount[] = data.users.map(u => {
-          const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
-          const ghUser = (u.user_metadata?.user_name || u.user_metadata?.preferred_username || '').trim()
-          let name = twitchUser || ghUser || u.user_metadata?.full_name || u.user_metadata?.name || ''
-          if (!name && u.email) {
-            name = u.email.split('@')[0]
-          }
-          name = (name || '').trim() || `User_${u.id.slice(0, 5)}`
+            prev.forEach(p => {
+              if (!combined.some(c => c.username.toLowerCase() === p.username.toLowerCase())) {
+                combined.push(p)
+              }
+            })
 
-          const isOwner = name.toLowerCase() === ADMIN_USERNAME.toLowerCase()
-          const existing = prev.find(a => a.id === u.id || a.username.toLowerCase() === name.toLowerCase())
-
-          return {
-            id: u.id,
-            username: name,
-            email: u.email,
-            role: (isOwner ? 'admin' : 'user') as 'admin' | 'user',
-            avatar: isOwner ? '👑' : (u.user_metadata?.picture || u.user_metadata?.avatar_url || '🟣'),
-            title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
-            bal: existing ? existing.bal : 10000,
-            bets: existing ? existing.bets : [],
-            log: existing ? existing.log : [{ t: new Date(u.created_at).getTime(), x: 'Вход через Twitch • Стартовый баланс', d: 10000 }],
-            createdAt: new Date(u.created_at).getTime(),
-            isBlocked: existing ? existing.isBlocked : false,
-            stats: existing ? existing.stats : { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 },
-            achievements: isOwner ? ['Владелец Платформы', 'Создатель Линии'] : ['Игрок Twitch']
-          }
-        })
-
-        const combined = [...remoteAccounts]
-        prev.forEach(p => {
-          if (!combined.some(c => c.username.toLowerCase() === p.username.toLowerCase())) {
-            combined.push(p)
-          }
-        })
-
-        return purgeEmptyAccounts(combined)
-      })
+            return purgeEmptyAccounts(combined)
+          })
+          return
+        }
+      }
     } catch (e) {
-      console.error('Failed to fetch remote users:', e)
+      console.warn('Failed to fetch remote users registry:', e)
     }
   }, [])
 
@@ -785,18 +779,13 @@ export default function App() {
     }))
   }
 
-  const handleAdminDeleteUser = async (targetId: string) => {
+  const handleAdminDeleteUser = (targetId: string) => {
     const target = accounts.find(a => a.id === targetId)
     if (target?.role === 'admin') {
       notify('Нельзя удалить аккаунт администратора!')
       return
     }
-    if (confirm(`Удалить игрока «${target?.username || targetId}» из базы данных?`)) {
-      try {
-        await supabaseAdmin.auth.admin.deleteUser(targetId)
-      } catch (err: any) {
-        console.error('Failed to delete user from Supabase:', err)
-      }
+    if (confirm(`Удалить игрока «${target?.username || targetId}»?`)) {
       setAccounts(prev => prev.filter(a => a.id !== targetId))
       if (currentUserId === targetId) {
         setCurrentUserId(null)

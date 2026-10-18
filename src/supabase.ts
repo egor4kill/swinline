@@ -15,15 +15,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 export const ADMIN_USERNAME = 'egor4kill'
 export const ADMIN_GITHUB_USERNAME = ADMIN_USERNAME
 
-// Supabase admin service key for fetching full registered user list in admin panel
-const SUPABASE_SERVICE_KEY = typeof window !== 'undefined' && window.localStorage?.getItem('sv_admin_secret')
-  ? window.localStorage.getItem('sv_admin_secret')!
-  : (typeof atob === 'function' ? atob('***REMOVED_SECRET***=') : '')
-
-export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-})
+// Public users registry URL stored in public_data bucket (direct browser access without CORS/secret key blocking)
+export const USERS_REGISTRY_URL = `${SUPABASE_URL}/storage/v1/object/public/public_data/users_registry.json`
 
