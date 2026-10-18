@@ -79,6 +79,17 @@ const PigLogo = () => (
   </svg>
 )
 
+const ROULETTE_SECTORS = [
+  { mul: 1.2, label: 'x1.2', title: 'Свин-старт', color: '#ff7700', bg: '#2d1806', emoji: '🐷' },
+  { mul: 0,   label: 'x0',   title: 'В лужу',     color: '#ef4444', bg: '#2b0d10', emoji: '💥' },
+  { mul: 2.0, label: 'x2.0', title: 'Двойной хряк',color: '#10b981', bg: '#082618', emoji: '💎' },
+  { mul: 0.5, label: 'x0.5', title: 'Половинка',  color: '#94a3b8', bg: '#1c2230', emoji: '🐽' },
+  { mul: 3.0, label: 'x3.0', title: 'Тройной куш',color: '#3b82f6', bg: '#0a1d3b', emoji: '⚡' },
+  { mul: 0,   label: 'x0',   title: 'Корыто пусто',color: '#ef4444', bg: '#2b0d10', emoji: '🐽' },
+  { mul: 1.5, label: 'x1.5', title: 'Хрюк-бонус', color: '#eab308', bg: '#2b2308', emoji: '🥓' },
+  { mul: 10.0,label: 'x10',  title: 'ДЖЕКПОТ 👑', color: '#fbbf24', bg: '#3a2804', emoji: '👑' }
+]
+
 const getTwitchAvatar = (username?: string, currentAvatar?: string | null): string => {
   if (currentAvatar && (currentAvatar.startsWith('http://') || currentAvatar.startsWith('https://'))) {
     return currentAvatar
@@ -245,6 +256,8 @@ export default function App() {
 
   // 6. Games 24/7 Roulette State
   const [spinning, setSpinning] = useState(false)
+  const [wheelRotation, setWheelRotation] = useState(0)
+  const [wonSectorIdx, setWonSectorIdx] = useState<number | null>(null)
   const [rouletteResult, setRouletteResult] = useState<string | null>(null)
 
   // 7. Games 24/7 Crash Game State
@@ -767,11 +780,11 @@ export default function App() {
     }, `Забрано ${fmt(winAmount)} по коэффициенту ${mul.toFixed(2)}x! 🎉`)
   }
 
-  // Roulette Spin Logic
+  // Roulette Spin Logic - Physics-based Fortune Wheel
   const spinRoulette = () => {
     if (!currentUser) {
       setAuthModalOpen(true)
-      notify('Для игры необходимо войти в аккаунт!')
+      notify('Для игры необходимо войти через Twitch!')
       return
     }
     if (currentUser.isBlocked) {
@@ -785,27 +798,38 @@ export default function App() {
     }
     setSpinning(true)
     setRouletteResult(null)
+    setWonSectorIdx(null)
 
     mutate(s => {
       s.bal = r2(s.bal - 100)
       s.log.unshift({ t: Date.now(), x: 'Ставка в «Корыто Фортуны»', d: -100 })
     })
 
-    setTimeout(() => {
-      const multipliers = [0, 0, 0.5, 1.5, 2, 5, 10]
-      const mul = multipliers[Math.floor(Math.random() * multipliers.length)]
-      const win = 100 * mul
+    const winningIdx = Math.floor(Math.random() * ROULETTE_SECTORS.length)
+    const sector = ROULETTE_SECTORS[winningIdx]
+    const win = r2(100 * sector.mul)
 
+    // Calculate rotation to land winningIdx at 270 deg (top pointer)
+    const sectorCenter = (winningIdx + 0.5) * 45
+    let targetAngle = 270 - sectorCenter
+    if (targetAngle < 0) targetAngle += 360
+
+    const currentBase = Math.floor(wheelRotation / 360) * 360
+    const finalRotation = currentBase + 1800 + targetAngle + (wheelRotation % 360 > targetAngle ? 360 : 0)
+
+    setWheelRotation(finalRotation)
+
+    setTimeout(() => {
       mutate(s => {
         if (win > 0) {
           s.bal = r2(s.bal + win)
-          s.log.unshift({ t: Date.now(), x: `Выигрыш в «Корыто Фортуны» (x${mul})`, d: win })
+          s.log.unshift({ t: Date.now(), x: `Выигрыш в «Корыто Фортуны» (${sector.label} • ${sector.title})`, d: win })
         }
       })
-
       setSpinning(false)
-      setRouletteResult(mul === 0 ? 'Увы, корыто пусто (x0)!' : `Ура! Выпало x${mul} (+${fmt(win)})! 🎉`)
-    }, 1100)
+      setWonSectorIdx(winningIdx)
+      setRouletteResult(sector.mul === 0 ? `Увы! Выпало ${sector.label} (${sector.title}) 🐽` : `🎉 Ура! Выпало ${sector.label} — ${sector.title} (+${fmt(win)})!`)
+    }, 4200)
   }
 
   // Admin: Create New Match
@@ -1485,139 +1509,344 @@ export default function App() {
               </div>
 
               {/* CRASH GAME ARENA */}
-              {gamesTab === 'crash' && (
-                <div className="wl-crash-arena">
-                  {/* History of crash points */}
-                  <div>
-                    <div style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700, marginBottom: 6 }}>
-                      ПОСЛЕДНИЕ РАУНДЫ:
-                    </div>
-                    <div className="wl-crash-history-pills">
-                      {crashHistory.map((h, i) => (
-                        <span
-                          key={i}
-                          className="wl-crash-history-pill"
-                          style={{
-                            color: h >= 2.0 ? 'var(--green)' : h < 1.2 ? '#ef4444' : 'var(--org)',
-                            borderColor: h >= 2.0 ? 'var(--green-glow)' : undefined
-                          }}
-                        >
-                          {h.toFixed(2)}x
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+              {gamesTab === 'crash' && (() => {
+                const progress = Math.min(1, Math.max(0, (crashMultiplier - 1.0) / 8.0))
+                const curX = 40 + progress * 480
+                const curY = 230 - Math.pow(progress, 0.8) * 180
+                const controlX = 40 + progress * 160
+                const controlY = 230
+                const curvePath = `M 40 230 Q ${controlX} ${controlY}, ${curX} ${curY}`
+                const areaPath = `M 40 230 Q ${controlX} ${controlY}, ${curX} ${curY} L ${curX} 230 Z`
+                const isHigh = crashMultiplier >= 10.0 && crashState === 'running'
+                const multiplierColor = crashState === 'crashed'
+                  ? '#ef4444'
+                  : crashState === 'won'
+                  ? 'var(--green)'
+                  : crashMultiplier >= 10.0
+                  ? '#fbbf24'
+                  : crashMultiplier >= 5.0
+                  ? '#c084fc'
+                  : crashMultiplier >= 2.0
+                  ? 'var(--org)'
+                  : '#ffffff'
 
-                  {/* Multiplier Central Display */}
-                  <div className="wl-crash-display">
-                    <div
-                      className="wl-crash-multiplier"
-                      style={{
-                        color: crashState === 'crashed' ? '#ef4444' : crashState === 'won' ? 'var(--green)' : 'var(--tx-primary)'
-                      }}
-                    >
-                      {crashMultiplier.toFixed(2)}x
-                    </div>
-
-                    <div className="wl-crash-status">
-                      {crashState === 'idle' && <span style={{ color: 'var(--tx-muted)' }}>Сделайте ставку и начните раунд</span>}
-                      {crashState === 'running' && <span style={{ color: 'var(--org)' }}>🚀 ХРЯК В ПОЛЁТЕ! УСПЕЙТЕ ЗАБРАТЬ!</span>}
-                      {crashState === 'crashed' && <span style={{ color: '#ef4444' }}>💥 КРЭШ! СВИН УПАЛ В ЛУЖУ</span>}
-                      {crashState === 'won' && <span style={{ color: 'var(--green)' }}>🎉 ВЫИГРЫШ ЗАБРАН!</span>}
-                    </div>
-
-                    {/* Animated Pig Icon */}
-                    <div
-                      className="wl-crash-pig"
-                      style={{
-                        bottom: crashState === 'running' ? Math.min(160, 20 + crashMultiplier * 20) : 20,
-                        right: crashState === 'running' ? Math.min(260, 40 + crashMultiplier * 28) : 40,
-                        transform: crashState === 'crashed' ? 'rotate(90deg) scale(0.8)' : 'none'
-                      }}
-                    >
-                      {crashState === 'crashed' ? '💥' : crashState === 'won' ? '💰' : '🐷🚀'}
-                    </div>
-                  </div>
-
-                  {/* Crash Control Bar */}
-                  <div style={{ background: '#161a24', padding: 16, borderRadius: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА SV₽:</label>
-                      <input
-                        type="text"
-                        className="wl-stake-input"
-                        value={crashStake}
-                        disabled={crashState === 'running'}
-                        onChange={e => setCrashStake(e.target.value.replace(',', '.'))}
-                      />
+                return (
+                  <div className={`wl-crash-arena ${crashState} ${crashMultiplier > 3.2 && crashState === 'running' ? 'shaking' : ''}`}>
+                    {/* History of crash points */}
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700, marginBottom: 6 }}>
+                        ПОСЛЕДНИЕ РАУНДЫ:
+                      </div>
+                      <div className="wl-crash-history-pills">
+                        {crashHistory.map((h, i) => (
+                          <span
+                            key={i}
+                            className="wl-crash-history-pill"
+                            style={{
+                              color: h >= 2.0 ? 'var(--green)' : h < 1.2 ? '#ef4444' : 'var(--org)',
+                              borderColor: h >= 2.0 ? 'rgba(16, 185, 129, 0.4)' : undefined,
+                              boxShadow: h >= 10.0 ? '0 0 10px rgba(251, 191, 36, 0.4)' : undefined
+                            }}
+                          >
+                            {h.toFixed(2)}x
+                          </span>
+                        ))}
+                      </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {['100', '200', '500', '1000'].map(val => (
-                        <button
-                          key={val}
-                          className="wl-quick-btn"
-                          style={{ padding: '8px 14px' }}
+                    {/* SVG Flight Canvas with Rocket & Curve */}
+                    <div className="wl-crash-display">
+                      <svg className="wl-crash-svg-container" viewBox="0 0 600 260" preserveAspectRatio="none">
+                        <defs>
+                          <linearGradient id="crashAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#ff5500" stopOpacity="0.3" />
+                            <stop offset="100%" stopColor="#ff5500" stopOpacity="0.0" />
+                          </linearGradient>
+                          <linearGradient id="crashLineGrad" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor="#f59e0b" />
+                            <stop offset="100%" stopColor="#ff5500" />
+                          </linearGradient>
+                        </defs>
+
+                        {/* Coordinate Grid */}
+                        <line x1="30" y1="230" x2="570" y2="230" stroke="#1f2738" strokeWidth="2" />
+                        <line x1="30" y1="170" x2="570" y2="170" stroke="#141a27" strokeDasharray="4 4" />
+                        <line x1="30" y1="110" x2="570" y2="110" stroke="#141a27" strokeDasharray="4 4" />
+                        <line x1="30" y1="50" x2="570" y2="50" stroke="#141a27" strokeDasharray="4 4" />
+
+                        <text x="565" y="234" fill="#3a455a" fontSize="10" fontWeight="700">1.0x</text>
+                        <text x="565" y="174" fill="#3a455a" fontSize="10" fontWeight="700">2.0x</text>
+                        <text x="565" y="114" fill="#3a455a" fontSize="10" fontWeight="700">5.0x</text>
+                        <text x="565" y="54" fill="#3a455a" fontSize="10" fontWeight="700">10x</text>
+
+                        {/* Trajectory & Neon Trail */}
+                        {crashState !== 'idle' && (
+                          <>
+                            <path d={areaPath} fill="url(#crashAreaGrad)" />
+                            <path
+                              d={curvePath}
+                              fill="none"
+                              stroke={crashState === 'crashed' ? '#ef4444' : 'url(#crashLineGrad)'}
+                              strokeWidth="4"
+                              strokeLinecap="round"
+                              style={{
+                                filter: crashState === 'crashed' ? 'drop-shadow(0 0 8px #ef4444)' : 'drop-shadow(0 0 10px #ff5500)'
+                              }}
+                            />
+                          </>
+                        )}
+
+                        {/* Flying Rocket Pig / Crash Burst / Victory Cashout */}
+                        {crashState === 'running' && (
+                          <g transform={`translate(${curX}, ${curY}) rotate(${-8 - progress * 26})`}>
+                            <text x="-32" y="8" fontSize="24" className="wl-thruster-flame">🔥</text>
+                            <text x="-14" y="10" fontSize="34" className="wl-rocket-pig">🐷🚀</text>
+                          </g>
+                        )}
+
+                        {crashState === 'crashed' && (
+                          <g transform={`translate(${curX}, ${curY})`}>
+                            <circle cx="0" cy="0" r="16" className="wl-crash-shockwave" />
+                            <text x="-22" y="14" fontSize="42">💥</text>
+                          </g>
+                        )}
+
+                        {crashState === 'won' && (
+                          <g transform={`translate(${curX}, ${curY})`}>
+                            <text x="-20" y="12" fontSize="40">💰✨</text>
+                          </g>
+                        )}
+                      </svg>
+
+                      {/* Giant Multiplier HUD */}
+                      <div
+                        className={`wl-crash-multiplier ${isHigh ? 'high' : ''}`}
+                        style={{ color: multiplierColor }}
+                      >
+                        {crashMultiplier.toFixed(2)}x
+                      </div>
+
+                      <div className="wl-crash-status">
+                        {crashState === 'idle' && (
+                          <span style={{ color: 'var(--tx-muted)', background: 'rgba(255,255,255,0.05)', padding: '4px 14px', borderRadius: 999 }}>
+                            Сделайте ставку и запустите ракету 🚀
+                          </span>
+                        )}
+                        {crashState === 'running' && (
+                          <span style={{ color: 'var(--org)', background: 'rgba(255,85,0,0.15)', border: '1px solid rgba(255,85,0,0.3)', padding: '4px 14px', borderRadius: 999 }}>
+                            🚀 ХРЯК В ПОЛЁТЕ! УСПЕЙТЕ ЗАБРАТЬ!
+                          </span>
+                        )}
+                        {crashState === 'crashed' && (
+                          <span style={{ color: '#ef4444', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', padding: '4px 14px', borderRadius: 999 }}>
+                            💥 КРЭШ! СВИН УПАЛ В ЛУЖУ
+                          </span>
+                        )}
+                        {crashState === 'won' && (
+                          <span style={{ color: 'var(--green)', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', padding: '4px 14px', borderRadius: 999 }}>
+                            🎉 ВЫИГРЫШ ЗАБРАН!
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Crash Control Bar */}
+                    <div style={{ background: '#161a24', padding: 16, borderRadius: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА SV₽:</label>
+                        <input
+                          type="text"
+                          className="wl-stake-input"
+                          value={crashStake}
                           disabled={crashState === 'running'}
-                          onClick={() => setCrashStake(val)}
-                        >
-                          +{val}
-                        </button>
-                      ))}
-                    </div>
+                          onChange={e => setCrashStake(e.target.value.replace(',', '.'))}
+                        />
+                      </div>
 
-                    <div style={{ width: '100%', maxWidth: 280 }}>
-                      {crashState !== 'running' ? (
-                        <button
-                          className="wl-btn-orange"
-                          style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
-                          onClick={startCrashGame}
-                        >
-                          СТАРТ РАУНДА 🚀
-                        </button>
-                      ) : (
-                        <button
-                          className="wl-btn-green"
-                          style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
-                          onClick={cashoutCrash}
-                        >
-                          ЗАБРАТЬ {fmt(r2(parseFloat(crashStake) * crashMultiplier))}
-                        </button>
-                      )}
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {['100', '200', '500', '1000'].map(val => (
+                          <button
+                            key={val}
+                            className="wl-quick-btn"
+                            style={{ padding: '8px 14px' }}
+                            disabled={crashState === 'running'}
+                            onClick={() => setCrashStake(val)}
+                          >
+                            +{val}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{ width: '100%', maxWidth: 280 }}>
+                        {crashState !== 'running' ? (
+                          <button
+                            className="wl-btn-orange"
+                            style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
+                            onClick={startCrashGame}
+                          >
+                            СТАРТ РАУНДА 🚀
+                          </button>
+                        ) : (
+                          <button
+                            className="wl-btn-green"
+                            style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
+                            onClick={cashoutCrash}
+                          >
+                            ЗАБРАТЬ {fmt(r2(parseFloat(crashStake) * crashMultiplier))}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
 
-              {/* ROULETTE */}
+              {/* ROULETTE (КОРЫТО ФОРТУНЫ) */}
               {gamesTab === 'roulette' && (
-                <div className="wl-banner-card highlight" style={{ padding: 32, textAlign: 'center' }}>
+                <div className="wl-banner-card highlight" style={{ padding: '28px 24px 34px', textAlign: 'center' }}>
                   <span className="wl-banner-tag">ИГРЫ 24/7 • БЫСТРЫЕ ИСХОДЫ</span>
-                  <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 26, margin: '14px 0 6px' }}>
+                  <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>
                     КОРЫТО ФОРТУНЫ 🐷
                   </h2>
-                  <p style={{ color: 'var(--tx-secondary)', fontSize: 14, marginBottom: 24 }}>
-                    Испытайте удачу! Ставка от 100 SV₽. Крутите корыто и получайте моментальные множители от x0 до x10!
+                  <p style={{ color: 'var(--tx-secondary)', fontSize: 14, marginBottom: 18, maxWidth: 520, margin: '0 auto 18px' }}>
+                    Испытайте удачу! Ставка 100 SV₽. Крутите корыто и забирайте моментальные множители от x0 до x10!
                   </p>
 
-                  <div style={{ margin: '30px auto', width: 140, height: 140, borderRadius: '50%', border: '4px dashed var(--org)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, animation: spinning ? 'spin 0.6s linear infinite' : 'none' }}>
-                    {spinning ? '🌀' : '🐽'}
+                  {/* Physics-Based SVG Fortune Wheel */}
+                  <div className="wl-wheel-container">
+                    {/* Outer Rim with LED Bulbs */}
+                    <div className="wl-wheel-rim">
+                      {Array.from({ length: 16 }).map((_, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            position: 'absolute',
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: spinning ? (i % 2 === 0 ? '#ff7700' : '#ffd700') : '#475569',
+                            boxShadow: spinning ? '0 0 8px #ff7700' : 'none',
+                            top: `${50 - 48 * Math.cos((i * 22.5 * Math.PI) / 180)}%`,
+                            left: `${50 + 48 * Math.sin((i * 22.5 * Math.PI) / 180)}%`,
+                            transform: 'translate(-50%, -50%)',
+                            transition: 'all 0.2s'
+                          }}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Golden Pointer at 12 o'clock */}
+                    <div className={`wl-wheel-pointer ${spinning ? 'ticking' : ''}`}>
+                      <svg width="32" height="36" viewBox="0 0 32 36">
+                        <path d="M 16 36 L 4 6 Q 16 0 28 6 Z" fill="#fbbf24" stroke="#b45309" strokeWidth="2" filter="drop-shadow(0 2px 4px rgba(0,0,0,0.8))" />
+                        <circle cx="16" cy="10" r="4" fill="#fff" />
+                      </svg>
+                    </div>
+
+                    {/* Rotating SVG Wheel */}
+                    <div
+                      style={{
+                        width: 290,
+                        height: 290,
+                        borderRadius: '50%',
+                        transform: `rotate(${wheelRotation}deg)`,
+                        transition: spinning ? 'transform 4.2s cubic-bezier(0.12, 0.8, 0.2, 1)' : 'none'
+                      }}
+                    >
+                      <svg viewBox="0 0 300 300" className="wl-wheel-svg">
+                        {ROULETTE_SECTORS.map((sec, idx) => {
+                          const r1 = (idx * 45 * Math.PI) / 180
+                          const r2 = ((idx + 1) * 45 * Math.PI) / 180
+                          const x1 = 150 + 145 * Math.cos(r1)
+                          const y1 = 150 + 145 * Math.sin(r1)
+                          const x2 = 150 + 145 * Math.cos(r2)
+                          const y2 = 150 + 145 * Math.sin(r2)
+                          const path = `M 150 150 L ${x1} ${y1} A 145 145 0 0 1 ${x2} ${y2} Z`
+
+                          const midAngle = (idx + 0.5) * 45
+                          const midRad = (midAngle * Math.PI) / 180
+                          const textX = 150 + 94 * Math.cos(midRad)
+                          const textY = 150 + 94 * Math.sin(midRad)
+
+                          const isWinner = wonSectorIdx === idx && !spinning
+
+                          return (
+                            <g key={idx}>
+                              <path
+                                d={path}
+                                fill={isWinner ? '#f59e0b' : sec.bg}
+                                stroke="rgba(255,255,255,0.18)"
+                                strokeWidth="1.5"
+                                style={{
+                                  transition: 'fill 0.3s',
+                                  filter: isWinner ? 'drop-shadow(0 0 12px #f59e0b)' : 'none'
+                                }}
+                              />
+                              <g transform={`rotate(${midAngle + 90}, ${textX}, ${textY})`}>
+                                <text
+                                  x={textX}
+                                  y={textY - 8}
+                                  fill="#fff"
+                                  fontSize="16"
+                                  textAnchor="middle"
+                                  dominantBaseline="central"
+                                >
+                                  {sec.emoji}
+                                </text>
+                                <text
+                                  x={textX}
+                                  y={textY + 12}
+                                  fill={isWinner ? '#000' : sec.color}
+                                  fontSize="13"
+                                  fontWeight="800"
+                                  fontFamily="var(--font-d)"
+                                  textAnchor="middle"
+                                  dominantBaseline="central"
+                                >
+                                  {sec.label}
+                                </text>
+                              </g>
+                            </g>
+                          )
+                        })}
+                      </svg>
+                    </div>
+
+                    {/* Central Mascot Hub */}
+                    <div className="wl-wheel-center-hub" onClick={!spinning ? spinRoulette : undefined} title="Крутить корыто">
+                      <PigLogo />
+                      <span style={{ fontSize: 9, fontWeight: 800, color: '#f59e0b', marginTop: 2, letterSpacing: 0.5 }}>SVIN</span>
+                    </div>
                   </div>
 
+                  {/* Result Box */}
                   {rouletteResult && (
-                    <div style={{ padding: '12px 20px', borderRadius: 10, background: '#1c2230', border: '1px solid var(--org)', color: '#fff', fontSize: 16, fontWeight: 700, marginBottom: 20 }}>
+                    <div style={{
+                      padding: '12px 20px',
+                      borderRadius: 12,
+                      background: 'linear-gradient(135deg, #171d2b, #1f2738)',
+                      border: '1px solid var(--org)',
+                      color: '#fff',
+                      fontSize: 16,
+                      fontWeight: 800,
+                      marginBottom: 20,
+                      display: 'inline-block',
+                      boxShadow: '0 4px 20px rgba(255, 85, 0, 0.25)'
+                    }}>
                       {rouletteResult}
                     </div>
                   )}
 
-                  <button
-                    className="wl-btn-orange"
-                    style={{ fontSize: 16, padding: '14px 36px', borderRadius: 12 }}
-                    disabled={spinning}
-                    onClick={spinRoulette}
-                  >
-                    {spinning ? 'Корыто крутится...' : 'Крутить за 100 SV₽'}
-                  </button>
+                  <div>
+                    <button
+                      className="wl-btn-orange"
+                      style={{ fontSize: 16, padding: '14px 42px', borderRadius: 12, fontWeight: 800 }}
+                      disabled={spinning}
+                      onClick={spinRoulette}
+                    >
+                      {spinning ? 'Корыто крутится...' : 'Крутить за 100 SV₽ 🎰'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

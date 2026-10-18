@@ -1216,17 +1216,38 @@ button:focus-visible, input:focus-visible {
 
 /* Crash 24/7 Game Arena */
 .wl-crash-arena {
-  background: linear-gradient(180deg, #10131b 0%, #08090d 100%);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 24px;
+  background: radial-gradient(ellipse at 50% 20%, #171d2b 0%, #090b10 100%);
+  border: 1px solid rgba(255, 85, 0, 0.25);
+  border-radius: 18px;
+  padding: 20px 24px 24px;
   position: relative;
-  min-height: 380px;
+  min-height: 420px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: border-color 0.3s;
+}
+
+.wl-crash-arena.running {
+  border-color: rgba(255, 85, 0, 0.5);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(255, 85, 0, 0.15);
+}
+
+.wl-crash-arena.shaking {
+  animation: wl-arena-shake 0.15s ease-in-out infinite;
+}
+
+.wl-crash-arena.crashed {
+  border-color: rgba(239, 68, 68, 0.6);
+  animation: wl-crash-flash 0.4s ease-out;
+  box-shadow: 0 0 35px rgba(239, 68, 68, 0.3);
+}
+
+.wl-crash-arena.won {
+  border-color: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 35px rgba(16, 185, 129, 0.3);
 }
 
 .wl-crash-display {
@@ -1234,31 +1255,59 @@ button:focus-visible, input:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 220px;
+  height: 250px;
   position: relative;
+}
+
+.wl-crash-svg-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .wl-crash-multiplier {
   font-family: var(--font-d);
-  font-size: clamp(48px, 8vw, 84px);
+  font-size: clamp(52px, 8vw, 92px);
   font-weight: 800;
   line-height: 1;
   letter-spacing: -2px;
-  transition: color 0.1s;
+  transition: color 0.1s, transform 0.1s;
+  z-index: 2;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+}
+
+.wl-crash-multiplier.high {
+  animation: wl-pulse-high 0.8s ease-in-out infinite alternate;
 }
 
 .wl-crash-status {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 800;
   margin-top: 10px;
   letter-spacing: 0.5px;
+  z-index: 2;
 }
 
-.wl-crash-pig {
-  font-size: 54px;
-  position: absolute;
-  transition: all 0.15s linear;
-  filter: drop-shadow(0 0 15px rgba(255, 85, 0, 0.5));
+.wl-thruster-flame {
+  display: inline-block;
+  transform-origin: right center;
+  animation: wl-flame-flicker 0.1s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 8px #ff4500);
+}
+
+.wl-rocket-pig {
+  display: inline-block;
+  animation: wl-rocket-bob 0.8s ease-in-out infinite alternate;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.7));
+}
+
+.wl-crash-shockwave {
+  animation: wl-shockwave-expand 0.6s ease-out forwards;
+  fill: none;
+  stroke: #ef4444;
+  stroke-width: 3;
 }
 
 .wl-crash-history-pills {
@@ -1277,6 +1326,106 @@ button:focus-visible, input:focus-visible {
   background: #171b26;
   border: 1px solid var(--border);
   white-space: nowrap;
+  transition: transform 0.15s;
+}
+
+/* Fortune Wheel (Корыто Фортуны) Styles */
+.wl-wheel-container {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  margin: 16px auto 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wl-wheel-rim {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2d3446 0%, #161b26 70%, #0d1017 100%);
+  border: 3px solid rgba(255, 119, 0, 0.4);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(255, 119, 0, 0.2);
+}
+
+.wl-wheel-svg {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  filter: drop-shadow(0 6px 16px rgba(0,0,0,0.6));
+}
+
+.wl-wheel-pointer {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32px;
+  height: 36px;
+  z-index: 10;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.8));
+}
+
+.wl-wheel-pointer.ticking {
+  animation: wl-pointer-wobble 0.18s ease-in-out infinite alternate;
+}
+
+.wl-wheel-center-hub {
+  position: absolute;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2a1f14 0%, #1a130b 100%);
+  border: 3px solid #ff7700;
+  box-shadow: 0 0 20px rgba(255, 119, 0, 0.5), inset 0 0 8px rgba(0,0,0,0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  color: #fff;
+  font-size: 26px;
+  cursor: pointer;
+}
+
+/* Keyframes */
+@keyframes wl-arena-shake {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-2px, 1.5px); }
+  50% { transform: translate(2px, -1.5px); }
+  75% { transform: translate(-1.5px, -1px); }
+  100% { transform: translate(1.5px, 1px); }
+}
+
+@keyframes wl-crash-flash {
+  0% { background-color: rgba(239, 68, 68, 0.3); }
+  100% { background-color: transparent; }
+}
+
+@keyframes wl-flame-flicker {
+  0% { transform: scale(0.9, 0.9); opacity: 0.8; }
+  100% { transform: scale(1.25, 1.1) translateX(-3px); opacity: 1; }
+}
+
+@keyframes wl-rocket-bob {
+  0% { transform: translateY(0) rotate(-2deg); }
+  100% { transform: translateY(-5px) rotate(3deg); }
+}
+
+@keyframes wl-shockwave-expand {
+  0% { r: 10; opacity: 1; stroke-width: 6; }
+  100% { r: 65; opacity: 0; stroke-width: 1; }
+}
+
+@keyframes wl-pointer-wobble {
+  0% { transform: translateX(-50%) rotate(0deg); }
+  100% { transform: translateX(-50%) rotate(-14deg); }
+}
+
+@keyframes wl-pulse-high {
+  0% { text-shadow: 0 0 15px rgba(245, 158, 11, 0.4); transform: scale(1); }
+  100% { text-shadow: 0 0 35px rgba(245, 158, 11, 0.9); transform: scale(1.04); }
 }
 
 .wl-form-group {
