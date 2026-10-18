@@ -78,19 +78,28 @@ const PigLogo = () => (
   </svg>
 )
 
+const purgeEmptyAccounts = (list: UserAccount[]): UserAccount[] => {
+  return (list || []).filter(a => {
+    if (!a || !a.id || !a.username) return false
+    const u = a.username.trim()
+    if (!u) return false
+    if (u.toLowerCase() === 'admin' && a.id === 'adm1') return false
+    if (u === 'Кабанчик_2026' || a.id === 'u1') return false
+    if (u.toLowerCase() === 'игрок' || u.startsWith('Игрок_') || u.startsWith('Player_')) return false
+    return true
+  })
+}
+
 export default function App() {
   // 1. Account & Auth & Admin States
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
     const raw = loadJSON(KEY_ACCOUNTS, DEFAULT_ACCOUNTS)
-    // Strictly sanitize: remove dummy admin 'adm1', purge fake 'admin' accounts, enforce owner-only admin role
-    return raw
-      .filter((a: any) => a.id !== 'adm1' && a.username?.toLowerCase() !== 'admin')
-      .map((a: any) => {
-        if (a.role === 'admin' && a.username?.toLowerCase() !== ADMIN_GITHUB_USERNAME.toLowerCase()) {
-          return { ...a, role: 'user' as const, title: 'Игрок SVINLINE' }
-        }
-        return a
-      })
+    return purgeEmptyAccounts(raw).map((a: any) => {
+      if (a.role === 'admin' && a.username?.toLowerCase() !== ADMIN_GITHUB_USERNAME.toLowerCase()) {
+        return { ...a, role: 'user' as const, title: 'Игрок SVINLINE' }
+      }
+      return a
+    })
   })
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
     const id = loadJSON(KEY_CURRENT_USER, null)
@@ -234,15 +243,17 @@ export default function App() {
 
     // Prevent empty dummy accounts
     if (!name) {
-      name = `Игрок_${u.id.slice(0, 5)}`
+      notify('Не удалось определить имя пользователя из профиля')
+      return
     }
 
     const avatar = customAvatar || (isOwner ? '👑' : provider === 'twitch' ? '🟣' : provider === 'discord' ? '🎮' : '🐗')
 
     setAccounts(prev => {
-      const existing = prev.find(a => a.id === u.id)
+      const clean = purgeEmptyAccounts(prev)
+      const existing = clean.find(a => a.id === u.id)
       if (existing) {
-        return prev.map(a => a.id === u.id ? {
+        return clean.map(a => a.id === u.id ? {
           ...a,
           username: name || a.username,
           // CRITICAL: NEVER allow admin unless verified GitHub owner
@@ -266,7 +277,7 @@ export default function App() {
         stats: { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 },
         achievements: isOwner ? ['Владелец Репозитория', 'Создатель Линии'] : [`Игрок ${provider}`]
       }
-      return [...prev, newAcc]
+      return [...clean, newAcc]
     })
 
     setCurrentUserId(u.id)
@@ -704,6 +715,29 @@ export default function App() {
       }
       return a
     }))
+  }
+
+  const handleAdminDeleteUser = (targetId: string) => {
+    const target = accounts.find(a => a.id === targetId)
+    if (target?.role === 'admin') {
+      notify('Нельзя удалить аккаунт администратора!')
+      return
+    }
+    if (confirm(`Удалить аккаунт «${target?.username || targetId}»?`)) {
+      setAccounts(prev => prev.filter(a => a.id !== targetId))
+      if (currentUserId === targetId) {
+        setCurrentUserId(null)
+      }
+      notify(`Аккаунт ${target?.username} удален!`)
+    }
+  }
+
+  const handleAdminPurgeEmpty = () => {
+    setAccounts(prev => {
+      const clean = purgeEmptyAccounts(prev)
+      notify(`Очищено! Активных профилей: ${clean.length}`)
+      return clean
+    })
   }
 
   // Filtered events
@@ -2009,8 +2043,18 @@ export default function App() {
               {/* TAB 0: USER SURVEILLANCE */}
               {adminTab === 'users' && (
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 12 }}>
-                    МОНИТОРИНГ И УПРАВЛЕНИЕ ИГРОКАМИ ({accounts.length}):
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-secondary)' }}>
+                      МОНИТОРИНГ И УПРАВЛЕНИЕ ИГРОКАМИ ({accounts.length}):
+                    </div>
+                    <button
+                      className="wl-demo-btn"
+                      style={{ color: '#f59e0b', borderColor: '#f59e0b44' }}
+                      onClick={handleAdminPurgeEmpty}
+                      title="Удалить пустые и неактивные аккаунты"
+                    >
+                      🧹 Очистить пустые аккаунты
+                    </button>
                   </div>
                   <div style={{ overflowX: 'auto' }}>
                     <table className="wl-admin-table">
@@ -2067,12 +2111,22 @@ export default function App() {
                                   Обнулить
                                 </button>
                                 {acc.role !== 'admin' && (
-                                  <button
-                                    className="wl-demo-btn"
-                                    onClick={() => handleAdminToggleBlock(acc.id)}
-                                  >
-                                    {acc.isBlocked ? 'Разблокировать' : 'Блок'}
-                                  </button>
+                                  <>
+                                    <button
+                                      className="wl-demo-btn"
+                                      onClick={() => handleAdminToggleBlock(acc.id)}
+                                    >
+                                      {acc.isBlocked ? 'Разблокировать' : 'Блок'}
+                                    </button>
+                                    <button
+                                      className="wl-demo-btn"
+                                      style={{ color: '#ef4444' }}
+                                      onClick={() => handleAdminDeleteUser(acc.id)}
+                                      title="Удалить аккаунт"
+                                    >
+                                      Удалить
+                                    </button>
+                                  </>
                                 )}
                                 <button
                                   className="wl-demo-btn"
@@ -2342,35 +2396,12 @@ export default function App() {
 
               {authTab === 'login' ? (
                 <form onSubmit={handleLogin}>
-                  {/* OAuth Buttons (GitHub for Owner, Twitch/Discord for Players) */}
+                  {/* OAuth Buttons (Twitch / Discord for Players) */}
                   <div style={{ marginBottom: 18 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
-                      Вход через сервисы:
+                      Быстрый вход через сервисы:
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <button
-                        type="button"
-                        className="wl-btn-orange"
-                        style={{
-                          background: '#24292e',
-                          color: '#fff',
-                          border: '1px solid #444d56',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 10,
-                          height: 42,
-                          borderRadius: 8,
-                          fontSize: 14
-                        }}
-                        onClick={() => handleOAuthLogin('github')}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-                          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                        </svg>
-                        <span>Войти через <b>GitHub</b> (Владелец: egor4kill)</span>
-                      </button>
-
                       <button
                         type="button"
                         className="wl-btn-orange"
@@ -2382,16 +2413,17 @@ export default function App() {
                           alignItems: 'center',
                           justifyContent: 'center',
                           gap: 10,
-                          height: 42,
+                          height: 44,
                           borderRadius: 8,
-                          fontSize: 14
+                          fontSize: 14,
+                          fontWeight: 700
                         }}
                         onClick={() => handleOAuthLogin('twitch')}
                       >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                           <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
                         </svg>
-                        <span>Войти через <b>Twitch</b> (Игрок)</span>
+                        <span>Войти через <b>Twitch</b></span>
                       </button>
 
                       <button
@@ -2417,7 +2449,7 @@ export default function App() {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0 10px' }}>
                       <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                      <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>ИЛИ ПО ЛОГИНУ</span>
+                      <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>ИЛИ ПО ЛОГИНУ И ПАРОЛЮ</span>
                       <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                     </div>
                   </div>
@@ -2455,6 +2487,64 @@ export default function App() {
                 </form>
               ) : (
                 <form onSubmit={handleRegister}>
+                  {/* OAuth for Registration */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
+                      Быстрая регистрация через сервисы:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="wl-btn-orange"
+                        style={{
+                          background: '#9146ff',
+                          color: '#fff',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 10,
+                          height: 44,
+                          borderRadius: 8,
+                          fontSize: 14,
+                          fontWeight: 700
+                        }}
+                        onClick={() => handleOAuthLogin('twitch')}
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
+                        </svg>
+                        <span>Зарегистрироваться через <b>Twitch</b> (+10 000 SV₽)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="wl-btn-orange"
+                        style={{
+                          background: '#5865f2',
+                          color: '#fff',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 10,
+                          height: 38,
+                          borderRadius: 8,
+                          fontSize: 13
+                        }}
+                        onClick={() => handleOAuthLogin('discord')}
+                      >
+                        <span>Зарегистрироваться через <b>Discord</b></span>
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0 10px' }}>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                      <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>ИЛИ РЕГИСТРАЦИЯ ПО EMAIL</span>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                    </div>
+                  </div>
+
                   <div className="wl-form-group">
                     <label className="wl-form-label">Придумайте никнейм:</label>
                     <input
@@ -2522,6 +2612,21 @@ export default function App() {
                   </button>
                 </form>
               )}
+
+              {/* Discreet Owner GitHub Login Link */}
+              <div style={{ textAlign: 'center', marginTop: 14, paddingTop: 10, borderTop: '1px solid #1a202c' }}>
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('github')}
+                  style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 11, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  title="Вход для владельца репозитория"
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                  </svg>
+                  <span>Вход для владельца (GitHub)</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
