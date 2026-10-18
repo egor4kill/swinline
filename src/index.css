@@ -1107,3 +1107,189 @@ button:focus-visible, input:focus-visible {
     border-radius: 16px 16px 0 0;
   }
 }
+
+/* Modals & Popups */
+.wl-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fade-in 0.15s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.wl-modal-card {
+  background: #141722;
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+}
+
+.wl-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a1f2c;
+}
+
+.wl-modal-body {
+  padding: 20px;
+}
+
+/* Admin badge & panel */
+.wl-admin-badge {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #000;
+  font-weight: 800;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+}
+
+.wl-admin-badge:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+/* User Account Chip in Header */
+.wl-user-chip {
+  background: #171b26;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  padding: 4px 12px 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.wl-user-chip:hover {
+  background: #202636;
+  border-color: var(--org);
+}
+
+.wl-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #232938;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+
+/* Crash 24/7 Game Arena */
+.wl-crash-arena {
+  background: linear-gradient(180deg, #10131b 0%, #08090d 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  position: relative;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.wl-crash-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 220px;
+  position: relative;
+}
+
+.wl-crash-multiplier {
+  font-family: var(--font-d);
+  font-size: clamp(48px, 8vw, 84px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  transition: color 0.1s;
+}
+
+.wl-crash-status {
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: 10px;
+  letter-spacing: 0.5px;
+}
+
+.wl-crash-pig {
+  font-size: 54px;
+  position: absolute;
+  transition: all 0.15s linear;
+  filter: drop-shadow(0 0 15px rgba(255, 85, 0, 0.5));
+}
+
+.wl-crash-history-pills {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.wl-crash-history-pill {
+  font-family: var(--font-d);
+  font-weight: 800;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #171b26;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.wl-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.wl-form-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tx-secondary);
+}
+
+.wl-form-input {
+  background: #0f121a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #fff;
+  font-size: 14px;
+}
+
+.wl-form-input:focus {
+  border-color: var(--org);
+}

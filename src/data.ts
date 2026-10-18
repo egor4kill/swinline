@@ -14,6 +14,45 @@ export type Ev = {
   extraMarkets?: { title: string; out: [string, number][] }[]
 }
 
+export type UserAccount = {
+  id: string
+  username: string
+  role: 'user' | 'admin'
+  avatar: string
+  title: string
+  bal: number
+  stats: {
+    totalBets: number
+    wonBets: number
+    lostBets: number
+    totalProfit: number
+  }
+  achievements: string[]
+}
+
+export const DEFAULT_ACCOUNTS: UserAccount[] = [
+  {
+    id: 'u1',
+    username: 'Кабанчик_2026',
+    role: 'user',
+    avatar: '🐗',
+    title: 'VIP-Хряк I степени',
+    bal: 10000,
+    stats: { totalBets: 12, wonBets: 8, lostBets: 4, totalProfit: 4200 },
+    achievements: ['Первая грязь', 'Мастер коэффициента 1.01', 'Удачный хрюк']
+  },
+  {
+    id: 'adm1',
+    username: 'Главный_Хряктор',
+    role: 'admin',
+    avatar: '👑',
+    title: 'Верховный Администратор Линии',
+    bal: 1000000,
+    stats: { totalBets: 99, wonBets: 99, lostBets: 0, totalProfit: 999999 },
+    achievements: ['Создатель Линии', 'Властелин Корыта', 'Абсолютный Боров']
+  }
+]
+
 export const CATS = [
   'Свинские соревнования',
   'Интернет и мемы',

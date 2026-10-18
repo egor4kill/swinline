@@ -20,11 +20,18 @@ import {
   Volume2,
   Maximize2,
   MessageSquare,
-  BarChart3,
-  RotateCcw,
   ShieldCheck,
   CheckCircle2,
-  Sparkle
+  Sparkle,
+  User,
+  PlusCircle,
+  Settings,
+  Award,
+  Wallet,
+  Zap,
+  Check,
+  TrendingUp,
+  AlertTriangle
 } from 'lucide-react'
 import {
   CATS,
@@ -36,11 +43,17 @@ import {
   ABOUT,
   START,
   MINBET,
-  type Ev
+  DEFAULT_ACCOUNTS,
+  type Ev,
+  type UserAccount
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
 
-const KEY = 'svinline.v2'
+const KEY_STATE = 'svinline.v3.state'
+const KEY_EVENTS = 'svinline.v3.custom_events'
+const KEY_ACCOUNTS = 'svinline.v3.accounts'
+const KEY_CURRENT_USER = 'svinline.v3.current_user_id'
+
 const freshState = () => ({
   bal: START,
   bets: [] as any[],
@@ -48,12 +61,12 @@ const freshState = () => ({
   st: {} as Record<string, { s: string; w?: number }>
 })
 
-function loadState() {
+function loadJSON<T>(key: string, fallback: T): T {
   try {
-    const o = JSON.parse(localStorage.getItem(KEY) || 'null')
-    if (o && typeof o.bal === 'number') return o
+    const raw = localStorage.getItem(key)
+    if (raw) return JSON.parse(raw)
   } catch {}
-  return freshState()
+  return fallback
 }
 
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' SV₽'
@@ -65,23 +78,48 @@ const PigLogo = () => (
 )
 
 export default function App() {
-  const [S, setS] = useState<any>(loadState)
+  // 1. Account & Admin States
+  const [accounts, setAccounts] = useState<UserAccount[]>(() => loadJSON(KEY_ACCOUNTS, DEFAULT_ACCOUNTS))
+  const [currentUserId, setCurrentUserId] = useState<string>(() => loadJSON(KEY_CURRENT_USER, 'u1'))
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [adminModalOpen, setAdminModalOpen] = useState(false)
+  const [adminTab, setAdminTab] = useState<'create' | 'matches' | 'bank'>('create')
+
+  // Find active user
+  const currentUser = useMemo(() => {
+    return accounts.find(a => a.id === currentUserId) || accounts[0]
+  }, [accounts, currentUserId])
+
+  const isAdmin = currentUser.role === 'admin'
+
+  // 2. Custom Events added by Admin
+  const [customEvents, setCustomEvents] = useState<Ev[]>(() => loadJSON(KEY_EVENTS, []))
+
+  // Merge default events with admin custom events
+  const allEvents = useMemo(() => {
+    return [...customEvents, ...EVENTS]
+  }, [customEvents])
+
+  // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette'>('crash')
   const [selectedSport, setSelectedSport] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [favorites, setFavorites] = useState<Record<string, boolean>>({})
   const [expandedMarkets, setExpandedMarkets] = useState<Record<string, boolean>>({})
 
-  // Bet slip state
+  // 4. Betting & State
+  const [S, setS] = useState<any>(() => loadJSON(KEY_STATE, freshState()))
   const [selectedBet, setSelectedBet] = useState<{ evId: string; outcomeIdx: number; outcomeTitle: string; odds: number } | null>(null)
   const [stake, setStake] = useState('500')
   const [slipOpen, setSlipOpen] = useState(false)
   const [slipTab, setSlipTab] = useState<'coupon' | 'ingame'>('coupon')
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  const busy = useRef(false)
 
-  // Esports player simulation state
+  // 5. Esports stream simulation
   const [streamPlaying, setStreamPlaying] = useState(true)
   const [chatMessages, setChatMessages] = useState<string[]>([
     '🔥 SvinPro: ХРЯК С Deagle ПРОСТО МОНСТР!!',
@@ -91,17 +129,50 @@ export default function App() {
     '⚡ Porky_99: Где трансляция? А, вот пошла!'
   ])
 
-  // Games 24/7 Roulette state
+  // 6. Games 24/7 Roulette State
   const [spinning, setSpinning] = useState(false)
   const [rouletteResult, setRouletteResult] = useState<string | null>(null)
 
-  const busy = useRef(false)
+  // 7. Games 24/7 Crash Game State
+  const [crashStake, setCrashStake] = useState('200')
+  const [crashState, setCrashState] = useState<'idle' | 'running' | 'crashed' | 'won'>('idle')
+  const [crashMultiplier, setCrashMultiplier] = useState(1.00)
+  const [crashHistory, setCrashHistory] = useState<number[]>([1.45, 2.80, 1.15, 6.20, 1.05, 3.42, 1.95])
+  const crashTimerRef = useRef<any>(null)
+  const crashTargetRef = useRef<number>(2.00)
+
+  // 8. Admin Form State for New Match
+  const [newMatchTitle, setNewMatchTitle] = useState('')
+  const [newMatchLeague, setNewMatchLeague] = useState('Свин-Лига РПЛ | Турнир')
+  const [newMatchCat, setNewMatchCat] = useState(0)
+  const [newMatchTeam1, setNewMatchTeam1] = useState('')
+  const [newMatchTeam2, setNewMatchTeam2] = useState('')
+  const [newMatchOdds1, setNewMatchOdds1] = useState('1.90')
+  const [newMatchOddsX, setNewMatchOddsX] = useState('3.20')
+  const [newMatchOdds2, setNewMatchOdds2] = useState('2.40')
+  const [newMatchIsLive, setNewMatchIsLive] = useState(false)
+
+  // Sync to local storage
+  useEffect(() => {
+    try { localStorage.setItem(KEY_STATE, JSON.stringify(S)) } catch {}
+  }, [S])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(S))
-    } catch {}
-  }, [S])
+    try { localStorage.setItem(KEY_EVENTS, JSON.stringify(customEvents)) } catch {}
+  }, [customEvents])
+
+  useEffect(() => {
+    try { localStorage.setItem(KEY_ACCOUNTS, JSON.stringify(accounts)) } catch {}
+  }, [accounts])
+
+  useEffect(() => {
+    try { localStorage.setItem(KEY_CURRENT_USER, JSON.stringify(currentUserId)) } catch {}
+  }, [currentUserId])
+
+  // Sync account balance with S.bal
+  useEffect(() => {
+    setAccounts(prev => prev.map(a => a.id === currentUserId ? { ...a, bal: S.bal } : a))
+  }, [S.bal, currentUserId])
 
   useEffect(() => {
     if (!msg) return
@@ -109,7 +180,7 @@ export default function App() {
     return () => clearTimeout(t)
   }, [msg])
 
-  // Fake live chat in Esports
+  // Esports live chat interval
   useEffect(() => {
     if (view !== 'esports') return
     const fakeChats = [
@@ -118,14 +189,13 @@ export default function App() {
       'SVINLINE ДЕЛАЕТ РАЗНИЦУ',
       'Кабан 1 в 3 затащил!',
       'Коэффициент уже 1.85, успевайте',
-      'Фрибет зашел на ура',
       'Свинья на AWP лучший снайпер турнира'
     ]
     const interval = setInterval(() => {
       const randomMsg = fakeChats[Math.floor(Math.random() * fakeChats.length)]
       const user = ['PorkMaster', 'OinkBoy', 'BaconGod', 'HamsterPro', 'PiggyBoss'][Math.floor(Math.random() * 5)]
       setChatMessages(prev => [...prev.slice(-12), `${user}: ${randomMsg}`])
-    }, 3800)
+    }, 4200)
     return () => clearInterval(interval)
   }, [view])
 
@@ -141,8 +211,8 @@ export default function App() {
   const addVirtualMoney = (amount: number = 5000) => {
     mutate(s => {
       s.bal = r2(s.bal + amount)
-      s.log.unshift({ t: Date.now(), x: `Начисление ${fmt(amount)} (Бесплатно)`, d: amount })
-    }, `+${fmt(amount)} начислено на виртуальный счёт!`)
+      s.log.unshift({ t: Date.now(), x: `Пополнение ${fmt(amount)}`, d: amount })
+    }, `+${fmt(amount)} зачислено на баланс!`)
   }
 
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
@@ -184,24 +254,80 @@ export default function App() {
     }
 
     busy.current = true
-    setTimeout(() => { busy.current = false }, 400)
+    setTimeout(() => { busy.current = false }, 350)
     setS(next)
     setSelectedBet(null)
     setErr('')
-    notify(`Ставка ${fmt(v)} успешно принята!`)
+    notify(`Ставка ${fmt(v)} принята!`)
   }
 
-  // 24/7 Roulette game simulation
+  // Crash Game Logic
+  const startCrashGame = () => {
+    const v = parseFloat(crashStake)
+    if (!isFinite(v) || v <= 0) {
+      notify('Укажите корректную сумму ставки')
+      return
+    }
+    if (v > S.bal) {
+      notify('Недостаточно SV₽ на балансе')
+      return
+    }
+
+    // Deduct stake
+    mutate(s => {
+      s.bal = r2(s.bal - v)
+      s.log.unshift({ t: Date.now(), x: `Ставка в Хряк-Крэш 24/7`, d: -v })
+    })
+
+    // Determine crash point using fair random formula (1.05x to 15.00x)
+    const r = Math.random()
+    let crashAt = 1.00 + (1 / (1 - r * 0.94) - 1)
+    if (crashAt > 20) crashAt = 20
+    crashTargetRef.current = r2(Math.max(1.05, crashAt))
+
+    setCrashMultiplier(1.00)
+    setCrashState('running')
+
+    let current = 1.00
+    if (crashTimerRef.current) clearInterval(crashTimerRef.current)
+
+    crashTimerRef.current = setInterval(() => {
+      current = r2(current + 0.03 + (current * 0.025))
+      if (current >= crashTargetRef.current) {
+        clearInterval(crashTimerRef.current)
+        setCrashMultiplier(crashTargetRef.current)
+        setCrashState('crashed')
+        setCrashHistory(prev => [crashTargetRef.current, ...prev.slice(0, 10)])
+      } else {
+        setCrashMultiplier(current)
+      }
+    }, 70)
+  }
+
+  const cashoutCrash = () => {
+    if (crashState !== 'running') return
+    if (crashTimerRef.current) clearInterval(crashTimerRef.current)
+
+    const winAmount = r2(parseFloat(crashStake) * crashMultiplier)
+    setCrashState('won')
+    setCrashHistory(prev => [crashMultiplier, ...prev.slice(0, 10)])
+
+    mutate(s => {
+      s.bal = r2(s.bal + winAmount)
+      s.log.unshift({ t: Date.now(), x: `Выигрыш в Хряк-Крэш (x${crashMultiplier.toFixed(2)})`, d: winAmount })
+    }, `Забрано ${fmt(winAmount)} по коэффициенту ${crashMultiplier.toFixed(2)}x! 🎉`)
+  }
+
+  // Roulette Spin Logic
   const spinRoulette = () => {
     if (spinning) return
     if (S.bal < 100) {
-      notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽» вверху.')
+      notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽».')
       return
     }
     setSpinning(true)
     setRouletteResult(null)
 
-    // Deduct 100 SV₽
     mutate(s => {
       s.bal = r2(s.bal - 100)
       s.log.unshift({ t: Date.now(), x: 'Ставка в «Корыто Фортуны»', d: -100 })
@@ -221,12 +347,53 @@ export default function App() {
 
       setSpinning(false)
       setRouletteResult(mul === 0 ? 'Увы, корыто пусто (x0)!' : `Ура! Выпало x${mul} (+${fmt(win)})! 🎉`)
-    }, 1200)
+    }, 1100)
+  }
+
+  // Admin: Create New Match
+  const handleCreateMatch = (e: FormEvent) => {
+    e.preventDefault()
+    if (!newMatchTitle.trim()) {
+      notify('Введите название матча')
+      return
+    }
+    const o1 = parseFloat(newMatchOdds1) || 1.90
+    const ox = parseFloat(newMatchOddsX) || 3.10
+    const o2 = parseFloat(newMatchOdds2) || 2.40
+
+    const newEv: Ev = {
+      id: 'custom_' + Date.now(),
+      cat: newMatchCat,
+      league: newMatchLeague || 'Свин-Лига РПЛ | Турнир',
+      title: newMatchTitle,
+      team1: newMatchTeam1 || 'Команда 1',
+      team2: newMatchTeam2 || 'Команда 2',
+      score: '0 : 0',
+      isLive: newMatchIsLive,
+      liveTime: newMatchIsLive ? '1-й тайм 1\'' : 'Скоро',
+      desc: 'Матч добавлен главным администратором линии SVINLINE.',
+      out: [
+        ['П1', o1],
+        ['Ничья X', ox],
+        ['П2', o2],
+        ['Фора 1 (-1)', r2(o1 * 0.9)],
+        ['Фора 2 (+1)', r2(o2 * 0.9)],
+        ['Тотал М 2.5', 1.85],
+        ['Тотал Б 2.5', 1.95]
+      ]
+    }
+
+    setCustomEvents(prev => [newEv, ...prev])
+    setNewMatchTitle('')
+    setNewMatchTeam1('')
+    setNewMatchTeam2('')
+    setAdminModalOpen(false)
+    notify(`Матч «${newEv.title}» успешно опубликован в линию!`)
   }
 
   // Filtered events
   const filteredEvents = useMemo(() => {
-    return EVENTS.filter(ev => {
+    return allEvents.filter(ev => {
       if (view === 'live' && !ev.isLive) return false
       if (view === 'esports' && ev.cat !== 4) return false
       if (selectedSport !== null && ev.cat !== selectedSport) return false
@@ -241,7 +408,7 @@ export default function App() {
       }
       return true
     })
-  }, [view, selectedSport, favoritesOnly, favorites, searchQuery])
+  }, [allEvents, view, selectedSport, favoritesOnly, favorites, searchQuery])
 
   // Group events by league
   const groupedByLeague = useMemo(() => {
@@ -253,7 +420,6 @@ export default function App() {
     return Array.from(map.entries())
   }, [filteredEvents])
 
-  // Count active bets
   const activeBetsCount = S.bets.filter((b: any) => b.state === 'open').length
 
   const getSportIcon = (iconName: string) => {
@@ -270,7 +436,6 @@ export default function App() {
     }
   }
 
-  // Bet calculation values
   const stakeVal = parseFloat(stake)
   const isStakeValid = isFinite(stakeVal) && stakeVal > 0
   const currentOdds = selectedBet?.odds || 1
@@ -282,7 +447,7 @@ export default function App() {
       {/* 1. Header (Winline style with SVINLINE branding) */}
       <header className="wl-header">
         <div className="wl-header-inner">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             {/* Logo stadium-pill */}
             <div className="wl-logo-pill" onClick={() => { setView('line'); setSelectedSport(null) }}>
               <PigLogo />
@@ -345,10 +510,37 @@ export default function App() {
             </nav>
           </div>
 
-          {/* Right Header: Balance & Action Buttons */}
+          {/* Right Header: User Account, Admin Badge, Balance & Actions */}
           <div className="wl-header-right">
-            <div className="wl-balance-chip" title="Ваш текущий виртуальный баланс">
-              <span>Баланс:</span>
+            {/* Admin Badge if admin */}
+            {isAdmin && (
+              <button
+                className="wl-admin-badge"
+                onClick={() => setAdminModalOpen(true)}
+                title="Открыть панель администратора"
+              >
+                <ShieldCheck size={14} />
+                <span>АДМИН-ПАНЕЛЬ</span>
+              </button>
+            )}
+
+            {/* User Profile Chip */}
+            <div
+              className="wl-user-chip"
+              onClick={() => setProfileModalOpen(true)}
+              title="Профиль и смена аккаунта"
+            >
+              <div className="wl-user-avatar">{currentUser.avatar}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{currentUser.username}</span>
+                <span style={{ fontSize: 10, color: isAdmin ? '#f59e0b' : 'var(--tx-muted)' }}>
+                  {currentUser.title}
+                </span>
+              </div>
+            </div>
+
+            {/* Balance chip */}
+            <div className="wl-balance-chip" title="Текущий баланс">
               <span className="wl-balance-amount">{fmt(S.bal)}</span>
             </div>
 
@@ -357,27 +549,16 @@ export default function App() {
               onClick={() => addVirtualMoney(5000)}
               title="Начислить бесплатные SV₽"
             >
-              + Начислить SV₽
-            </button>
-
-            <button
-              className="wl-btn-green"
-              onClick={() => {
-                notify('🎁 Бонус 0 ₽ активирован! Свинья довольна!')
-              }}
-              title="Приветственный бонус"
-            >
-              Бонус 0 ₽
+              + Начислить
             </button>
           </div>
         </div>
       </header>
 
-      {/* 2. Main 3-Column Sportsbook Workspace */}
+      {/* 2. Main 3-Column Layout */}
       <div className="wl-layout">
-        {/* Left Sidebar: Categories & Search */}
+        {/* Left Sidebar */}
         <aside className="wl-sidebar">
-          {/* Search box */}
           <div className="wl-search-box">
             <Search className="wl-search-icon" size={16} />
             <input
@@ -397,7 +578,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Quick Filters */}
           <div className="wl-sidebar-quick">
             <button
               className={`wl-sidebar-quick-btn ${favoritesOnly ? 'active' : ''}`}
@@ -417,9 +597,19 @@ export default function App() {
               <Clock size={16} />
               <span>Все события</span>
             </button>
+
+            {isAdmin && (
+              <button
+                className="wl-sidebar-quick-btn"
+                style={{ color: '#f59e0b', background: '#f59e0b11', borderColor: '#f59e0b33' }}
+                onClick={() => setAdminModalOpen(true)}
+              >
+                <PlusCircle size={16} />
+                <span>+ Добавить матч</span>
+              </button>
+            )}
           </div>
 
-          {/* Sports & Absurd categories list */}
           <div className="wl-sports-list">
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', padding: '6px 12px' }}>
               Категории ставок
@@ -449,12 +639,12 @@ export default function App() {
           </div>
         </aside>
 
-        {/* Center Content Workspace */}
+        {/* Center Main Content */}
         <main className="wl-center">
-          {/* A. LINE OR LIVE VIEW */}
+          {/* A. LINE / LIVE VIEW */}
           {(view === 'line' || view === 'live') && (
             <>
-              {/* Top Promo Banners (Screenshot 3 & 1 style) */}
+              {/* Banners */}
               <div className="wl-banners-slider">
                 <div className="wl-banner-card highlight">
                   <span className="wl-banner-tag">СВИНОБЕТ • BET RACE</span>
@@ -490,7 +680,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Tournament quick tags pills (Screenshot 3) */}
+              {/* Tournament Pills */}
               <div className="wl-tournaments-bar">
                 {TOURNAMENT_PILLS.map((pill, idx) => (
                   <button
@@ -507,7 +697,7 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Sport round buttons filter (Screenshot 1 & 3) */}
+              {/* Round Filters */}
               <div className="wl-round-filters">
                 <button
                   className={`wl-round-btn ${selectedSport === null ? 'active' : ''}`}
@@ -544,89 +734,9 @@ export default function App() {
                   <div className="wl-round-icon">🍔</div>
                   <span>Бургеры</span>
                 </button>
-                <button
-                  className={`wl-round-btn ${selectedSport === 1 ? 'active' : ''}`}
-                  onClick={() => setSelectedSport(1)}
-                >
-                  <div className="wl-round-icon">🔥</div>
-                  <span>Мемы</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${selectedSport === 3 ? 'active' : ''}`}
-                  onClick={() => setSelectedSport(3)}
-                >
-                  <div className="wl-round-icon">🎪</div>
-                  <span>Абсурд</span>
-                </button>
               </div>
 
-              {/* Featured Match of the Day (Screenshot 3 style) */}
-              {selectedSport === null && !searchQuery && (
-                <div className="wl-match-of-day">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div className="wl-mod-badge">
-                      <Sparkle size={13} /> МАТЧ ДНЯ • СВИН-ЛИГА РПЛ
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--tx-muted)' }}>
-                      Прямая трансляция • 2-й тайм
-                    </div>
-                  </div>
-
-                  <div className="wl-mod-content">
-                    <div className="wl-mod-team">
-                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef444422', border: '2px solid #ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
-                        🐷
-                      </div>
-                      <div>
-                        <div>Спартак Хряк</div>
-                        <div style={{ fontSize: 12, color: 'var(--tx-muted)' }}>Хозяева поля</div>
-                      </div>
-                    </div>
-
-                    <div className="wl-mod-score">
-                      <div className="wl-mod-score-box">2 : 0</div>
-                      <div className="wl-mod-timer">73' (Идёт игра)</div>
-                    </div>
-
-                    <div className="wl-mod-team right">
-                      <div style={{ textAlign: 'right' }}>
-                        <div>Рубин Кабаны</div>
-                        <div style={{ fontSize: 12, color: 'var(--tx-muted)' }}>В гостях</div>
-                      </div>
-                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#22c55e22', border: '2px solid #22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
-                        🐗
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Direct odds buttons on the featured match */}
-                  <div className="wl-mod-odds">
-                    <button
-                      className={`wl-odd-box ${selectedBet?.evId === 'e5' && selectedBet?.outcomeIdx === 0 ? 'selected' : ''}`}
-                      onClick={() => selectOdd(EVENTS[4], 0, 'П1 (Спартак Хряк)', 1.85)}
-                    >
-                      <span className="wl-odd-lbl">Победа 1</span>
-                      <span className="wl-odd-val">1.85</span>
-                    </button>
-                    <button
-                      className={`wl-odd-box ${selectedBet?.evId === 'e5' && selectedBet?.outcomeIdx === 1 ? 'selected' : ''}`}
-                      onClick={() => selectOdd(EVENTS[4], 1, 'Ничья (X)', 3.30)}
-                    >
-                      <span className="wl-odd-lbl">Ничья X</span>
-                      <span className="wl-odd-val">3.30</span>
-                    </button>
-                    <button
-                      className={`wl-odd-box ${selectedBet?.evId === 'e5' && selectedBet?.outcomeIdx === 2 ? 'selected' : ''}`}
-                      onClick={() => selectOdd(EVENTS[4], 2, 'Победа 2 (Рубин Кабаны)', 4.10)}
-                    >
-                      <span className="wl-odd-lbl">Победа 2</span>
-                      <span className="wl-odd-val">4.10</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Main Events Table grouped by League (Screenshot 1) */}
+              {/* Matches grouped by League */}
               {groupedByLeague.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '60px 20px', background: 'var(--bg-card)', borderRadius: 14, border: '1px dashed var(--border)' }}>
                   <div style={{ fontSize: 32, marginBottom: 12 }}>🐷</div>
@@ -638,17 +748,15 @@ export default function App() {
               ) : (
                 groupedByLeague.map(([leagueName, leagueEvents]) => (
                   <div className="wl-table-container" key={leagueName}>
-                    {/* League Header */}
                     <div className="wl-league-header">
                       <div className="wl-league-title">
                         <span>{leagueName}</span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: 'var(--tx-muted)' }}>
-                        <span>Событий: {leagueEvents.length}</span>
+                      <div style={{ fontSize: 12, color: 'var(--tx-muted)' }}>
+                        Событий: {leagueEvents.length}
                       </div>
                     </div>
 
-                    {/* Columns labels header */}
                     <div className="wl-columns-header">
                       <div>Событие / Участники</div>
                       <div className="wl-odds-columns-labels">
@@ -662,7 +770,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* League Match Rows */}
                     {leagueEvents.map(ev => {
                       const eventStatus = S.st[ev.id]?.s || 'open'
                       const isClosed = eventStatus === 'closed'
@@ -674,7 +781,6 @@ export default function App() {
                       return (
                         <div key={ev.id} style={{ borderBottom: '1px solid #1a202c' }}>
                           <div className="wl-match-row">
-                            {/* Match Title & Info */}
                             <div className="wl-match-info">
                               <div className="wl-match-teams">
                                 <button
@@ -707,7 +813,6 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Odds Matrix (7 columns: 1, X, 2, F1, F2, TM, TB) */}
                             <div className="wl-odds-matrix">
                               {ev.out.slice(0, 7).map((outcome, idx) => {
                                 const isSelected = selectedBet?.evId === ev.id && selectedBet?.outcomeIdx === idx
@@ -724,7 +829,6 @@ export default function App() {
                                     }}
                                     disabled={isDisabled}
                                     onClick={() => selectOdd(ev, idx, outcome[0], outcome[1])}
-                                    title={`${outcome[0]}: ${outcome[1].toFixed(2)}`}
                                   >
                                     <span className="wl-odd-val">{outcome[1].toFixed(2)}</span>
                                     <span className="wl-odd-lbl">{outcome[0].split(' ')[0]}</span>
@@ -734,42 +838,14 @@ export default function App() {
                             </div>
                           </div>
 
-                          {/* Extra Markets & Demo Management Drawer */}
                           {isExpanded && (
                             <div className="wl-extra-markets">
-                              {/* Extra Markets */}
-                              {ev.extraMarkets && ev.extraMarkets.length > 0 && (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
-                                  {ev.extraMarkets.map((em, mIdx) => (
-                                    <div key={mIdx} style={{ background: '#161a24', padding: 10, borderRadius: 8 }}>
-                                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: 'var(--tx-secondary)' }}>
-                                        {em.title}
-                                      </div>
-                                      <div style={{ display: 'flex', gap: 6 }}>
-                                        {em.out.map((eo, eoIdx) => (
-                                          <button
-                                            key={eoIdx}
-                                            className="wl-odd-box"
-                                            style={{ flex: 1 }}
-                                            onClick={() => selectOdd(ev, 100 + mIdx * 10 + eoIdx, `${em.title} (${eo[0]})`, eo[1])}
-                                          >
-                                            <span className="wl-odd-lbl">{eo[0]}</span>
-                                            <span className="wl-odd-val">{eo[1].toFixed(2)}</span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              {/* Demo match administration buttons */}
                               <div className="wl-demo-controls">
-                                <span style={{ color: 'var(--tx-muted)', fontWeight: 600 }}>Демо-расчёт матча:</span>
+                                <span style={{ color: 'var(--tx-muted)', fontWeight: 600 }}>Быстрый демо-расчёт:</span>
                                 {eventStatus === 'open' && (
                                   <button
                                     className="wl-demo-btn"
-                                    onClick={() => mutate(s => { s.st[ev.id] = { s: 'closed' } }, `Приём ставок на «${ev.title}» закрыт`)}
+                                    onClick={() => mutate(s => { s.st[ev.id] = { s: 'closed' } }, `Приём ставок закрыт`)}
                                   >
                                     Закрыть приём
                                   </button>
@@ -778,8 +854,8 @@ export default function App() {
                                   <button
                                     key={oIdx}
                                     className="wl-demo-btn"
-                                    style={{ borderColor: 'var(--green-glow)' }}
-                                    onClick={() => mutate(s => settleEvent(s, ev.id, oIdx), `Матч завершён! Победил исход: ${outcome[0]}`)}
+                                    style={{ borderColor: 'var(--green)' }}
+                                    onClick={() => mutate(s => settleEvent(s, ev.id, oIdx), `Матч рассчитан: победа ${outcome[0]}!`)}
                                   >
                                     Выиграл: {outcome[0]}
                                   </button>
@@ -787,9 +863,9 @@ export default function App() {
                                 <button
                                   className="wl-demo-btn"
                                   style={{ color: '#ef4444' }}
-                                  onClick={() => mutate(s => cancelEvent(s, ev.id), `Событие отменено, ставки возвращены на баланс`)}
+                                  onClick={() => mutate(s => cancelEvent(s, ev.id), `Событие отменено, ставки возвращены`)}
                                 >
-                                  Отменить событие
+                                  Отменить матч
                                 </button>
                               </div>
                             </div>
@@ -803,23 +879,169 @@ export default function App() {
             </>
           )}
 
-          {/* B. ESPORTS STREAM VIEW (Screenshot 2) */}
-          {view === 'esports' && (
-            <div>
-              {/* Top sub-tabs */}
-              <div style={{ display: 'flex', gap: 10, marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
-                {['ГЛАВНАЯ', 'LIVE', 'DOTA 2', 'CS 2', 'VALORANT', 'MOBILE LEGENDS', 'RAINBOW SIX'].map((tab, idx) => (
-                  <button
-                    key={idx}
-                    className="wl-sidebar-quick-btn"
-                    style={{ fontWeight: idx === 3 ? 800 : 600, color: idx === 3 ? 'var(--org)' : undefined }}
-                  >
-                    {tab}
-                  </button>
-                ))}
+          {/* B. GAMES 24/7 (CRASH & ROULETTE) */}
+          {view === 'games24' && (
+            <div style={{ maxWidth: 880, margin: '0 auto' }}>
+              {/* Game Mode Switcher */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+                <button
+                  className={`wl-round-btn ${gamesTab === 'crash' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('crash')}
+                >
+                  <Zap size={16} color="var(--org)" />
+                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7</span>
+                </button>
+                <button
+                  className={`wl-round-btn ${gamesTab === 'roulette' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('roulette')}
+                >
+                  <Sparkles size={16} />
+                  <span>Корыто Фортуны</span>
+                </button>
               </div>
 
-              {/* Tournament Match Title Header */}
+              {/* CRASH GAME ARENA */}
+              {gamesTab === 'crash' && (
+                <div className="wl-crash-arena">
+                  {/* History of crash points */}
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700, marginBottom: 6 }}>
+                      ПОСЛЕДНИЕ РАУНДЫ:
+                    </div>
+                    <div className="wl-crash-history-pills">
+                      {crashHistory.map((h, i) => (
+                        <span
+                          key={i}
+                          className="wl-crash-history-pill"
+                          style={{
+                            color: h >= 2.0 ? 'var(--green)' : h < 1.2 ? '#ef4444' : 'var(--org)',
+                            borderColor: h >= 2.0 ? 'var(--green-glow)' : undefined
+                          }}
+                        >
+                          {h.toFixed(2)}x
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Multiplier Central Display */}
+                  <div className="wl-crash-display">
+                    <div
+                      className="wl-crash-multiplier"
+                      style={{
+                        color: crashState === 'crashed' ? '#ef4444' : crashState === 'won' ? 'var(--green)' : 'var(--tx-primary)'
+                      }}
+                    >
+                      {crashMultiplier.toFixed(2)}x
+                    </div>
+
+                    <div className="wl-crash-status">
+                      {crashState === 'idle' && <span style={{ color: 'var(--tx-muted)' }}>Сделайте ставку и начните раунд</span>}
+                      {crashState === 'running' && <span style={{ color: 'var(--org)' }}>🚀 ХРЯК В ПОЛЁТЕ! УСПЕЙТЕ ЗАБРАТЬ!</span>}
+                      {crashState === 'crashed' && <span style={{ color: '#ef4444' }}>💥 КРЭШ! СВИН УПАЛ В ЛУЖУ</span>}
+                      {crashState === 'won' && <span style={{ color: 'var(--green)' }}>🎉 ВЫИГРЫШ ЗАБРАН!</span>}
+                    </div>
+
+                    {/* Animated Pig Icon */}
+                    <div
+                      className="wl-crash-pig"
+                      style={{
+                        bottom: crashState === 'running' ? Math.min(160, 20 + crashMultiplier * 20) : 20,
+                        right: crashState === 'running' ? Math.min(260, 40 + crashMultiplier * 28) : 40,
+                        transform: crashState === 'crashed' ? 'rotate(90deg) scale(0.8)' : 'none'
+                      }}
+                    >
+                      {crashState === 'crashed' ? '💥' : crashState === 'won' ? '💰' : '🐷🚀'}
+                    </div>
+                  </div>
+
+                  {/* Crash Control Bar */}
+                  <div style={{ background: '#161a24', padding: 16, borderRadius: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА SV₽:</label>
+                      <input
+                        type="text"
+                        className="wl-stake-input"
+                        value={crashStake}
+                        disabled={crashState === 'running'}
+                        onChange={e => setCrashStake(e.target.value.replace(',', '.'))}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {['100', '200', '500', '1000'].map(val => (
+                        <button
+                          key={val}
+                          className="wl-quick-btn"
+                          style={{ padding: '8px 14px' }}
+                          disabled={crashState === 'running'}
+                          onClick={() => setCrashStake(val)}
+                        >
+                          +{val}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={{ width: '100%', maxWidth: 280 }}>
+                      {crashState !== 'running' ? (
+                        <button
+                          className="wl-btn-orange"
+                          style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
+                          onClick={startCrashGame}
+                        >
+                          СТАРТ РАУНДА 🚀
+                        </button>
+                      ) : (
+                        <button
+                          className="wl-btn-green"
+                          style={{ width: '100%', height: 48, fontSize: 16, borderRadius: 10 }}
+                          onClick={cashoutCrash}
+                        >
+                          ЗАБРАТЬ {fmt(r2(parseFloat(crashStake) * crashMultiplier))}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ROULETTE */}
+              {gamesTab === 'roulette' && (
+                <div className="wl-banner-card highlight" style={{ padding: 32, textAlign: 'center' }}>
+                  <span className="wl-banner-tag">ИГРЫ 24/7 • БЫСТРЫЕ ИСХОДЫ</span>
+                  <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 26, margin: '14px 0 6px' }}>
+                    КОРЫТО ФОРТУНЫ 🐷
+                  </h2>
+                  <p style={{ color: 'var(--tx-secondary)', fontSize: 14, marginBottom: 24 }}>
+                    Испытайте удачу! Ставка от 100 SV₽. Крутите корыто и получайте моментальные множители от x0 до x10!
+                  </p>
+
+                  <div style={{ margin: '30px auto', width: 140, height: 140, borderRadius: '50%', border: '4px dashed var(--org)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, animation: spinning ? 'spin 0.6s linear infinite' : 'none' }}>
+                    {spinning ? '🌀' : '🐽'}
+                  </div>
+
+                  {rouletteResult && (
+                    <div style={{ padding: '12px 20px', borderRadius: 10, background: '#1c2230', border: '1px solid var(--org)', color: '#fff', fontSize: 16, fontWeight: 700, marginBottom: 20 }}>
+                      {rouletteResult}
+                    </div>
+                  )}
+
+                  <button
+                    className="wl-btn-orange"
+                    style={{ fontSize: 16, padding: '14px 36px', borderRadius: 12 }}
+                    disabled={spinning}
+                    onClick={spinRoulette}
+                  >
+                    {spinning ? 'Корыто крутится...' : 'Крутить за 100 SV₽'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* C. ESPORTS STREAM VIEW */}
+          {view === 'esports' && (
+            <div>
               <div style={{ background: '#141822', padding: '14px 18px', borderRadius: 12, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ fontSize: 12, color: 'var(--org)', fontWeight: 800 }}>THUNDERPICK WORLD CHAMPIONSHIP • ГРАНД-ФИНАЛ</div>
@@ -837,9 +1059,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Interactive Player & Stats Area */}
               <div className="wl-esports-arena">
-                {/* Simulated Stream Player */}
                 <div className="wl-stream-player">
                   <div className="wl-stream-hud">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '4px 10px', borderRadius: 999 }}>
@@ -851,7 +1071,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Visualizer inside the stream */}
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 64, animation: streamPlaying ? 'pulse 2s infinite' : 'none' }}>
                       🐷🎮
@@ -864,7 +1083,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Player controls */}
                   <div className="wl-stream-bottom-bar">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <button onClick={() => setStreamPlaying(p => !p)} style={{ color: '#fff' }}>
@@ -883,13 +1101,11 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Right stats & live chat panel */}
                 <div className="wl-esports-stats-panel">
                   <div style={{ fontWeight: 800, fontSize: 15, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
                     Командная статистика
                   </div>
 
-                  {/* Winrate bar */}
                   <div className="wl-stat-row">
                     <div className="wl-stat-labels">
                       <span>FURIA: 55%</span>
@@ -902,7 +1118,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Pistol round winrate */}
                   <div className="wl-stat-row">
                     <div className="wl-stat-labels">
                       <span>FURIA: 58%</span>
@@ -915,23 +1130,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Map pool */}
-                  <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6 }}>Пул карт:</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                    {[
-                      ['Inferno', '54%'],
-                      ['Mirage', '62%'],
-                      ['Nuke', '48%'],
-                      ['Dust 2', '71%']
-                    ].map(([map, win], i) => (
-                      <div key={i} style={{ background: '#1c2230', padding: 6, borderRadius: 6, textAlign: 'center' }}>
-                        <div style={{ fontSize: 11, fontWeight: 700 }}>{map}</div>
-                        <div style={{ fontSize: 10, color: 'var(--org)' }}>{win}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Live Chat Stream */}
                   <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                       <MessageSquare size={14} /> Чат матча
@@ -946,61 +1144,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
-              {/* Match bets row */}
-              <div className="wl-table-container">
-                <div className="wl-league-header">
-                  <span className="wl-league-title">Ставки на гранд-финал FURIA vs BetBoom</span>
-                </div>
-                <div style={{ padding: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                  {EVENTS[6].out.map((outcome, idx) => (
-                    <button
-                      key={idx}
-                      className={`wl-odd-box ${selectedBet?.evId === 'e7' && selectedBet?.outcomeIdx === idx ? 'selected' : ''}`}
-                      style={{ minWidth: 140, height: 48 }}
-                      onClick={() => selectOdd(EVENTS[6], idx, outcome[0], outcome[1])}
-                    >
-                      <span className="wl-odd-lbl">{outcome[0]}</span>
-                      <span className="wl-odd-val">{outcome[1].toFixed(2)}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* C. 24/7 GAMES (Корыто Фортуны) */}
-          {view === 'games24' && (
-            <div style={{ maxWidth: 680, margin: '20px auto', textAlign: 'center' }}>
-              <div className="wl-banner-card highlight" style={{ padding: 32 }}>
-                <span className="wl-banner-tag">ИГРЫ 24/7 • БЫСТРЫЕ ИСХОДЫ</span>
-                <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 26, margin: '14px 0 6px' }}>
-                  КОРЫТО ФОРТУНЫ 🐷
-                </h2>
-                <p style={{ color: 'var(--tx-secondary)', fontSize: 14, marginBottom: 24 }}>
-                  Испытайте удачу! Ставка от 100 SV₽. Крутите корыто и получайте моментальные множители от x0 до x10!
-                </p>
-
-                {/* Animated Visualizer */}
-                <div style={{ margin: '30px auto', width: 140, height: 140, borderRadius: '50%', border: '4px dashed var(--org)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, animation: spinning ? 'spin 0.6s linear infinite' : 'none' }}>
-                  {spinning ? '🌀' : '🐽'}
-                </div>
-
-                {rouletteResult && (
-                  <div style={{ padding: '12px 20px', borderRadius: 10, background: '#1c2230', border: '1px solid var(--org)', color: '#fff', fontSize: 16, fontWeight: 700, marginBottom: 20 }}>
-                    {rouletteResult}
-                  </div>
-                )}
-
-                <button
-                  className="wl-btn-orange"
-                  style={{ fontSize: 16, padding: '14px 36px', borderRadius: 12 }}
-                  disabled={spinning}
-                  onClick={spinRoulette}
-                >
-                  {spinning ? 'Корыто крутится...' : 'Крутить за 100 SV₽'}
-                </button>
-              </div>
             </div>
           )}
 
@@ -1012,7 +1155,7 @@ export default function App() {
               </h2>
 
               <div className="wl-banner-card" style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, color: 'var(--tx-secondary)' }}>Доступный виртуальный баланс</div>
+                <div style={{ fontSize: 13, color: 'var(--tx-secondary)' }}>Доступный виртуальный баланс:</div>
                 <div style={{ fontFamily: 'var(--font-d)', fontSize: 36, fontWeight: 800, color: 'var(--org)', margin: '8px 0 16px' }}>
                   {fmt(S.bal)}
                 </div>
@@ -1027,7 +1170,7 @@ export default function App() {
                     className="wl-sidebar-quick-btn"
                     style={{ border: '1px solid var(--border)' }}
                     onClick={() => {
-                      if (confirm('Сбросить весь прогресс и историю ставок к начальным 10 000 SV₽?')) {
+                      if (confirm('Сбросить весь баланс и историю ставок?')) {
                         setS(freshState())
                         setSelectedBet(null)
                         notify('Прогресс сброшен к 10 000 SV₽')
@@ -1039,72 +1182,47 @@ export default function App() {
                 </div>
               </div>
 
-              {/* History of bets */}
-              <h3 style={{ fontSize: 17, fontWeight: 700, margin: '24px 0 12px' }}>История виртуальных ставок</h3>
+              <h3 style={{ fontSize: 17, fontWeight: 700, margin: '24px 0 12px' }}>История ставок</h3>
               <div className="wl-table-container">
                 {S.bets.length === 0 ? (
                   <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-muted)' }}>
-                    Ставок пока нет. Выберите исход в линии и нажмите «Сделать ставку»!
+                    Ставок пока нет. Загляните в линию и выберите исход!
                   </div>
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                      <thead>
-                        <tr style={{ background: '#171b26', borderBottom: '1px solid var(--border)', textAlign: 'left' }}>
-                          <th style={{ padding: '10px 14px' }}>Событие</th>
-                          <th style={{ padding: '10px 14px' }}>Ставка</th>
-                          <th style={{ padding: '10px 14px' }}>Коэф.</th>
-                          <th style={{ padding: '10px 14px' }}>Статус</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {S.bets.map((b: any) => {
-                          const ev = EVENTS.find(e => e.id === b.ev)
-                          const statusColor = b.state === 'won' ? 'var(--green)' : b.state === 'lost' ? '#ef4444' : 'var(--org)'
-                          const statusText = b.state === 'won' ? 'ВЫИГРЫШ' : b.state === 'lost' ? 'ПРОИГРЫШ' : b.state === 'refund' ? 'ВОЗВРАТ' : 'В ИГРЕ'
-
-                          return (
-                            <tr key={b.id} style={{ borderBottom: '1px solid #1c2230' }}>
-                              <td style={{ padding: '10px 14px' }}>
-                                <div style={{ fontWeight: 700 }}>{ev?.title || b.ev}</div>
-                                <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev?.out[b.i]?.[0] || 'Исход'}</div>
-                              </td>
-                              <td style={{ padding: '10px 14px', fontWeight: 700 }}>{fmt(b.stake)}</td>
-                              <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{b.odds.toFixed(2)}</td>
-                              <td style={{ padding: '10px 14px' }}>
-                                <span style={{ color: statusColor, fontWeight: 800, fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#191f2c' }}>
-                                  {statusText}
-                                </span>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Transactions log */}
-              <h3 style={{ fontSize: 17, fontWeight: 700, margin: '24px 0 12px' }}>Журнал транзакций</h3>
-              <div className="wl-table-container">
-                <div style={{ maxHeight: 260, overflowY: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#171b26', borderBottom: '1px solid var(--border)', textAlign: 'left' }}>
+                        <th style={{ padding: '10px 14px' }}>Событие</th>
+                        <th style={{ padding: '10px 14px' }}>Ставка</th>
+                        <th style={{ padding: '10px 14px' }}>Коэф.</th>
+                        <th style={{ padding: '10px 14px' }}>Статус</th>
+                      </tr>
+                    </thead>
                     <tbody>
-                      {S.log.map((l: any, i: number) => (
-                        <tr key={i} style={{ borderBottom: '1px solid #1a202c' }}>
-                          <td style={{ padding: '8px 14px', color: 'var(--tx-muted)', fontSize: 12 }}>
-                            {new Date(l.t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                          </td>
-                          <td style={{ padding: '8px 14px' }}>{l.x}</td>
-                          <td style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 700, color: l.d > 0 ? 'var(--green)' : l.d < 0 ? '#ef4444' : '#fff' }}>
-                            {l.d > 0 ? `+${fmt(l.d)}` : fmt(l.d)}
-                          </td>
-                        </tr>
-                      ))}
+                      {S.bets.map((b: any) => {
+                        const ev = allEvents.find(e => e.id === b.ev)
+                        const statusColor = b.state === 'won' ? 'var(--green)' : b.state === 'lost' ? '#ef4444' : 'var(--org)'
+                        const statusText = b.state === 'won' ? 'ВЫИГРЫШ' : b.state === 'lost' ? 'ПРОИГРЫШ' : b.state === 'refund' ? 'ВОЗВРАТ' : 'В ИГРЕ'
+
+                        return (
+                          <tr key={b.id} style={{ borderBottom: '1px solid #1c2230' }}>
+                            <td style={{ padding: '10px 14px' }}>
+                              <div style={{ fontWeight: 700 }}>{ev?.title || b.ev}</div>
+                              <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev?.out[b.i]?.[0] || 'Исход'}</div>
+                            </td>
+                            <td style={{ padding: '10px 14px', fontWeight: 700 }}>{fmt(b.stake)}</td>
+                            <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{b.odds.toFixed(2)}</td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{ color: statusColor, fontWeight: 800, fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#191f2c' }}>
+                                {statusText}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
-                </div>
+                )}
               </div>
             </div>
           )}
@@ -1128,7 +1246,7 @@ export default function App() {
                     <button
                       className="wl-btn-orange"
                       style={{ marginTop: 14, width: 'fit-content' }}
-                      onClick={() => notify(`Условия акции «${p[0]}» соблюдены!`)}
+                      onClick={() => notify(`Условия акции «${p[0]}» выполнены!`)}
                     >
                       Активировать
                     </button>
@@ -1145,7 +1263,7 @@ export default function App() {
                 Результаты и архив событий
               </h2>
               <div className="wl-table-container">
-                {EVENTS.map(ev => {
+                {allEvents.map(ev => {
                   const state = S.st[ev.id]
                   return (
                     <div key={ev.id} style={{ padding: 14, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1197,7 +1315,7 @@ export default function App() {
         </main>
       </div>
 
-      {/* 3. Floating Bottom-Right Coupon Button (Signature Winline widget) */}
+      {/* 3. Floating Bottom-Right Coupon Button */}
       <div className="wl-floating-coupon-bar">
         <button
           className="wl-coupon-trigger-btn"
@@ -1217,17 +1335,16 @@ export default function App() {
 
         <button
           className="wl-floating-chat-btn"
-          onClick={() => notify('💬 Поддержка SVINLINE: «Свинья сейчас обедает, вернётся через 5 минут!»')}
+          onClick={() => notify('💬 Поддержка: «Свинья сейчас обедает, вернётся через 5 минут!»')}
           title="Онлайн-поддержка"
         >
           <MessageSquare size={20} />
         </button>
       </div>
 
-      {/* 4. Floating BetSlip Drawer / Modal */}
+      {/* 4. Floating BetSlip Drawer */}
       {slipOpen && (
         <div className="wl-betslip-drawer">
-          {/* Slip Header with tabs */}
           <div className="wl-slip-header">
             <div className="wl-slip-tabs">
               <button
@@ -1248,7 +1365,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Slip Body: Tab Coupon */}
           {slipTab === 'coupon' ? (
             <div className="wl-slip-body">
               {!selectedBet ? (
@@ -1256,14 +1372,13 @@ export default function App() {
                   <div style={{ fontSize: 30, marginBottom: 8 }}>📋</div>
                   <div style={{ fontWeight: 700, fontSize: 15, color: '#fff' }}>Купон пуст</div>
                   <div style={{ fontSize: 13, marginTop: 4 }}>
-                    Выберите коэффициент в любом событии на линии, чтобы добавить его в купон.
+                    Выберите исход в линии, чтобы добавить его в купон.
                   </div>
                 </div>
               ) : (
                 <form onSubmit={handlePlaceBet}>
-                  {/* Selected Event details */}
                   {(() => {
-                    const ev = EVENTS.find(e => e.id === selectedBet.evId)
+                    const ev = allEvents.find(e => e.id === selectedBet.evId)
                     return (
                       <div style={{ background: '#1b212d', padding: 12, borderRadius: 10, marginBottom: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1291,10 +1406,9 @@ export default function App() {
                     )
                   })()}
 
-                  {/* Stake input */}
                   <div>
                     <label style={{ fontSize: 12, color: 'var(--tx-secondary)', fontWeight: 600 }}>
-                      Сумма виртуальной ставки, SV₽:
+                      Сумма ставки, SV₽:
                     </label>
                     <input
                       type="text"
@@ -1305,11 +1419,9 @@ export default function App() {
                         setStake(e.target.value.replace(',', '.'))
                         setErr('')
                       }}
-                      placeholder="Например, 500"
                     />
                   </div>
 
-                  {/* Quick stake buttons */}
                   <div className="wl-quick-stakes">
                     {['100', '500', '1000'].map(val => (
                       <button
@@ -1331,18 +1443,11 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Payout calculation */}
                   <div style={{ background: '#0e1117', padding: 10, borderRadius: 8, margin: '12px 0', fontSize: 13 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--tx-secondary)' }}>
                       <span>Возможный выигрыш:</span>
                       <span style={{ fontFamily: 'var(--font-d)', fontWeight: 800, color: 'var(--org)', fontSize: 15 }}>
                         {isStakeValid ? fmt(potentialPayout) : '—'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--tx-muted)', fontSize: 11, marginTop: 4 }}>
-                      <span>Чистая выплата:</span>
-                      <span style={{ color: 'var(--green)' }}>
-                        {isStakeValid ? `+${fmt(netProfit)}` : '—'}
                       </span>
                     </div>
                   </div>
@@ -1353,7 +1458,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Submit Bet button */}
                   <button
                     type="submit"
                     className="wl-btn-orange"
@@ -1365,20 +1469,16 @@ export default function App() {
               )}
             </div>
           ) : (
-            /* Slip Body: Tab In Game */
             <div className="wl-slip-body">
               {activeBetsCount === 0 ? (
                 <div style={{ textAlign: 'center', padding: '36px 12px', color: 'var(--tx-muted)' }}>
                   <div style={{ fontSize: 30, marginBottom: 8 }}>⏳</div>
                   <div style={{ fontWeight: 700, fontSize: 15, color: '#fff' }}>Нет активных ставок</div>
-                  <div style={{ fontSize: 13, marginTop: 4 }}>
-                    Здесь отображаются ваши текущие нерассчитанные ставки.
-                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {S.bets.filter((b: any) => b.state === 'open').map((b: any) => {
-                    const ev = EVENTS.find(e => e.id === b.ev)
+                    const ev = allEvents.find(e => e.id === b.ev)
                     return (
                       <div key={b.id} style={{ background: '#1c2230', padding: 12, borderRadius: 10 }}>
                         <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev?.league}</div>
@@ -1386,24 +1486,6 @@ export default function App() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 12 }}>
                           <span>{ev?.out[b.i]?.[0]} (x{b.odds.toFixed(2)})</span>
                           <span style={{ fontWeight: 700, color: 'var(--org)' }}>{fmt(b.stake)}</span>
-                        </div>
-
-                        {/* Test instant settle directly in slip */}
-                        <div style={{ display: 'flex', gap: 6, marginTop: 8, borderTop: '1px solid #283347', paddingTop: 8 }}>
-                          <button
-                            className="wl-demo-btn"
-                            style={{ flex: 1, color: 'var(--green)' }}
-                            onClick={() => mutate(s => settleEvent(s, b.ev, b.i), `Выигрыш по ставке ${fmt(b.stake)}!`)}
-                          >
-                            ✓ Засчитать выигрыш
-                          </button>
-                          <button
-                            className="wl-demo-btn"
-                            style={{ flex: 1, color: '#ef4444' }}
-                            onClick={() => mutate(s => settleEvent(s, b.ev, b.i === 0 ? 1 : 0), `Ставка проиграна`)}
-                          >
-                            ✕ Проигрыш
-                          </button>
                         </div>
                       </div>
                     )
@@ -1415,7 +1497,382 @@ export default function App() {
         </div>
       )}
 
-      {/* 5. Toast feedback notification */}
+      {/* 5. USER PROFILE MODAL */}
+      {profileModalOpen && (
+        <div className="wl-modal-overlay" onClick={() => setProfileModalOpen(false)}>
+          <div className="wl-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="wl-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <User size={20} color="var(--org)" />
+                <span style={{ fontWeight: 800, fontSize: 17 }}>Личный кабинет игрока</span>
+              </div>
+              <button onClick={() => setProfileModalOpen(false)} style={{ color: 'var(--tx-muted)' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="wl-modal-body">
+              {/* Profile Card */}
+              <div style={{ background: '#1a1f2c', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#252b3d', border: '2px solid var(--org)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
+                    {currentUser.avatar}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800 }}>{currentUser.username}</div>
+                    <div style={{ fontSize: 12, color: isAdmin ? '#f59e0b' : 'var(--tx-secondary)', fontWeight: 700 }}>
+                      {currentUser.title}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--org)', fontWeight: 700, marginTop: 4 }}>
+                      Баланс: {fmt(S.bal)}
+                    </div>
+                  </div>
+                </div>
+
+                {isAdmin && (
+                  <span className="wl-admin-badge">
+                    <ShieldCheck size={14} /> ADMIN
+                  </span>
+                )}
+              </div>
+
+              {/* Account Switcher */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8 }}>
+                  БЫСТРОЕ ПЕРЕКЛЮЧЕНИЕ ПРОФИЛЕЙ:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button
+                    className={`wl-sidebar-quick-btn ${currentUserId === 'u1' ? 'active' : ''}`}
+                    style={{ border: '1px solid var(--border)', padding: 10, justifyContent: 'center' }}
+                    onClick={() => {
+                      setCurrentUserId('u1')
+                      notify('Переключено на аккаунт игрока: Кабанчик_2026')
+                    }}
+                  >
+                    <span>🐗 Кабанчик_2026 (Игрок)</span>
+                  </button>
+
+                  <button
+                    className={`wl-sidebar-quick-btn ${currentUserId === 'adm1' ? 'active' : ''}`}
+                    style={{ border: '1px solid #f59e0b55', color: '#f59e0b', padding: 10, justifyContent: 'center' }}
+                    onClick={() => {
+                      setCurrentUserId('adm1')
+                      notify('Активирован профиль Администратора: Главный_Хряктор 👑')
+                    }}
+                  >
+                    <span>👑 Главный_Хряктор (Admin)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Achievements */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Award size={14} color="var(--org)" />
+                  ДОСТИЖЕНИЯ И АЧИВКИ:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {currentUser.achievements.map((ach, i) => (
+                    <span
+                      key={i}
+                      style={{ background: '#1c2232', border: '1px solid var(--border)', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}
+                    >
+                      🏆 {ach}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8 }}>
+                  СТАТИСТИКА ИГРОКА:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, textAlign: 'center' }}>
+                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Ставок</div>
+                    <div style={{ fontSize: 16, fontWeight: 800 }}>{currentUser.stats.totalBets + S.bets.length}</div>
+                  </div>
+                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Винрейт</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--green)' }}>67%</div>
+                  </div>
+                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Любимый спорт</div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>Свин-Лига</div>
+                  </div>
+                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Статус</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--org)' }}>VIP</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. ADMIN DASHBOARD MODAL */}
+      {adminModalOpen && isAdmin && (
+        <div className="wl-modal-overlay" onClick={() => setAdminModalOpen(false)}>
+          <div className="wl-modal-card" style={{ maxWidth: 780 }} onClick={e => e.stopPropagation()}>
+            <div className="wl-modal-header" style={{ background: '#241a0d', borderBottomColor: '#f59e0b44' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <ShieldCheck size={22} color="#f59e0b" />
+                <span style={{ fontWeight: 800, fontSize: 17, color: '#f59e0b' }}>
+                  ПАНЕЛЬ АДМИНИСТРАТОРА ЛИНИИ SVINLINE
+                </span>
+              </div>
+              <button onClick={() => setAdminModalOpen(false)} style={{ color: 'var(--tx-muted)' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Admin Tabs */}
+            <div style={{ display: 'flex', gap: 4, background: '#141824', padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+              <button
+                className={`wl-slip-tab ${adminTab === 'create' ? 'active' : ''}`}
+                onClick={() => setAdminTab('create')}
+              >
+                + Добавить матч в линию
+              </button>
+              <button
+                className={`wl-slip-tab ${adminTab === 'matches' ? 'active' : ''}`}
+                onClick={() => setAdminTab('matches')}
+              >
+                Управление событиями ({allEvents.length})
+              </button>
+              <button
+                className={`wl-slip-tab ${adminTab === 'bank' ? 'active' : ''}`}
+                onClick={() => setAdminTab('bank')}
+              >
+                Касса и Балансы
+              </button>
+            </div>
+
+            <div className="wl-modal-body">
+              {/* TAB 1: ADD MATCH FORM */}
+              {adminTab === 'create' && (
+                <form onSubmit={handleCreateMatch}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Название матча / вывеска:</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        placeholder="Например: Спартак Хряк vs Динамо Кабан"
+                        value={newMatchTitle}
+                        onChange={e => setNewMatchTitle(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Категория:</label>
+                      <select
+                        className="wl-form-input"
+                        value={newMatchCat}
+                        onChange={e => setNewMatchCat(Number(e.target.value))}
+                      >
+                        {CATS.map((c, i) => (
+                          <option key={i} value={i}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Команда / Участник 1:</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        placeholder="Хозяева"
+                        value={newMatchTeam1}
+                        onChange={e => setNewMatchTeam1(e.target.value)}
+                      />
+                    </div>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Команда / Участник 2:</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        placeholder="Гости"
+                        value={newMatchTeam2}
+                        onChange={e => setNewMatchTeam2(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Турнир / Лига:</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      placeholder="Лига"
+                      value={newMatchLeague}
+                      onChange={e => setNewMatchLeague(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Odds inputs */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 10 }}>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Кэф на Победу 1 (П1):</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        value={newMatchOdds1}
+                        onChange={e => setNewMatchOdds1(e.target.value)}
+                      />
+                    </div>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Кэф на Ничью (X):</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        value={newMatchOddsX}
+                        onChange={e => setNewMatchOddsX(e.target.value)}
+                      />
+                    </div>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Кэф на Победу 2 (П2):</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        value={newMatchOdds2}
+                        onChange={e => setNewMatchOdds2(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
+                    <input
+                      type="checkbox"
+                      id="isLiveCheck"
+                      checked={newMatchIsLive}
+                      onChange={e => setNewMatchIsLive(e.target.checked)}
+                    />
+                    <label htmlFor="isLiveCheck" style={{ fontSize: 13, cursor: 'pointer' }}>
+                      Опубликовать как активный <b>Live-матч</b> (с красным индикатором)
+                    </label>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="wl-btn-orange"
+                    style={{ width: '100%', height: 46, fontSize: 15, borderRadius: 10, marginTop: 10 }}
+                  >
+                    + Опубликовать событие в линию SVINLINE
+                  </button>
+                </form>
+              )}
+
+              {/* TAB 2: LIVE MATCH CONTROLLER */}
+              {adminTab === 'matches' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 420, overflowY: 'auto' }}>
+                  {allEvents.map(ev => {
+                    const st = S.st[ev.id]?.s || 'open'
+                    return (
+                      <div key={ev.id} style={{ background: '#171b26', border: '1px solid var(--border)', borderRadius: 10, padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev.league}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{ev.title}</div>
+                          </div>
+                          <span className={`st ${st === 'open' ? 'o' : st === 'closed' ? 'c' : st === 'done' ? 'f' : 'x'}`}>
+                            {st === 'open' ? 'Открыто' : st === 'closed' ? 'Закрыто' : st === 'done' ? 'Завершено' : 'Отменено'}
+                          </span>
+                        </div>
+
+                        {/* Admin Action Buttons */}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                          {st === 'open' && (
+                            <button
+                              className="wl-demo-btn"
+                              onClick={() => mutate(s => { s.st[ev.id] = { s: 'closed' } }, `Приём ставок на «${ev.title}» закрыт`)}
+                            >
+                              Закрыть приём
+                            </button>
+                          )}
+
+                          {/* Settle winners */}
+                          {ev.out.slice(0, 3).map((out, idx) => (
+                            <button
+                              key={idx}
+                              className="wl-demo-btn"
+                              style={{ borderColor: 'var(--green-glow)' }}
+                              onClick={() => mutate(s => settleEvent(s, ev.id, idx), `Матч завершен! Победил: ${out[0]}. Ставки рассчитаны!`)}
+                            >
+                              Победил {out[0]}
+                            </button>
+                          ))}
+
+                          <button
+                            className="wl-demo-btn"
+                            style={{ color: '#ef4444' }}
+                            onClick={() => mutate(s => cancelEvent(s, ev.id), `Матч отменён, произведён возврат ставок`)}
+                          >
+                            Отменить матч
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* TAB 3: BANK & CASHIER */}
+              {adminTab === 'bank' && (
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
+                    Управление кассой и балансами:
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
+                    <button
+                      className="wl-btn-orange"
+                      onClick={() => addVirtualMoney(50000)}
+                    >
+                      + 50 000 SV₽
+                    </button>
+                    <button
+                      className="wl-btn-orange"
+                      style={{ background: '#3b82f6' }}
+                      onClick={() => addVirtualMoney(250000)}
+                    >
+                      + 250 000 SV₽
+                    </button>
+                    <button
+                      className="wl-btn-green"
+                      onClick={() => addVirtualMoney(1000000)}
+                    >
+                      + 1 000 000 SV₽
+                    </button>
+                  </div>
+
+                  <button
+                    className="wl-sidebar-quick-btn"
+                    style={{ border: '1px solid #ef4444', color: '#ef4444', width: '100%', justifyContent: 'center' }}
+                    onClick={() => {
+                      if (confirm('Сбросить весь банк и историю ставок к начальным 10 000 SV₽?')) {
+                        setS(freshState())
+                        setSelectedBet(null)
+                        notify('Касса и прогресс полностью сброшены')
+                      }
+                    }}
+                  >
+                    Сбросить кассу к исходным 10 000 SV₽
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Toast feedback notification */}
       {msg && (
         <div className="wl-toast">
           <CheckCircle2 size={18} color="var(--org)" />
@@ -1423,7 +1880,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 6. Discreet Footer */}
+      {/* 8. Discreet Footer */}
       <footer className="wl-footer">
         <div>
           © 2026 SVINLINE (СВИНЛАЙН). Все права защищены. Играйте ответственно. Внутренняя расчетная единица: SV₽. 18+
