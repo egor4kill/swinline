@@ -1126,7 +1126,12 @@ export default function App() {
               className="wl-search-input"
               placeholder="Поиск событий..."
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={e => {
+                setSearchQuery(e.target.value)
+                if (view !== 'line' && view !== 'live' && e.target.value) {
+                  setView('line')
+                }
+              }}
             />
             {searchQuery && (
               <button
@@ -1141,7 +1146,10 @@ export default function App() {
           <div className="wl-sidebar-quick">
             <button
               className={`wl-sidebar-quick-btn ${favoritesOnly ? 'active' : ''}`}
-              onClick={() => setFavoritesOnly(prev => !prev)}
+              onClick={() => {
+                setFavoritesOnly(prev => !prev)
+                if (view !== 'line' && view !== 'live') setView('line')
+              }}
             >
               <Star size={16} color={favoritesOnly ? 'var(--org)' : '#94a3b8'} />
               <span>Избранное</span>
@@ -1152,7 +1160,11 @@ export default function App() {
 
             <button
               className={`wl-sidebar-quick-btn ${selectedSport === null && !favoritesOnly ? 'active' : ''}`}
-              onClick={() => { setSelectedSport(null); setFavoritesOnly(false) }}
+              onClick={() => {
+                setSelectedSport(null)
+                setFavoritesOnly(false)
+                if (view !== 'line' && view !== 'live') setView('line')
+              }}
             >
               <Clock size={16} />
               <span>Все события</span>

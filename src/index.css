@@ -80,10 +80,11 @@ button:focus-visible, input:focus-visible {
 }
 
 .wl-header-inner {
-  max-width: 1720px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
   height: 100%;
-  padding: 0 16px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -229,30 +230,28 @@ button:focus-visible, input:focus-visible {
   transform: translateY(-1px);
 }
 
-/* 3-Column Main Layout */
+/* Main Layout: Fixed-position Sidebar permanently anchored to the left across all tabs */
 .wl-layout {
-  max-width: 1720px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   min-height: calc(100vh - 58px);
 }
 
-@media (min-width: 1400px) {
-  .wl-layout.has-right-sidebar {
-    grid-template-columns: 240px 1fr 340px;
-  }
-}
-
-/* Left Sidebar */
+/* Left Sidebar - permanently locked on the left, never shifts right */
 .wl-sidebar {
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
-  padding: 14px 10px;
+  padding: 14px 12px;
   height: calc(100vh - 58px);
   position: sticky;
   top: 58px;
   overflow-y: auto;
+  width: 260px;
+  flex-shrink: 0;
+  z-index: 20;
 }
 
 .wl-search-box {
@@ -360,8 +359,10 @@ button:focus-visible, input:focus-visible {
 
 /* Center Workspace */
 .wl-center {
-  padding: 14px 18px 80px;
+  padding: 16px 24px 80px;
   overflow-y: auto;
+  min-width: 0;
+  width: 100%;
 }
 
 /* Top Carousel / Banners Bar */
@@ -1085,7 +1086,17 @@ button:focus-visible, input:focus-visible {
 }
 
 /* Responsive adjustments */
-@media (max-width: 860px) {
+@media (max-width: 1024px) and (min-width: 768px) {
+  .wl-layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+  .wl-sidebar {
+    width: 210px;
+    padding: 10px 8px;
+  }
+}
+
+@media (max-width: 767px) {
   .wl-layout {
     grid-template-columns: 1fr;
   }
