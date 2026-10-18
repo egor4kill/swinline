@@ -79,11 +79,27 @@ const PigLogo = () => (
   </svg>
 )
 
+const getTwitchAvatar = (username?: string, currentAvatar?: string | null): string => {
+  if (currentAvatar && (currentAvatar.startsWith('http://') || currentAvatar.startsWith('https://'))) {
+    return currentAvatar
+  }
+  const u = (username || '').toLowerCase().trim()
+  if (u === 'egor4kill') {
+    return 'https://static-cdn.jtvnw.net/jtv_user_pictures/310827f8-113e-442f-9435-bf8637ec3b6a-profile_image-300x300.png'
+  }
+  if (u === 'lowrensy') {
+    return 'https://static-cdn.jtvnw.net/jtv_user_pictures/6d72a4ce-1517-408b-8d79-2490b31fa178-profile_image-300x300.png'
+  }
+  if (currentAvatar && currentAvatar !== '👑' && currentAvatar !== '🐗' && currentAvatar !== '🟣') {
+    return currentAvatar
+  }
+  return '🟣'
+}
+
 const UserAvatar = ({
   avatar,
   name,
   size = 28,
-  crown = false,
   className = ''
 }: {
   avatar?: string | null
@@ -92,7 +108,10 @@ const UserAvatar = ({
   crown?: boolean
   className?: string
 }) => {
-  const isImage = avatar && (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('/') || avatar.startsWith('data:'))
+  const [hasError, setHasError] = useState(false)
+  const resolved = getTwitchAvatar(name, avatar)
+  const isImage = !hasError && Boolean(resolved && (resolved.startsWith('http://') || resolved.startsWith('https://') || resolved.startsWith('/') || resolved.startsWith('data:')))
+
   return (
     <div
       className={className}
@@ -104,55 +123,29 @@ const UserAvatar = ({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        flexShrink: 0
+        flexShrink: 0,
+        background: '#1a1f2c',
+        border: '1px solid rgba(255,255,255,0.18)',
+        overflow: 'hidden'
       }}
     >
       {isImage ? (
         <img
-          src={avatar!}
+          src={resolved}
           alt={name || 'Avatar'}
           style={{
-            width: size,
-            height: size,
+            width: '100%',
+            height: '100%',
             borderRadius: '50%',
             objectFit: 'cover',
-            border: crown ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.18)',
             display: 'block'
           }}
-          onError={(e) => {
-            (e.target as HTMLElement).style.display = 'none'
-          }}
+          referrerPolicy="no-referrer"
+          onError={() => setHasError(true)}
         />
       ) : (
-        <div
-          style={{
-            width: size,
-            height: size,
-            borderRadius: '50%',
-            background: crown ? 'linear-gradient(135deg, #f59e0b22, #f59e0b44)' : '#23293a',
-            border: crown ? '1px solid #f59e0b' : '1px solid var(--border)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: size * 0.58
-          }}
-        >
-          {avatar || (name ? name[0].toUpperCase() : '🟣')}
-        </div>
-      )}
-      {crown && (
-        <span
-          style={{
-            position: 'absolute',
-            bottom: -3,
-            right: -4,
-            fontSize: Math.max(10, Math.floor(size * 0.42)),
-            lineHeight: 1,
-            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.8))'
-          }}
-          title="Владелец / Администратор"
-        >
-          👑
+        <span style={{ fontSize: size * 0.55, fontWeight: 700, userSelect: 'none', color: '#fff' }}>
+          {resolved && resolved.length <= 2 && resolved !== '🟣' ? resolved : (name ? name[0].toUpperCase() : '👤')}
         </span>
       )}
     </div>
@@ -181,10 +174,15 @@ export default function App() {
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
     const raw = loadJSON(KEY_ACCOUNTS, DEFAULT_ACCOUNTS)
     return purgeEmptyAccounts(raw).map((a: any) => {
-      if (a.role === 'admin' && a.username?.toLowerCase() !== ADMIN_USERNAME.toLowerCase()) {
-        return { ...a, role: 'user' as const, title: 'Игрок (Twitch)' }
+      const isOwner = a.username?.toLowerCase() === ADMIN_USERNAME.toLowerCase()
+      const role = (isOwner ? 'admin' : (a.role === 'admin' ? 'user' : (a.role || 'user'))) as 'admin' | 'user'
+      const title = isOwner ? 'Владелец платформы (Admin)' : (role === 'admin' ? 'Игрок (Twitch)' : (a.title || 'Игрок (Twitch)'))
+      return {
+        ...a,
+        role,
+        title,
+        avatar: getTwitchAvatar(a.username, a.avatar)
       }
-      return a
     })
   })
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
@@ -337,7 +335,7 @@ export default function App() {
               id: p.id,
               username: p.username,
               role: (isOwner ? 'admin' : (p.role || 'user')) as 'admin' | 'user',
-              avatar: isOwner ? '👑' : (p.avatar || '🟣'),
+              avatar: getTwitchAvatar(p.username, p.avatar),
               title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
               bal: Number(p.bal ?? 10000),
               bets: userBets,
@@ -379,7 +377,7 @@ export default function App() {
                 username: u.username,
                 email: u.email,
                 role: (isOwner ? 'admin' : 'user') as 'admin' | 'user',
-                avatar: isOwner ? '👑' : (u.avatar || '🟣'),
+                avatar: getTwitchAvatar(u.username, u.avatar),
                 title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
                 bal: existing ? existing.bal : (u.bal ?? 10000),
                 bets: existing ? existing.bets : (u.bets ?? []),
@@ -451,7 +449,7 @@ export default function App() {
     // OWNER CHECK: If username is egor4kill (via Twitch or GitHub), grant full ADMIN status!
     const isOwner = name.toLowerCase() === ADMIN_USERNAME.toLowerCase()
     const twitchAvatar = u.user_metadata?.avatar_url || u.user_metadata?.picture || u.user_metadata?.avatar || ''
-    const avatar = customAvatar || twitchAvatar || (isOwner ? '👑' : '🟣')
+    const avatar = getTwitchAvatar(name, customAvatar || twitchAvatar)
     const accountId = u.id
 
     setAccounts(prev => {
@@ -464,7 +462,7 @@ export default function App() {
           username: name,
           role: isOwner ? 'admin' : 'user',
           title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
-          avatar: customAvatar || twitchAvatar || a.avatar || (isOwner ? '👑' : '🟣')
+          avatar: getTwitchAvatar(name, customAvatar || twitchAvatar || a.avatar)
         } : a)
       }
 
@@ -493,7 +491,7 @@ export default function App() {
     supabase.from('profiles').upsert({
       id: accountId,
       username: name,
-      avatar: customAvatar || twitchAvatar || (isOwner ? '👑' : '🟣'),
+      avatar,
       role: isOwner ? 'admin' : 'user',
       bal: isOwner ? 35000 : 10000,
       updated_at: new Date().toISOString()

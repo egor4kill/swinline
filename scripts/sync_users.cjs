@@ -36,12 +36,14 @@ async function syncUsers() {
 
       const isOwner = name.toLowerCase() === ADMIN_USERNAME.toLowerCase();
 
+      const twitchAvatar = u.user_metadata?.picture || u.user_metadata?.avatar_url || (name.toLowerCase() === 'egor4kill' ? 'https://static-cdn.jtvnw.net/jtv_user_pictures/310827f8-113e-442f-9435-bf8637ec3b6a-profile_image-300x300.png' : (name.toLowerCase() === 'lowrensy' ? 'https://static-cdn.jtvnw.net/jtv_user_pictures/6d72a4ce-1517-408b-8d79-2490b31fa178-profile_image-300x300.png' : '🟣'));
+
       return {
         id: u.id,
         username: name,
         email: u.email,
         role: isOwner ? 'admin' : 'user',
-        avatar: u.user_metadata?.picture || u.user_metadata?.avatar_url || (isOwner ? '👑' : '🟣'),
+        avatar: twitchAvatar,
         title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
         bal: isOwner ? 35000 : 10000,
         bets: [],
