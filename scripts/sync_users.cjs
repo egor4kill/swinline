@@ -41,7 +41,7 @@ async function syncUsers() {
         username: name,
         email: u.email,
         role: isOwner ? 'admin' : 'user',
-        avatar: isOwner ? '👑' : (u.user_metadata?.picture || u.user_metadata?.avatar_url || '🟣'),
+        avatar: u.user_metadata?.picture || u.user_metadata?.avatar_url || (isOwner ? '👑' : '🟣'),
         title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
         bal: isOwner ? 35000 : 10000,
         bets: [],

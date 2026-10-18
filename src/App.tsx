@@ -49,6 +49,7 @@ import {
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
 import { supabase, USERS_REGISTRY_URL, ADMIN_USERNAME } from './supabase'
+import ceoPhoto from './assets/ceo.jpg'
 
 const KEY_STATE = 'svinline.v3.state'
 const KEY_EVENTS = 'svinline.v3.custom_events'
@@ -77,6 +78,87 @@ const PigLogo = () => (
     <use href="#pig" />
   </svg>
 )
+
+const UserAvatar = ({
+  avatar,
+  name,
+  size = 28,
+  crown = false,
+  className = ''
+}: {
+  avatar?: string | null
+  name?: string
+  size?: number
+  crown?: boolean
+  className?: string
+}) => {
+  const isImage = avatar && (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('/') || avatar.startsWith('data:'))
+  return (
+    <div
+      className={className}
+      style={{
+        position: 'relative',
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0
+      }}
+    >
+      {isImage ? (
+        <img
+          src={avatar!}
+          alt={name || 'Avatar'}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: '50%',
+            objectFit: 'cover',
+            border: crown ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.18)',
+            display: 'block'
+          }}
+          onError={(e) => {
+            (e.target as HTMLElement).style.display = 'none'
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            width: size,
+            height: size,
+            borderRadius: '50%',
+            background: crown ? 'linear-gradient(135deg, #f59e0b22, #f59e0b44)' : '#23293a',
+            border: crown ? '1px solid #f59e0b' : '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: size * 0.58
+          }}
+        >
+          {avatar || (name ? name[0].toUpperCase() : '🟣')}
+        </div>
+      )}
+      {crown && (
+        <span
+          style={{
+            position: 'absolute',
+            bottom: -3,
+            right: -4,
+            fontSize: Math.max(10, Math.floor(size * 0.42)),
+            lineHeight: 1,
+            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.8))'
+          }}
+          title="Владелец / Администратор"
+        >
+          👑
+        </span>
+      )}
+    </div>
+  )
+}
+
 
 const purgeEmptyAccounts = (list: UserAccount[]): UserAccount[] => {
   const seenUsernames = new Set<string>()
@@ -368,7 +450,8 @@ export default function App() {
 
     // OWNER CHECK: If username is egor4kill (via Twitch or GitHub), grant full ADMIN status!
     const isOwner = name.toLowerCase() === ADMIN_USERNAME.toLowerCase()
-    const avatar = customAvatar || (isOwner ? '👑' : '🟣')
+    const twitchAvatar = u.user_metadata?.avatar_url || u.user_metadata?.picture || u.user_metadata?.avatar || ''
+    const avatar = customAvatar || twitchAvatar || (isOwner ? '👑' : '🟣')
     const accountId = u.id
 
     setAccounts(prev => {
@@ -381,7 +464,7 @@ export default function App() {
           username: name,
           role: isOwner ? 'admin' : 'user',
           title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
-          avatar: isOwner ? '👑' : (a.avatar && a.avatar !== '👑' ? a.avatar : '🟣')
+          avatar: customAvatar || twitchAvatar || a.avatar || (isOwner ? '👑' : '🟣')
         } : a)
       }
 
@@ -410,7 +493,7 @@ export default function App() {
     supabase.from('profiles').upsert({
       id: accountId,
       username: name,
-      avatar: isOwner ? '👑' : (u.user_metadata?.picture || u.user_metadata?.avatar_url || avatar),
+      avatar: customAvatar || twitchAvatar || (isOwner ? '👑' : '🟣'),
       role: isOwner ? 'admin' : 'user',
       bal: isOwner ? 35000 : 10000,
       updated_at: new Date().toISOString()
@@ -1057,7 +1140,7 @@ export default function App() {
                   onClick={() => setProfileModalOpen(true)}
                   title="Личный кабинет"
                 >
-                  <div className="wl-user-avatar">{currentUser.avatar}</div>
+                  <UserAvatar avatar={currentUser.avatar} name={currentUser.username} size={30} crown={isAdmin} />
                   <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
                     <span style={{ fontSize: 13, fontWeight: 700 }}>{currentUser.username}</span>
                     <span style={{ fontSize: 10, color: isAdmin ? '#f59e0b' : 'var(--tx-muted)' }}>
@@ -1865,6 +1948,48 @@ export default function App() {
               <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
                 О компании SVINLINE
               </h2>
+
+              {/* CEO Showcase Card */}
+              <div
+                className="wl-banner-card highlight"
+                style={{
+                  display: 'flex',
+                  gap: 22,
+                  alignItems: 'center',
+                  marginBottom: 20,
+                  padding: '20px 24px',
+                  borderRadius: 14,
+                  background: 'linear-gradient(135deg, #151a26, #1c2333)',
+                  border: '1px solid rgba(255, 85, 0, 0.35)',
+                  boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)'
+                }}
+              >
+                <img
+                  src={ceoPhoto}
+                  alt="Генеральный директор SVINLINE"
+                  style={{
+                    width: 120,
+                    height: 150,
+                    objectFit: 'cover',
+                    borderRadius: 12,
+                    border: '2px solid var(--org)',
+                    boxShadow: '0 4px 20px var(--org-glow)',
+                    flexShrink: 0
+                  }}
+                />
+                <div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255, 85, 0, 0.15)', color: 'var(--org)', border: '1px solid rgba(255, 85, 0, 0.3)', padding: '4px 12px', borderRadius: 999, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', marginBottom: 8 }}>
+                    <ShieldCheck size={14} /> Руководство компании
+                  </div>
+                  <h3 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginBottom: 6, fontFamily: 'var(--font-d)' }}>
+                    Генеральный директор SVINLINE
+                  </h3>
+                  <div style={{ fontSize: 14, color: 'var(--tx-secondary)', lineHeight: 1.6 }}>
+                    Основатель и генеральный директор букмекерской платформы SVINLINE. Лично курирует честность выплат, надёжность алгоритмов линии, организацию турниров и стратегическое развитие платформы нового поколения.
+                  </div>
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 24 }}>
                 {Array.from({ length: ABOUT.length / 2 }).map((_, i) => (
                   <div key={i} className="wl-banner-card">
@@ -2087,9 +2212,7 @@ export default function App() {
               {/* Profile Card */}
               <div style={{ background: '#1a1f2c', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#252b3d', border: '2px solid var(--org)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
-                    {currentUser.avatar}
-                  </div>
+                  <UserAvatar avatar={currentUser.avatar} name={currentUser.username} size={60} crown={isAdmin} />
                   <div>
                     <div style={{ fontSize: 18, fontWeight: 800 }}>{currentUser.username}</div>
                     <div style={{ fontSize: 12, color: isAdmin ? '#f59e0b' : 'var(--tx-secondary)', fontWeight: 700 }}>
@@ -2280,15 +2403,7 @@ export default function App() {
                           <tr key={acc.id}>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {acc.avatar?.startsWith('http') ? (
-                                  <img
-                                    src={acc.avatar}
-                                    alt={acc.username}
-                                    style={{ width: 26, height: 26, borderRadius: '50%', objectFit: 'cover' }}
-                                  />
-                                ) : (
-                                  <span style={{ fontSize: 20 }}>{acc.avatar}</span>
-                                )}
+                                <UserAvatar avatar={acc.avatar} name={acc.username} size={30} crown={acc.role === 'admin'} />
                                 <div>
                                   <div style={{ fontWeight: 700 }}>{acc.username}</div>
                                   <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{acc.title}</div>
@@ -2719,9 +2834,12 @@ export default function App() {
         <div className="wl-modal-overlay" onClick={() => setInspectingUser(null)}>
           <div className="wl-modal-card" style={{ maxWidth: 620 }} onClick={e => e.stopPropagation()}>
             <div className="wl-modal-header">
-              <span style={{ fontWeight: 800, fontSize: 16 }}>
-                Купоны игрока {inspectingUser.avatar} {inspectingUser.username}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <UserAvatar avatar={inspectingUser.avatar} name={inspectingUser.username} size={28} crown={inspectingUser.role === 'admin'} />
+                <span style={{ fontWeight: 800, fontSize: 16 }}>
+                  Купоны игрока {inspectingUser.username}
+                </span>
+              </div>
               <button onClick={() => setInspectingUser(null)} style={{ color: 'var(--tx-muted)' }}>
                 <X size={18} />
               </button>
