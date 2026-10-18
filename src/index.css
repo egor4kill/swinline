@@ -1293,3 +1293,76 @@ button:focus-visible, input:focus-visible {
 .wl-form-input:focus {
   border-color: var(--org);
 }
+
+/* Admin User Monitoring Table */
+.wl-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.wl-admin-table th {
+  background: #181d2a;
+  padding: 10px 12px;
+  color: var(--tx-secondary);
+  font-weight: 700;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.wl-admin-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #1c2230;
+  vertical-align: middle;
+}
+
+.wl-status-badge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.wl-status-badge.active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.wl-status-badge.blocked {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.wl-audit-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #161a25;
+  border-radius: 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+}
+
+.wl-auth-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.wl-auth-tab {
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tx-secondary);
+  border-radius: 8px;
+}
+
+.wl-auth-tab.active {
+  background: var(--org);
+  color: #000;
+}
