@@ -191,17 +191,12 @@ export default function App() {
     return id
   })
   const [authModalOpen, setAuthModalOpen] = useState(false)
-  const [authTab, setAuthTab] = useState<'login' | 'register'>('login')
-  const [loginUser, setLoginUser] = useState('')
-  const [loginPass, setLoginPass] = useState('')
-  const [regUser, setRegUser] = useState('')
-  const [regEmail, setRegEmail] = useState('')
-  const [regPass, setRegPass] = useState('')
-  const [regAvatar, setRegAvatar] = useState('🐗')
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [adminModalOpen, setAdminModalOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'users' | 'create' | 'matches' | 'audit' | 'bank'>('users')
   const [inspectingUser, setInspectingUser] = useState<UserAccount | null>(null)
+  const activeUserLoadedRef = useRef<string | null>(null)
+  const lastDepositRef = useRef<number>(0)
 
   // Find active user (or null if guest)
   const currentUser = useMemo(() => {
@@ -258,7 +253,6 @@ export default function App() {
   const [crashMultiplier, setCrashMultiplier] = useState(1.00)
   const [crashHistory, setCrashHistory] = useState<number[]>([1.45, 2.80, 1.15, 6.20, 1.05, 3.42, 1.95])
   const crashTimerRef = useRef<any>(null)
-  const crashTargetRef = useRef<number>(2.00)
 
   // 8. Admin Form State for New Match
   const [newMatchTitle, setNewMatchTitle] = useState('')
@@ -288,9 +282,39 @@ export default function App() {
     try { localStorage.setItem(KEY_CURRENT_USER, JSON.stringify(currentUserId)) } catch {}
   }, [currentUserId])
 
-  // Sync account balance with S.bal
+  // User balance isolation & remote database balance synchronization:
+  const lastSyncBalRef = useRef<number | null>(null)
   useEffect(() => {
-    setAccounts(prev => prev.map(a => a.id === currentUserId ? { ...a, bal: S.bal } : a))
+    if (!currentUserId) {
+      activeUserLoadedRef.current = null
+      lastSyncBalRef.current = null
+      return
+    }
+    const acc = accounts.find(a => a.id === currentUserId)
+    if (!acc) return
+
+    // 1. On account switch / first load:
+    if (activeUserLoadedRef.current !== currentUserId) {
+      activeUserLoadedRef.current = currentUserId
+      lastSyncBalRef.current = acc.bal
+      if (typeof acc.bal === 'number' && acc.bal !== S.bal) {
+        setS((prev: any) => ({ ...prev, bal: acc.bal }))
+      }
+      return
+    }
+
+    // 2. If remote database updated balance (e.g. admin top-up via Supabase):
+    if (lastSyncBalRef.current !== null && acc.bal !== lastSyncBalRef.current && acc.bal !== S.bal) {
+      lastSyncBalRef.current = acc.bal
+      setS((prev: any) => ({ ...prev, bal: acc.bal }))
+    }
+  }, [currentUserId, accounts, S.bal])
+
+  // Sync local S.bal changes to current user in accounts and Supabase
+  useEffect(() => {
+    if (!currentUserId) return
+    setAccounts(prev => prev.map(a => a.id === currentUserId && a.bal !== S.bal ? { ...a, bal: S.bal } : a))
+    lastSyncBalRef.current = S.bal
   }, [S.bal, currentUserId])
 
   // Supabase Auth listener (detects GitHub/Twitch logins and admin ownership)
@@ -560,10 +584,20 @@ export default function App() {
   }
 
   const addVirtualMoney = (amount: number = 5000) => {
+    const now = Date.now()
+    if (now - lastDepositRef.current < 2500) {
+      notify('Подождите пару секунд перед следующим начислением')
+      return
+    }
+    if (S.bal >= 100000) {
+      notify('Баланс уже превышает 100 000 SV₽! Дополнительное начисление не требуется.')
+      return
+    }
+    lastDepositRef.current = now
     mutate(s => {
       s.bal = r2(s.bal + amount)
       s.log.unshift({ t: Date.now(), x: `Пополнение ${fmt(amount)}`, d: amount })
-    }, `+${fmt(amount)} зачислено на баланс!`)
+    }, `+${fmt(amount)} зачислено на баланс! 🎉`)
   }
 
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
@@ -604,32 +638,52 @@ export default function App() {
       return
     }
     if (busy.current || !selectedBet) return
+
     const v = parseFloat(stake)
+    if (isNaN(v) || !isFinite(v) || v < 10) {
+      setErr('Минимальная сумма ставки — 10 SV₽')
+      return
+    }
+    if (v > S.bal) {
+      setErr('Недостаточно SV₽ на балансе')
+      return
+    }
+
+    const ev = allEvents.find(event => event.id === selectedBet.evId)
+    if (!ev) {
+      setErr('Событие не найдено или снято с линии')
+      return
+    }
+    if ((S.st?.[selectedBet.evId] || { s: 'open' }).s !== 'open') {
+      setErr('Матч уже завершён, приём ставок закрыт!')
+      return
+    }
+
+    const realOdds = Number(ev.out[selectedBet.outcomeIdx]?.[1]) || selectedBet.odds || 1.85
+    const realPickTitle = ev.out[selectedBet.outcomeIdx]?.[0] || selectedBet.outcomeTitle || 'Исход'
+
+    busy.current = true
     const next = structuredClone(S)
     const res = placeBet(next, selectedBet.evId, selectedBet.outcomeIdx, v)
 
     if (res.err) {
+      busy.current = false
       setErr(res.err)
       return
     }
 
-    busy.current = true
     setTimeout(() => { busy.current = false }, 350)
     setS(next)
 
     // Sync real bet and balance into Supabase database
-    const ev = allEvents.find(event => event.id === selectedBet.evId)
-    const outcomeTitle = selectedBet.outcomeTitle || 'Исход'
-    const oddsVal = selectedBet.odds || 1.85
-
     supabase.from('bets').insert({
       user_id: currentUser.id,
       username: currentUser.username,
       event_id: selectedBet.evId,
-      match_title: ev?.title || selectedBet.evId,
-      pick: outcomeTitle,
-      pick_name: outcomeTitle,
-      odds: oddsVal,
+      match_title: ev.title || selectedBet.evId,
+      pick: realPickTitle,
+      pick_name: realPickTitle,
+      odds: realOdds,
       stake: v,
       status: 'pending'
     }).then(() => {
@@ -673,26 +727,26 @@ export default function App() {
       s.log.unshift({ t: Date.now(), x: `Ставка в Хряк-Крэш 24/7`, d: -v })
     })
 
-    // Determine crash point using fair random formula (1.05x to 15.00x)
-    const r = Math.random()
-    let crashAt = 1.00 + (1 / (1 - r * 0.94) - 1)
-    if (crashAt > 20) crashAt = 20
-    crashTargetRef.current = r2(Math.max(1.05, crashAt))
-
     setCrashMultiplier(1.00)
     setCrashState('running')
 
     let current = 1.00
     if (crashTimerRef.current) clearInterval(crashTimerRef.current)
 
+    // Dynamic hazard rate: the crash point does not exist in memory beforehand
     crashTimerRef.current = setInterval(() => {
-      current = r2(current + 0.03 + (current * 0.025))
-      if (current >= crashTargetRef.current) {
+      // Dynamic hazard rate per 70ms tick:
+      const tickRisk = 0.012 + Math.min(0.08, (current - 1.0) * 0.0075)
+      const rolled = Math.random()
+
+      if (rolled < tickRisk || current >= 25.0) {
         clearInterval(crashTimerRef.current)
-        setCrashMultiplier(crashTargetRef.current)
+        const finalMul = r2(current)
+        setCrashMultiplier(finalMul)
         setCrashState('crashed')
-        setCrashHistory(prev => [crashTargetRef.current, ...prev.slice(0, 10)])
+        setCrashHistory(prev => [finalMul, ...prev.slice(0, 10)])
       } else {
+        current = r2(current + 0.03 + (current * 0.022))
         setCrashMultiplier(current)
       }
     }, 70)
@@ -702,14 +756,15 @@ export default function App() {
     if (crashState !== 'running') return
     if (crashTimerRef.current) clearInterval(crashTimerRef.current)
 
-    const winAmount = r2(parseFloat(crashStake) * crashMultiplier)
+    const mul = r2(crashMultiplier)
+    const winAmount = r2(parseFloat(crashStake) * mul)
     setCrashState('won')
-    setCrashHistory(prev => [crashMultiplier, ...prev.slice(0, 10)])
+    setCrashHistory(prev => [mul, ...prev.slice(0, 10)])
 
     mutate(s => {
       s.bal = r2(s.bal + winAmount)
-      s.log.unshift({ t: Date.now(), x: `Выигрыш в Хряк-Крэш (x${crashMultiplier.toFixed(2)})`, d: winAmount })
-    }, `Забрано ${fmt(winAmount)} по коэффициенту ${crashMultiplier.toFixed(2)}x! 🎉`)
+      s.log.unshift({ t: Date.now(), x: `Выигрыш в Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
+    }, `Забрано ${fmt(winAmount)} по коэффициенту ${mul.toFixed(2)}x! 🎉`)
   }
 
   // Roulette Spin Logic
@@ -794,139 +849,15 @@ export default function App() {
     notify(`Матч «${newEv.title}» успешно опубликован в линию!`)
   }
 
-  // Auth Handlers
-  const handleLogin = async (e: FormEvent) => {
-    e.preventDefault()
-    const input = loginUser.trim()
-    const pass = loginPass.trim()
-    if (!input || !pass) {
-      notify('Введите логин или email и пароль!')
-      return
-    }
-
-    // 1. Try Supabase Email Login if input is email or matches stored account email
-    const emailToTry = input.includes('@') ? input : accounts.find(a => a.username.toLowerCase() === input.toLowerCase())?.email || ''
-    if (emailToTry) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: emailToTry,
-          password: pass
-        })
-        if (!error && data.user) {
-          syncSupabaseUser(data.user)
-          setAuthModalOpen(false)
-          setLoginUser('')
-          setLoginPass('')
-          return
-        }
-      } catch {}
-    }
-
-    // 2. Fallback to existing registered player accounts
-    const target = accounts.find(a => (a.username.toLowerCase() === input.toLowerCase() || (a as any).email === input))
-    if (!target) {
-      notify('Пользователь не найден!')
-      return
-    }
-    if (target.password && target.password !== pass) {
-      notify('Неверный пароль!')
-      return
-    }
-    if (target.isBlocked) {
-      notify('Ваш аккаунт заблокирован администратором!')
-      return
-    }
-    setCurrentUserId(target.id)
-    setAuthModalOpen(false)
-    setLoginUser('')
-    setLoginPass('')
-    notify(`Добро пожаловать, ${target.username}! 👋`)
-  }
-
-  const handleRegister = async (e: FormEvent) => {
-    e.preventDefault()
-    const u = regUser.trim()
-    const email = regEmail.trim()
-    const pass = regPass.trim()
-    if (!u || !pass) {
-      notify('Введите никнейм и пароль!')
-      return
-    }
-    if (pass.length < 4) {
-      notify('Пароль должен содержать минимум 4 символа!')
-      return
-    }
-    if (accounts.some(a => a.username.toLowerCase() === u.toLowerCase())) {
-      notify('Пользователь с таким никнеймом уже существует!')
-      return
-    }
-
-    // Real cloud registration via Supabase if email provided
-    if (email) {
-      if (!email.includes('@')) {
-        notify('Введите корректный email адрес!')
-        return
-      }
-      try {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password: pass,
-          options: {
-            data: { username: u, name: u, avatar: regAvatar }
-          }
-        })
-        if (error) {
-          notify(`Ошибка регистрации в Supabase: ${error.message}`)
-          return
-        }
-        if (data.user) {
-          syncSupabaseUser(data.user, u, regAvatar)
-          setAuthModalOpen(false)
-          setRegUser('')
-          setRegEmail('')
-          setRegPass('')
-          notify(`Аккаунт ${u} успешно создан! Стартовый баланс: 10 000 SV₽! 🎉`)
-          return
-        }
-      } catch (err: any) {
-        notify(`Ошибка: ${err.message}`)
-        return
-      }
-    }
-
-    // Standard player account (strictly role: 'user', never admin)
-    const newAccount: UserAccount = {
-      id: 'u_' + Date.now(),
-      username: u,
-      email: email || undefined,
-      password: pass,
-      role: 'user', // NEVER admin. Admin is exclusively for GitHub owner.
-      avatar: regAvatar,
-      title: 'Игрок SVINLINE',
-      bal: 10000,
-      bets: [],
-      log: [{ t: Date.now(), x: 'Регистрация и стартовый баланс', d: 10000 }],
-      createdAt: Date.now(),
-      isBlocked: false,
-      stats: { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 },
-      achievements: ['Новый игрок']
-    }
-    setAccounts(prev => [...prev, newAccount])
-    setCurrentUserId(newAccount.id)
-    setAuthModalOpen(false)
-    setRegUser('')
-    setRegEmail('')
-    setRegPass('')
-    notify(`Аккаунт ${u} успешно зарегистрирован! Начислено 10 000 SV₽! 🎉`)
-  }
-
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut()
     } catch {}
     localStorage.removeItem('svinline_last_auth_provider')
     localStorage.removeItem(KEY_CURRENT_USER)
+    activeUserLoadedRef.current = null
     setCurrentUserId(null)
+    setS(freshState())
     setProfileModalOpen(false)
     notify('Вы вышли из профиля. Режим гостя.')
   }
@@ -2789,40 +2720,6 @@ export default function App() {
                 <span><b>Владелец ({ADMIN_USERNAME}):</b> автоматический статус Администратора</span>
               </div>
             </div>
-
-            {/* Fallback accordion for login */}
-            <details style={{ marginTop: 14, textAlign: 'left', fontSize: 12, color: 'var(--tx-muted)' }}>
-              <summary style={{ cursor: 'pointer', userSelect: 'none', padding: '6px 0', color: 'var(--tx-muted)' }}>
-                Резервный вход (по логину / email)
-              </summary>
-              <form onSubmit={handleLogin} style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <input
-                  type="text"
-                  className="wl-form-input"
-                  style={{ height: 38, fontSize: 13 }}
-                  value={loginUser}
-                  placeholder="Логин или email"
-                  onChange={e => setLoginUser(e.target.value)}
-                  required
-                />
-                <input
-                  type="password"
-                  className="wl-form-input"
-                  style={{ height: 38, fontSize: 13 }}
-                  value={loginPass}
-                  placeholder="Пароль"
-                  onChange={e => setLoginPass(e.target.value)}
-                  required
-                />
-                <button
-                  type="submit"
-                  className="wl-btn-orange"
-                  style={{ height: 36, fontSize: 13, borderRadius: 6 }}
-                >
-                  Войти
-                </button>
-              </form>
-            </details>
           </div>
         </div>
       )}

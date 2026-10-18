@@ -1,9 +1,13 @@
 // Syncs all Supabase registered Twitch users directly into public storage registry
 const SUPABASE_URL = 'https://vkgzyeugrxxwlouqrxrh.supabase.co';
-const secret = process.env.SUPABASE_SERVICE_KEY || Buffer.from('***REMOVED_SECRET***=', 'base64').toString('utf8');
+const secret = process.env.SUPABASE_SERVICE_KEY;
 const ADMIN_USERNAME = 'egor4kill';
 
 async function syncUsers() {
+  if (!secret) {
+    console.log('SUPABASE_SERVICE_KEY not provided in environment, skipping background auth registry sync.');
+    return;
+  }
   try {
     const res = await fetch(SUPABASE_URL + '/auth/v1/admin/users?page=&per_page=1000', {
       headers: {
