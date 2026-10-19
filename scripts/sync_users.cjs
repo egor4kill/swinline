@@ -45,7 +45,6 @@ async function syncUsers() {
       return {
         id: u.id,
         username: name,
-        email: u.email,
         role: isOwner ? 'admin' : 'user',
         avatar: twitchAvatar,
         title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',

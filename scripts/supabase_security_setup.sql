@@ -1,66 +1,108 @@
 -- ====================================================================
 -- SVINLINE: Row Level Security (RLS) & Database Hardening Script
--- Execute this script once in your Supabase Dashboard -> SQL Editor:
+-- Execute in Supabase Dashboard -> SQL Editor:
 -- https://supabase.com/dashboard/project/vkgzyeugrxxwlouqrxrh/sql
+--
+-- Goal: no client (anon/authenticated) can read other users' data.
 -- ====================================================================
 
--- 1. Enable RLS on profiles and bets
+-- 1. Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bets ENABLE ROW LEVEL SECURITY;
 
--- 2. Drop existing policies to prevent conflicts
-DROP POLICY IF EXISTS "Allow public read on profiles" ON public.profiles;
-DROP POLICY IF EXISTS "Allow users to insert own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Allow users to update own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Allow public read on bets" ON public.bets;
-DROP POLICY IF EXISTS "Allow users to insert own bets" ON public.bets;
-DROP POLICY IF EXISTS "Allow owner to update bets" ON public.bets;
+-- 2. Drop ALL existing policies on profiles/bets (including legacy permissive ones)
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT policyname, tablename
+    FROM pg_policies
+    WHERE schemaname = 'public' AND tablename IN ('profiles', 'bets')
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
+  END LOOP;
+END $$;
 
--- 3. PROFILES TABLE POLICIES
--- Anyone can view profiles (for leaderboard, admin surveillance, avatar display)
-CREATE POLICY "Allow public read on profiles"
+-- 3. PROFILES: each user can only read/insert/update their OWN row
+CREATE POLICY "profiles_select_own"
 ON public.profiles FOR SELECT
-USING (true);
+USING (auth.uid() = id);
 
--- Authenticated Twitch users can insert their own profile
-CREATE POLICY "Allow users to insert own profile"
+CREATE POLICY "profiles_insert_own"
 ON public.profiles FOR INSERT
-WITH CHECK (
-  auth.uid() = id
-  OR lower(username) = 'egor4kill'
-);
+WITH CHECK (auth.uid() = id);
 
--- Users can only update their own profile, or owner 'egor4kill' can update any
-CREATE POLICY "Allow users to update own profile"
+CREATE POLICY "profiles_update_own"
 ON public.profiles FOR UPDATE
-USING (
-  auth.uid() = id
-  OR lower(username) = 'egor4kill'
-);
+USING (auth.uid() = id)
+WITH CHECK (auth.uid() = id);
 
--- 4. BETS TABLE POLICIES
--- Anyone can view bets (for coupon inspect and admin surveillance)
-CREATE POLICY "Allow public read on bets"
+-- 4. BETS: each user can only read/insert their OWN bets.
+--    No client UPDATE/DELETE at all (settlement only via service role).
+CREATE POLICY "bets_select_own"
 ON public.bets FOR SELECT
-USING (true);
+USING (auth.uid() = user_id);
 
--- Users can only insert bets for their own user_id
-CREATE POLICY "Allow users to insert own bets"
+CREATE POLICY "bets_insert_own"
 ON public.bets FOR INSERT
-WITH CHECK (
-  auth.uid() = user_id
-  OR lower(username) = 'egor4kill'
-);
+WITH CHECK (auth.uid() = user_id);
 
--- Only owner 'egor4kill' can update or settle bets
-CREATE POLICY "Allow owner to update bets"
-ON public.bets FOR UPDATE
-USING (
-  lower(username) = 'egor4kill'
-  OR auth.uid() = user_id
-);
+-- 5. Guard privileged profile columns against privilege escalation.
+--    Only service_role (and SQL editor) may change role/username/is_blocked.
+CREATE OR REPLACE FUNCTION public.guard_profile_columns()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF coalesce(auth.role(), '') NOT IN ('authenticated', 'anon') THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.role IS DISTINCT FROM OLD.role
+     OR NEW.username IS DISTINCT FROM OLD.username
+     OR NEW.is_blocked IS DISTINCT FROM OLD.is_blocked THEN
+    RAISE EXCEPTION 'privileged profile columns are read-only';
+  END IF;
+  RETURN NEW;
+END;
+$$;
 
--- 5. Storage security for public_data bucket
+DROP TRIGGER IF EXISTS guard_profile_columns ON public.profiles;
+CREATE TRIGGER guard_profile_columns
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.guard_profile_columns();
+
+CREATE OR REPLACE FUNCTION public.guard_profile_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF coalesce(auth.role(), '') NOT IN ('authenticated', 'anon') THEN
+    RETURN NEW;
+  END IF;
+  NEW.role := 'user';
+  NEW.is_blocked := false;
+  NEW.bal := 10000;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS guard_profile_insert ON public.profiles;
+CREATE TRIGGER guard_profile_insert
+BEFORE INSERT ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.guard_profile_insert();
+
+-- 6. Storage: keep public_data PRIVATE and deny clients entirely.
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('public_data', 'public_data', true)
-ON CONFLICT (id) DO UPDATE SET public = true;
+VALUES ('public_data', 'public_data', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
+
+DROP POLICY IF EXISTS "public_data_deny_clients" ON storage.objects;
+CREATE POLICY "public_data_deny_clients"
+ON storage.objects AS RESTRICTIVE
+FOR ALL TO anon, authenticated
+USING (bucket_id <> 'public_data')
+WITH CHECK (bucket_id <> 'public_data');

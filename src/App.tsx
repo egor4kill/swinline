@@ -54,7 +54,7 @@ import {
   type UserAccount
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
-import { supabase, USERS_REGISTRY_URL, ADMIN_USERNAME } from './supabase'
+import { supabase, ADMIN_USERNAME } from './supabase'
 import ceoPhoto from './assets/ceo.jpg'
 
 const KEY_STATE = 'svinline.v3.state'
@@ -431,48 +431,7 @@ export default function App() {
         return
       }
     } catch (e) {
-      console.warn('Failed to fetch from profiles table, trying storage:', e)
-    }
-
-    // Fallback to public storage registry
-    try {
-      const res = await fetch(`${USERS_REGISTRY_URL}?v=${Date.now()}`)
-      if (res.ok) {
-        const remoteUsers = await res.json()
-        if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
-          setAccounts(prev => {
-            const combined: UserAccount[] = remoteUsers.map(u => {
-              const isOwner = (u.username || '').toLowerCase() === ADMIN_USERNAME.toLowerCase()
-              const existing = prev.find(a => a.id === u.id || a.username.toLowerCase() === (u.username || '').toLowerCase())
-              return {
-                id: u.id,
-                username: u.username,
-                email: u.email,
-                role: (isOwner ? 'admin' : 'user') as 'admin' | 'user',
-                avatar: getTwitchAvatar(u.username, u.avatar),
-                title: isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)',
-                bal: existing ? existing.bal : (u.bal ?? 10000),
-                bets: existing ? existing.bets : (u.bets ?? []),
-                log: existing ? existing.log : (u.log ?? [{ t: u.createdAt || Date.now(), x: 'Вход через Twitch', d: 10000 }]),
-                createdAt: u.createdAt || Date.now(),
-                isBlocked: existing ? existing.isBlocked : false,
-                stats: existing ? existing.stats : (u.stats ?? { totalBets: 0, wonBets: 0, lostBets: 0, totalProfit: 0 }),
-                achievements: isOwner ? ['Владелец Платформы', 'Создатель Линии'] : (u.achievements ?? ['Игрок Twitch'])
-              }
-            })
-
-            prev.forEach(p => {
-              if (!combined.some(c => c.username.toLowerCase() === p.username.toLowerCase())) {
-                combined.push(p)
-              }
-            })
-
-            return purgeEmptyAccounts(combined)
-          })
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to fetch remote users registry fallback:', e)
+      console.warn('Failed to fetch profiles from Supabase:', e)
     }
   }, [])
 
