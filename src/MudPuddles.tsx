@@ -12,6 +12,8 @@ const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 
 
 // Стили поля здесь же, чтобы заменить нужно было один файл
 const TILE_CSS = `
+.mp-grid{width:100%;max-width:380px;grid-template-columns:repeat(5,minmax(0,1fr))}
+.mp-grid .mp-tile{min-width:0;overflow:hidden}
 .mp-grid .mp-tile{background:linear-gradient(145deg,#3a3d43,#2a2c31);border:1px solid #62666e;box-shadow:inset 0 1px 0 #ffffff1a,0 3px 0 #0b0b0c}
 .mp-grid .mp-tile:empty::after{content:'?';color:#a3a9b3;font-weight:800;font-size:clamp(16px,5vw,24px)}
 .mp-grid .mp-tile:hover:not(:disabled){background:linear-gradient(145deg,#4a3320,#33261a);border-color:#ff6a00}
@@ -95,7 +97,7 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
   const st = round.current?.stake ?? 0
 
   return (
-    <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center' }}>
+    <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
       <style>{TILE_CSS}</style>
       <span className="wl-banner-tag">ИГРЫ 24/7 • МИНЫ</span>
       <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>ГРЯЗЕВЫЕ ЛУЖИ 🐷</h2>
