@@ -70,6 +70,7 @@ const freshState = () => ({
 })
 
 import Plinko from './Plinko'
+import MudPuddles from './MudPuddles'
 function loadJSON<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -246,7 +247,7 @@ export default function App() {
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
-  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko'>('crash')
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles'>('crash')
   const [selectedSport, setSelectedSport] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
@@ -912,6 +913,25 @@ export default function App() {
       setWonSectorIdx(winningIdx)
       setRouletteResult(sector.mul === 0 ? `Увы! Выпало ${sector.label} (${sector.title}) 🐽` : `🎉 Ура! Выпало ${sector.label} — ${sector.title} (+${fmt(win)})!`)
     }, 4200)
+  }
+
+  // Грязевые лужи: ставка списывается на старте раунда, выплата при «Забрать»
+  const puddlesBet = (stake: number) => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return false }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return false }
+    if (S.bal < stake) { notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽».'); return false }
+    mutate(s => {
+      s.bal = r2(s.bal - stake)
+      s.log.unshift({ t: Date.now(), x: 'Ставка в «Грязевые лужи»', d: -stake })
+    })
+    return true
+  }
+  const puddlesWin = (win: number, label: string) => {
+    if (win <= 0) return
+    mutate(s => {
+      s.bal = r2(s.bal + win)
+      s.log.unshift({ t: Date.now(), x: `Выигрыш в «Грязевые лужи» (${label})`, d: win })
+    })
   }
 
   // Пяточок-Плинко: ставка списывается при броске, выигрыш приходит, когда шарик упал в ячейку
@@ -1863,6 +1883,12 @@ export default function App() {
                 >
                   <span>🐷 Пяточок-Плинко</span>
                 </button>
+                <button
+                  className={`wl-round-btn ${gamesTab === 'puddles' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('puddles')}
+                >
+                  <span>🟤 Грязевые лужи</span>
+                </button>
               </div>
 
               {/* SHARED MULTIPLAYER CRASH GAME ARENA */}
@@ -2209,6 +2235,7 @@ export default function App() {
 
               {/* ROULETTE (КОРЫТО ФОРТУНЫ) */}
               {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} onWin={plinkoWin} />}
+              {gamesTab === 'puddles' && <MudPuddles bal={S.bal} onBet={puddlesBet} onWin={puddlesWin} />}
 
               {gamesTab === 'roulette' && (
                 <div className="wl-banner-card highlight" style={{ padding: '28px 24px 34px', textAlign: 'center' }}>
