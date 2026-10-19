@@ -96,15 +96,6 @@ const ROULETTE_SECTORS = [
   { mul: 10.0,label: 'x10',  title: 'ДЖЕКПОТ 👑', color: '#fbbf24', bg: '#3a2804', emoji: '👑' }
 ]
 
-const CRASH_COMMUNITY_PLAYERS = [
-  { name: 'lowrensy', avatar: 'https://static-cdn.jtvnw.net/jtv_user_pictures/6d72a4ce-1517-408b-8d79-2490b31fa178-profile_image-300x300.png' },
-  { name: 'PorkMaster', avatar: '🐗' },
-  { name: 'CyberKaban', avatar: '🕶️' },
-  { name: 'HamsterPro', avatar: '⚡' },
-  { name: 'OinkBoy', avatar: '🐷' },
-  { name: 'LuckySvin', avatar: '🚀' },
-  { name: 'BaconGod', avatar: '🥓' }
-]
 
 const getTwitchAvatar = (username?: string, currentAvatar?: string | null): string => {
   if (currentAvatar && (currentAvatar.startsWith('http://') || currentAvatar.startsWith('https://'))) {
@@ -277,15 +268,12 @@ export default function App() {
   const [msg, setMsg] = useState('')
   const busy = useRef(false)
 
-  // 5. Esports stream simulation
+  // 5. Esports stream
   const [streamPlaying, setStreamPlaying] = useState(true)
   const [chatMessages, setChatMessages] = useState<string[]>([
-    '🔥 SvinPro: ХРЯК С Deagle ПРОСТО МОНСТР!!',
-    '🐷 BaconKing: Ставил 5000 SV₽ на FURIA, не подведите!',
-    '🎮 CyberKaban: Эко-раунд от BetBoom, сейчас будет камбэк',
-    '⭐ LuckyPig: Коэффициент 1.42 железобетон',
-    '⚡ Porky_99: Где трансляция? А, вот пошла!'
+    'Чат матча активен. Соблюдайте правила общения!'
   ])
+  const [esportsChatInput, setEsportsChatInput] = useState('')
 
   // 6. Games 24/7 Roulette State
   const [spinning, setSpinning] = useState(false)
@@ -607,24 +595,6 @@ export default function App() {
     return () => clearTimeout(t)
   }, [msg])
 
-  // Esports live chat interval
-  useEffect(() => {
-    if (view !== 'esports') return
-    const fakeChats = [
-      'Хряки давят на B-пленте!',
-      'КТО ВЫИГРАЕТ 2-Ю КАРТУ???',
-      'SVINLINE ДЕЛАЕТ РАЗНИЦУ',
-      'Кабан 1 в 3 затащил!',
-      'Коэффициент уже 1.85, успевайте',
-      'Свинья на AWP лучший снайпер турнира'
-    ]
-    const interval = setInterval(() => {
-      const randomMsg = fakeChats[Math.floor(Math.random() * fakeChats.length)]
-      const user = ['PorkMaster', 'OinkBoy', 'BaconGod', 'HamsterPro', 'PiggyBoss'][Math.floor(Math.random() * 5)]
-      setChatMessages(prev => [...prev.slice(-12), `${user}: ${randomMsg}`])
-    }, 4200)
-    return () => clearInterval(interval)
-  }, [view])
 
   const notify = (m: string) => setMsg(m)
 
@@ -777,21 +747,8 @@ export default function App() {
               crashStartTimeRef.current = Date.now()
               setCrashMultiplier(1.00)
 
-              // Initialize community live bets
-              setLiveCrashBets(prevBets => {
-                const userBet = prevBets.find(b => b.isUser)
-                const botCount = 3 + Math.floor(Math.random() * 3)
-                const shuffled = [...CRASH_COMMUNITY_PLAYERS].sort(() => Math.random() - 0.5).slice(0, botCount)
-                const bots = shuffled.map(p => ({
-                  id: 'bot_' + p.name,
-                  name: p.name,
-                  avatar: p.avatar,
-                  stake: [100, 200, 500, 1000, 2500][Math.floor(Math.random() * 5)],
-                  targetMul: r2(1.2 + Math.random() * 3.8),
-                  isUser: false
-                }))
-                return userBet ? [userBet, ...bots] : bots
-              })
+              // Keep real user bets
+              setLiveCrashBets(prevBets => prevBets.filter(b => b.isUser))
 
               return 0
             }
@@ -827,13 +784,6 @@ export default function App() {
           } else {
             setCrashMultiplier(currentMul)
 
-            // Update bot cashouts in real-time
-            setLiveCrashBets(prev => prev.map(b => {
-              if (!b.isUser && !b.cashedOutMul && b.targetMul && currentMul >= b.targetMul) {
-                return { ...b, cashedOutMul: b.targetMul, winAmount: r2(b.stake * b.targetMul) }
-              }
-              return b
-            }))
 
             // Check auto-cashout for real user
             setMyCrashBet(currentBet => {
@@ -1544,7 +1494,7 @@ export default function App() {
                     </span>
                     <span>{sport.name}</span>
                   </div>
-                  <span className="wl-badge-count">{sport.count}</span>
+                  <span className="wl-badge-count">{allEvents.filter(e => e.cat === sport.id).length}</span>
                 </button>
               )
             })}
@@ -1559,12 +1509,12 @@ export default function App() {
               {/* Banners */}
               <div className="wl-banners-slider">
                 <div className="wl-banner-card highlight">
-                  <span className="wl-banner-tag">СВИНОБЕТ • BET RACE</span>
+                  <span className="wl-banner-tag">СТАРТОВЫЙ БОНУС</span>
                   <div className="wl-banner-title">
-                    БОНУС <span>0 ₽</span> — ЗАТО СВИНЬЯ ДОВОЛЬНА
+                    <span>10 000 SV₽</span> ДЛЯ НОВЫХ ИГРОКОВ
                   </div>
                   <div className="wl-banner-desc">
-                    Широкая линия эксклюзивных событий и турниров. Рекордные коэффициенты до 99.00!
+                    Моментальное зачисление на баланс при входе. Делайте ставки на любые спортивные и киберспортивные матчи!
                   </div>
                   <div className="wl-banner-mascot">
                     <PigLogo />
@@ -1572,22 +1522,22 @@ export default function App() {
                 </div>
 
                 <div className="wl-banner-card">
-                  <span className="wl-banner-tag" style={{ background: '#3b82f6', color: '#fff' }}>ХРЮКЭШБЭК</span>
+                  <span className="wl-banner-tag" style={{ background: '#3b82f6', color: '#fff' }}>ХРЯК-КРЭШ</span>
                   <div className="wl-banner-title" style={{ fontSize: 16 }}>
-                    Возврат 0% со всех проигрышей
+                    Мультиплеер в реальном времени
                   </div>
                   <div className="wl-banner-desc">
-                    Честно, открыто, без мелкого шрифта. Начисляется моментально в корыто.
+                    Следите за полетом ракеты и забирайте выигрыш с коэффициентами до x25.0!
                   </div>
                 </div>
 
                 <div className="wl-banner-card">
-                  <span className="wl-banner-tag" style={{ background: '#a855f7', color: '#fff' }}>VIP-ХРЯК</span>
+                  <span className="wl-banner-tag" style={{ background: '#a855f7', color: '#fff' }}>КОРЫТО ФОРТУНЫ</span>
                   <div className="wl-banner-title" style={{ fontSize: 16 }}>
-                    Премиум статус для избранных
+                    Колесо множителей
                   </div>
                   <div className="wl-banner-desc">
-                    100% уверенности, 0% понимания правил. Доступ к закрытым лужам.
+                    Вращайте колесо и получайте моментальные призы с джекпотом x10.0!
                   </div>
                 </div>
               </div>
@@ -2448,7 +2398,7 @@ export default function App() {
                   <div className="wl-stream-hud">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '4px 10px', borderRadius: 999 }}>
                       <div className="live-badge-dot" />
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>LIVE 1080p • 42 819 зрителей</span>
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>LIVE 1080p • Прямой эфир</span>
                     </div>
                     <div style={{ background: 'rgba(0,0,0,0.6)', padding: '4px 10px', borderRadius: 999, fontSize: 12 }}>
                       Карта: Dust 2
@@ -2518,13 +2468,43 @@ export default function App() {
                     <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                       <MessageSquare size={14} /> Чат матча
                     </div>
-                    <div style={{ maxHeight: 130, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-                      {chatMessages.map((msg, i) => (
-                        <div key={i} style={{ background: '#1a1f2b', padding: '4px 8px', borderRadius: 6, color: '#e2e8f0' }}>
-                          {msg}
-                        </div>
-                      ))}
+                    <div style={{ maxHeight: 130, minHeight: 70, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, marginBottom: 8 }}>
+                      {chatMessages.length === 0 ? (
+                        <div style={{ color: 'var(--tx-muted)', textAlign: 'center', padding: '15px 0' }}>Сообщений пока нет. Будьте первыми!</div>
+                      ) : (
+                        chatMessages.map((msg, i) => (
+                          <div key={i} style={{ background: '#1a1f2b', padding: '4px 8px', borderRadius: 6, color: '#e2e8f0' }}>
+                            {msg}
+                          </div>
+                        ))
+                      )}
                     </div>
+                    <form
+                      onSubmit={e => {
+                        e.preventDefault()
+                        if (!esportsChatInput.trim()) return
+                        const sender = currentUser?.username || 'Гость'
+                        setChatMessages(prev => [...prev.slice(-30), `${sender}: ${esportsChatInput.trim()}`])
+                        setEsportsChatInput('')
+                      }}
+                      style={{ display: 'flex', gap: 6 }}
+                    >
+                      <input
+                        type="text"
+                        className="wl-search-input"
+                        placeholder="Написать в чат..."
+                        value={esportsChatInput}
+                        onChange={e => setEsportsChatInput(e.target.value)}
+                        style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
+                      />
+                      <button
+                        type="submit"
+                        className="wl-btn-orange"
+                        style={{ padding: '4px 12px', fontSize: 12, height: 32, borderRadius: 8 }}
+                      >
+                        Отправить
+                      </button>
+                    </form>
                   </div>
                 </div>
               </div>
@@ -2647,26 +2627,37 @@ export default function App() {
                 Результаты и архив событий
               </h2>
               <div className="wl-table-container">
-                {allEvents.map(ev => {
-                  const state = S.st[ev.id]
-                  return (
-                    <div key={ev.id} style={{ padding: 14, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev.league}</div>
-                        <div style={{ fontWeight: 700, fontSize: 15 }}>{ev.title}</div>
-                        <div style={{ fontSize: 12, color: 'var(--tx-secondary)' }}>{ev.desc}</div>
+                {(() => {
+                  const finishedEvents = allEvents.filter(ev => S.st[ev.id]?.s === 'done' || S.st[ev.id]?.s === 'cancelled')
+                  if (finishedEvents.length === 0) {
+                    return (
+                      <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-muted)' }}>
+                        Завершённых событий пока нет. Итоги матчей появятся здесь после их расчёта администратором.
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontFamily: 'var(--font-d)', fontWeight: 800, fontSize: 18, color: 'var(--org)' }}>
-                          {ev.score || 'Завершено'}
+                    )
+                  }
+                  return finishedEvents.map(ev => {
+                    const state = S.st[ev.id]
+                    const isCancelled = state?.s === 'cancelled'
+                    return (
+                      <div key={ev.id} style={{ padding: 14, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev.league}</div>
+                          <div style={{ fontWeight: 700, fontSize: 15 }}>{ev.title}</div>
+                          <div style={{ fontSize: 12, color: 'var(--tx-secondary)' }}>{ev.desc}</div>
                         </div>
-                        <div style={{ fontSize: 11, color: state?.s === 'done' ? 'var(--green)' : 'var(--tx-muted)' }}>
-                          {state?.s === 'done' ? `Победил исход: ${ev.out[state.w!]?.[0]}` : 'Итог зафиксирован'}
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontFamily: 'var(--font-d)', fontWeight: 800, fontSize: 18, color: 'var(--org)' }}>
+                            {ev.score || (isCancelled ? 'Отменён' : 'Завершено')}
+                          </div>
+                          <div style={{ fontSize: 11, color: isCancelled ? '#ef4444' : 'var(--green)' }}>
+                            {isCancelled ? 'Матч отменён (возврат ставок)' : state?.w !== undefined ? `Победил исход: ${ev.out[state.w]?.[0]}` : 'Итог зафиксирован'}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })
+                })()}
               </div>
             </div>
           )}
@@ -2761,8 +2752,11 @@ export default function App() {
 
         <button
           className="wl-floating-chat-btn"
-          onClick={() => notify('💬 Поддержка: «Свинья сейчас обедает, вернётся через 5 минут!»')}
-          title="Онлайн-поддержка"
+          onClick={() => {
+            notify('💬 Поддержка: Связь с администратором в Telegram: @egor4kill')
+            window.open('https://t.me/egor4kill', '_blank')
+          }}
+          title="Служба поддержки (@egor4kill)"
         >
           <MessageSquare size={20} />
         </button>
@@ -3018,24 +3012,43 @@ export default function App() {
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8 }}>
                   СТАТИСТИКА ИГРОКА:
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, textAlign: 'center' }}>
-                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Ставок</div>
-                    <div style={{ fontSize: 16, fontWeight: 800 }}>{currentUser.stats.totalBets + S.bets.length}</div>
-                  </div>
-                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Винрейт</div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--green)' }}>67%</div>
-                  </div>
-                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Любимый спорт</div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>Свин-Лига</div>
-                  </div>
-                  <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Статус</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--org)' }}>VIP</div>
-                  </div>
-                </div>
+                {(() => {
+                  const allUserBets = (currentUser.bets || []).concat(S.bets || [])
+                  const settled = allUserBets.filter((b: any) => b.state === 'won' || b.state === 'lost')
+                  const won = settled.filter((b: any) => b.state === 'won').length
+                  const winrate = settled.length > 0 ? `${Math.round((won / settled.length) * 100)}%` : '0%'
+
+                  const sportCounts: Record<string, number> = {}
+                  allUserBets.forEach((b: any) => {
+                    const key = b.league || 'События'
+                    sportCounts[key] = (sportCounts[key] || 0) + 1
+                  })
+                  const topSport = Object.entries(sportCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—'
+                  const userStatus = currentUser.role === 'admin' ? 'Админ' : S.bal >= 50000 ? 'VIP' : 'Игрок'
+
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, textAlign: 'center' }}>
+                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Ставок</div>
+                        <div style={{ fontSize: 16, fontWeight: 800 }}>{allUserBets.length}</div>
+                      </div>
+                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Винрейт</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--green)' }}>{winrate}</div>
+                      </div>
+                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Любимый спорт</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={topSport}>
+                          {topSport}
+                        </div>
+                      </div>
+                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
+                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Статус</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--org)' }}>{userStatus}</div>
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
             </div>
           </div>

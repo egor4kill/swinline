@@ -59,14 +59,14 @@ export const CATS = [
 ]
 
 export const SPORT_CATEGORIES = [
-  { id: 0, name: 'Свин-Лига РПЛ', count: 154, icon: 'Trophy' },
-  { id: 5, name: 'Скоростное поедание', count: 27, icon: 'Utensils' },
-  { id: 4, name: 'Кибер-Хряк (CS & Dota)', count: 77, icon: 'Gamepad2' },
-  { id: 1, name: 'Интернет и мемы', count: 26, icon: 'Flame' },
-  { id: 2, name: 'Жизнь SVINLINE', count: 14, icon: 'Building' },
-  { id: 3, name: 'Абсолютный абсурд', count: 42, icon: 'Sparkles' },
-  { id: 6, name: 'Хрюк-MMA', count: 18, icon: 'Swords' },
-  { id: 7, name: 'Свинобол 24/7', count: 31, icon: 'Activity' }
+  { id: 0, name: 'Свин-Лига РПЛ', count: 0, icon: 'Trophy' },
+  { id: 5, name: 'Скоростное поедание', count: 0, icon: 'Utensils' },
+  { id: 4, name: 'Кибер-Хряк (CS & Dota)', count: 0, icon: 'Gamepad2' },
+  { id: 1, name: 'Интернет и мемы', count: 0, icon: 'Flame' },
+  { id: 2, name: 'Жизнь SVINLINE', count: 0, icon: 'Building' },
+  { id: 3, name: 'Абсолютный абсурд', count: 0, icon: 'Sparkles' },
+  { id: 6, name: 'Хрюк-MMA', count: 0, icon: 'Swords' },
+  { id: 7, name: 'Свинобол 24/7', count: 0, icon: 'Activity' }
 ]
 
 export const EVENTS: Ev[] = []
@@ -74,7 +74,7 @@ export const EVENTS: Ev[] = []
 
 export const TOURNAMENT_PILLS = [
   { name: 'ТОП-СВИН', tag: 'Хит', color: 'orange' },
-  { name: 'PGL BUCHAREST 2027', tag: 'CS2', color: 'red' },
+  { name: 'PGL CS2 MAJOR', tag: 'CS2', color: 'red' },
   { name: 'СВИН-ЛИГА РПЛ', tag: 'Футбол', color: 'blue' },
   { name: 'THUNDERPIG CUP', tag: 'Dota 2', color: 'purple' },
   { name: 'BURGER CHAMPIONS', tag: 'Фуд', color: 'yellow' },
@@ -83,20 +83,20 @@ export const TOURNAMENT_PILLS = [
 
 export const PROMOS = [
   [
-    'БОНУС 0 ₽ — ЗАТО СВИНЬЯ ДОВОЛЬНА',
-    'Эксклюзивный приветственный бонус SVINLINE. Начисляется моментально каждому новому игроку без депозита и условий по отыгрышу.'
+    'СТАРТОВЫЙ БОНУС 10 000 SV₽',
+    'Эксклюзивный приветственный бонус SVINLINE. Моментально начисляется на баланс каждому новому участнику при регистрации.'
   ],
   [
-    'ХРЮКЭШБЭК 0%',
-    'Гарантированная программа лояльности SVINLINE. Максимальная честность и прозрачность расчетов для каждого пользователя платформы.'
+    'МУЛЬТИПЛЕЕР ХРЯК-КРЭШ',
+    'Захватывающий режим полета ракеты в реальном времени с выводом множителей до x25.0 и общей сеткой раундов.'
   ],
   [
-    'VIP-ХРЯК: СТАТУС ПРЕМИУМ',
-    'Персональный менеджер-маскот, доступ в закрытую ложу и высший приоритет в поддержке.'
+    'КОРЫТО ФОРТУНЫ',
+    'Вращайте колесо множителей и получайте мгновенные выигрыши с максимальным кушем x10.0.'
   ],
   [
     'БЕЗОПАСНЫЙ СВИНОБЕТ',
-    'Играйте исключительно на платформенную валюту SV₽. Максимальный контроль банкролла, моментальные выплаты и чистый азарт.'
+    'Играйте на платформенную валюту SV₽. Честный контроль банкролла, прозрачная история ставок и мгновенные расчеты.'
   ]
 ]
 
