@@ -69,6 +69,7 @@ const freshState = () => ({
   st: {} as Record<string, { s: string; w?: number }>
 })
 
+import Plinko from './Plinko'
 function loadJSON<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -245,7 +246,7 @@ export default function App() {
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
-  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette'>('crash')
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko'>('crash')
   const [selectedSport, setSelectedSport] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
@@ -911,6 +912,25 @@ export default function App() {
       setWonSectorIdx(winningIdx)
       setRouletteResult(sector.mul === 0 ? `Увы! Выпало ${sector.label} (${sector.title}) 🐽` : `🎉 Ура! Выпало ${sector.label} — ${sector.title} (+${fmt(win)})!`)
     }, 4200)
+  }
+
+  // Пяточок-Плинко: ставка списывается при броске, выигрыш приходит, когда шарик упал в ячейку
+  const plinkoBet = (stake: number) => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return false }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return false }
+    if (S.bal < stake) { notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽».'); return false }
+    mutate(s => {
+      s.bal = r2(s.bal - stake)
+      s.log.unshift({ t: Date.now(), x: 'Ставка в «Пяточок-Плинко»', d: -stake })
+    })
+    return true
+  }
+  const plinkoWin = (win: number, label: string) => {
+    if (win <= 0) return
+    mutate(s => {
+      s.bal = r2(s.bal + win)
+      s.log.unshift({ t: Date.now(), x: `Выигрыш в «Пяточок-Плинко» (${label})`, d: win })
+    })
   }
 
   // Quick Templates for 1-click match creation
@@ -1837,6 +1857,12 @@ export default function App() {
                   <Sparkles size={16} />
                   <span>Корыто Фортуны</span>
                 </button>
+                <button
+                  className={`wl-round-btn ${gamesTab === 'plinko' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('plinko')}
+                >
+                  <span>🐷 Пяточок-Плинко</span>
+                </button>
               </div>
 
               {/* SHARED MULTIPLAYER CRASH GAME ARENA */}
@@ -2182,6 +2208,8 @@ export default function App() {
               })()}
 
               {/* ROULETTE (КОРЫТО ФОРТУНЫ) */}
+              {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} onWin={plinkoWin} />}
+
               {gamesTab === 'roulette' && (
                 <div className="wl-banner-card highlight" style={{ padding: '28px 24px 34px', textAlign: 'center' }}>
                   <span className="wl-banner-tag">ИГРЫ 24/7 • БЫСТРЫЕ ИСХОДЫ</span>

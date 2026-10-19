@@ -1699,3 +1699,8 @@ button:focus-visible, input:focus-visible {
   100% { transform: scale(1); opacity: 1; }
 }
 
+
+/* Пяточок-Плинко */
+.plinko-hit rect{animation:plinkoHit .6s ease}
+@keyframes plinkoHit{40%{transform:translateY(-6px);fill:#5a2c0a}}
+@media(prefers-reduced-motion:reduce){.plinko-hit rect{animation:none}}
