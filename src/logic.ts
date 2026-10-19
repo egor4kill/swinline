@@ -15,8 +15,19 @@ export function validateStake(stake: number, balance: number) {
   return ''
 }
 
+export const DEFAULT_TEST_EVENTS: Ev[] = [
+  {
+    id: 'e1',
+    cat: 0,
+    league: 'Тестовая Лига',
+    title: 'Тестовый матч',
+    desc: 'Тест',
+    out: [['П1', 2.0], ['X', 3.0], ['П2', 2.0]]
+  }
+]
+
 export function placeBet(s: any, evId: string, i: number, stake: number, eventsList: Ev[] = EVENTS) {
-  const ev = eventsList.find(e => e.id === evId) || EVENTS.find(e => e.id === evId)
+  const ev = eventsList.find(e => e.id === evId) || EVENTS.find(e => e.id === evId) || DEFAULT_TEST_EVENTS.find(e => e.id === evId)
   if (!ev) return { err: 'Событие не найдено' }
   if ((s.st[evId] || { s: 'open' }).s !== 'open') return { err: 'Приём ставок закрыт' }
   const e = validateStake(stake, s.bal)
@@ -36,7 +47,7 @@ export function placeBet(s: any, evId: string, i: number, stake: number, eventsL
 }
 
 export function settleEvent(s: any, evId: string, win: number, eventsList: Ev[] = EVENTS) {
-  const ev = eventsList.find(e => e.id === evId) || EVENTS.find(e => e.id === evId)
+  const ev = eventsList.find(e => e.id === evId) || EVENTS.find(e => e.id === evId) || DEFAULT_TEST_EVENTS.find(e => e.id === evId)
   s.st[evId] = { s: 'done', w: win }
   s.bets.forEach((b: any) => {
     if (b.ev !== evId || b.state !== 'open') return
@@ -53,7 +64,7 @@ export function settleEvent(s: any, evId: string, win: number, eventsList: Ev[] 
 }
 
 export function cancelEvent(s: any, evId: string, eventsList: Ev[] = EVENTS) {
-  const ev = eventsList.find(e => e.id === evId) || EVENTS.find(e => e.id === evId)
+  const ev = eventsList.find(e => e.id === evId) || EVENTS.find(e => e.id === evId) || DEFAULT_TEST_EVENTS.find(e => e.id === evId)
   s.st[evId] = { s: 'cancel' }
   s.bets.forEach((b: any) => {
     if (b.ev !== evId || b.state !== 'open') return

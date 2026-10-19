@@ -32,7 +32,12 @@ import {
   Check,
   TrendingUp,
   AlertTriangle,
-  Users
+  Users,
+  Trash2,
+  Edit3,
+  Lock,
+  Unlock,
+  RotateCcw
 } from 'lucide-react'
 import {
   CATS,
@@ -228,13 +233,24 @@ export default function App() {
 
   const isAdmin = currentUser?.role === 'admin'
 
-  // 2. Custom Events added by Admin
-  const [customEvents, setCustomEvents] = useState<Ev[]>(() => loadJSON(KEY_EVENTS, []))
+  // 2. Events managed by Admin (starting clean / without old mock events)
+  const [customEvents, setCustomEvents] = useState<Ev[]>(() => {
+    const raw = loadJSON<Ev[]>(KEY_EVENTS, [])
+    return (raw || []).filter(e => !/^e\d+$/.test(e.id))
+  })
 
-  // Merge default events with admin custom events
+  // All events in line are the managed custom events
   const allEvents = useMemo(() => {
-    return [...customEvents, ...EVENTS]
+    return customEvents
   }, [customEvents])
+
+  // Modals for safe management & editing
+  const [deleteEventModal, setDeleteEventModal] = useState<Ev | null>(null)
+  const [editEventModal, setEditEventModal] = useState<Ev | null>(null)
+  const [editScore, setEditScore] = useState('0 : 0')
+  const [editLiveTime, setEditLiveTime] = useState('Скоро')
+  const [editIsLive, setEditIsLive] = useState(false)
+  const [createMatchModalOpen, setCreateMatchModalOpen] = useState(false)
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
@@ -246,7 +262,13 @@ export default function App() {
   const [expandedMarkets, setExpandedMarkets] = useState<Record<string, boolean>>({})
 
   // 4. Betting & State
-  const [S, setS] = useState<any>(() => loadJSON(KEY_STATE, freshState()))
+  const [S, setS] = useState<any>(() => {
+    const raw = loadJSON(KEY_STATE, freshState())
+    if (raw && raw.bets) {
+      raw.bets = raw.bets.filter((b: any) => !/^e\d+$/.test(b.ev))
+    }
+    return raw
+  })
   const [selectedBet, setSelectedBet] = useState<{ evId: string; outcomeIdx: number; outcomeTitle: string; odds: number } | null>(null)
   const [stake, setStake] = useState('500')
   const [slipOpen, setSlipOpen] = useState(false)
@@ -295,10 +317,13 @@ export default function App() {
   const [newMatchCat, setNewMatchCat] = useState(0)
   const [newMatchTeam1, setNewMatchTeam1] = useState('')
   const [newMatchTeam2, setNewMatchTeam2] = useState('')
-  const [newMatchOdds1, setNewMatchOdds1] = useState('1.90')
+  const [newMatchOdds1, setNewMatchOdds1] = useState('1.95')
   const [newMatchOddsX, setNewMatchOddsX] = useState('3.20')
-  const [newMatchOdds2, setNewMatchOdds2] = useState('2.40')
+  const [newMatchOdds2, setNewMatchOdds2] = useState('2.35')
   const [newMatchIsLive, setNewMatchIsLive] = useState(false)
+  const [newMatchScore, setNewMatchScore] = useState('0 : 0')
+  const [newMatchTime, setNewMatchTime] = useState('Скоро')
+  const [newMatchDesc, setNewMatchDesc] = useState('')
 
   // Sync to local storage
   useEffect(() => {
@@ -699,7 +724,7 @@ export default function App() {
 
     busy.current = true
     const next = structuredClone(S)
-    const res = placeBet(next, selectedBet.evId, selectedBet.outcomeIdx, v)
+    const res = placeBet(next, selectedBet.evId, selectedBet.outcomeIdx, v, allEvents)
 
     if (res.err) {
       busy.current = false
@@ -979,28 +1004,86 @@ export default function App() {
     }, 4200)
   }
 
+  // Quick Templates for 1-click match creation
+  const applyTemplate = (type: 'football' | 'cs2' | 'mma' | 'burger') => {
+    if (type === 'football') {
+      setNewMatchTitle('Спартак Хряк vs Зенит Боровы')
+      setNewMatchCat(0)
+      setNewMatchLeague('Свин-Лига РПЛ')
+      setNewMatchTeam1('Спартак Хряк')
+      setNewMatchTeam2('Зенит Боровы')
+      setNewMatchOdds1('2.15')
+      setNewMatchOddsX('3.30')
+      setNewMatchOdds2('2.85')
+      setNewMatchIsLive(false)
+      setNewMatchScore('0 : 0')
+      setNewMatchTime('Сегодня 20:00')
+      setNewMatchDesc('Центральный матч тура грязевой Свин-Лиги.')
+    } else if (type === 'cs2') {
+      setNewMatchTitle('NAVI Pigs vs Team Spirit Hogs')
+      setNewMatchCat(4)
+      setNewMatchLeague('ThunderPig CS2 Major | Финал')
+      setNewMatchTeam1('NAVI Pigs')
+      setNewMatchTeam2('Team Spirit Hogs')
+      setNewMatchOdds1('1.72')
+      setNewMatchOddsX('5.50')
+      setNewMatchOdds2('2.15')
+      setNewMatchIsLive(true)
+      setNewMatchScore('11 : 9')
+      setNewMatchTime('Карта 2 • Mirage')
+      setNewMatchDesc('Гранд-финал мажора в прямом эфире!')
+    } else if (type === 'mma') {
+      setNewMatchTitle('Махачев Секач vs Царукян Боров')
+      setNewMatchCat(6)
+      setNewMatchLeague('Хрюк-UFC 310 | Главный бой')
+      setNewMatchTeam1('Махачев Секач')
+      setNewMatchTeam2('Царукян Боров')
+      setNewMatchOdds1('1.55')
+      setNewMatchOddsX('12.00')
+      setNewMatchOdds2('2.55')
+      setNewMatchIsLive(false)
+      setNewMatchScore('0 : 0')
+      setNewMatchTime('Суббота 23:30')
+      setNewMatchDesc('Титульный поединок за пояс в соломе.')
+    } else if (type === 'burger') {
+      setNewMatchTitle('Хряк-Чемпион vs Гигантский Бургер 2кг')
+      setNewMatchCat(5)
+      setNewMatchLeague('Burger Cup | Скоростное поедание')
+      setNewMatchTeam1('Хряк-Чемпион')
+      setNewMatchTeam2('Бургер-Монстр')
+      setNewMatchOdds1('1.85')
+      setNewMatchOddsX('3.50')
+      setNewMatchOdds2('1.95')
+      setNewMatchIsLive(true)
+      setNewMatchScore('1 : 0')
+      setNewMatchTime('Финал 30 сек')
+      setNewMatchDesc('Прямой эфир со столовой SVINLINE!')
+    }
+    notify('Шаблон применён! Можете отредактировать параметры или сразу опубликовать 🚀')
+  }
+
   // Admin: Create New Match
   const handleCreateMatch = (e: FormEvent) => {
     e.preventDefault()
     if (!newMatchTitle.trim()) {
-      notify('Введите название матча')
+      notify('Введите название матча!')
       return
     }
-    const o1 = parseFloat(newMatchOdds1) || 1.90
-    const ox = parseFloat(newMatchOddsX) || 3.10
-    const o2 = parseFloat(newMatchOdds2) || 2.40
+    const o1 = parseFloat(newMatchOdds1) || 1.95
+    const ox = parseFloat(newMatchOddsX) || 3.20
+    const o2 = parseFloat(newMatchOdds2) || 2.35
 
     const newEv: Ev = {
       id: 'custom_' + Date.now(),
       cat: newMatchCat,
-      league: newMatchLeague || 'Свин-Лига РПЛ | Турнир',
-      title: newMatchTitle,
-      team1: newMatchTeam1 || 'Команда 1',
-      team2: newMatchTeam2 || 'Команда 2',
-      score: '0 : 0',
+      league: newMatchLeague.trim() || 'Свин-Лига РПЛ',
+      title: newMatchTitle.trim(),
+      team1: newMatchTeam1.trim() || 'Команда 1',
+      team2: newMatchTeam2.trim() || 'Команда 2',
+      score: newMatchScore.trim() || '0 : 0',
       isLive: newMatchIsLive,
-      liveTime: newMatchIsLive ? '1-й тайм 1\'' : 'Скоро',
-      desc: 'Матч добавлен главным администратором линии SVINLINE.',
+      liveTime: newMatchIsLive ? (newMatchTime.trim() || '1-й тайм 1\'') : (newMatchTime.trim() || 'Скоро'),
+      desc: newMatchDesc.trim() || 'Матч добавлен администратором SVINLINE.',
       out: [
         ['П1', o1],
         ['Ничья X', ox],
@@ -1016,8 +1099,82 @@ export default function App() {
     setNewMatchTitle('')
     setNewMatchTeam1('')
     setNewMatchTeam2('')
+    setNewMatchDesc('')
+    setCreateMatchModalOpen(false)
     setAdminModalOpen(false)
-    notify(`Матч «${newEv.title}» успешно опубликован в линию!`)
+    notify(`Матч «${newEv.title}» успешно опубликован в линию! 🚀`)
+  }
+
+  // Safe Deletion with Confirmation
+  const handleDeleteEventConfirmed = () => {
+    if (!deleteEventModal) return
+    const evId = deleteEventModal.id
+    const evTitle = deleteEventModal.title
+
+    // If any open bets exist on this event, cancel & refund them first
+    mutate(s => {
+      cancelEvent(s, evId, allEvents)
+    })
+
+    // Remove event from customEvents
+    setCustomEvents(prev => prev.filter(e => e.id !== evId))
+
+    if (selectedBet?.evId === evId) {
+      setSelectedBet(null)
+    }
+
+    setDeleteEventModal(null)
+    notify(`Событие «${evTitle}» полностью удалено из линии 🗑️`)
+  }
+
+  // Cancel Event (refund all placed bets)
+  const handleCancelEventAction = (ev: Ev) => {
+    mutate(s => {
+      cancelEvent(s, ev.id, allEvents)
+    }, `Матч «${ev.title}» отменен, ставки возвращены игрокам ↩️`)
+  }
+
+  // Settle Event (payout winners)
+  const handleSettleEventAction = (ev: Ev, outcomeIdx: number) => {
+    const outcomeName = ev.out[outcomeIdx]?.[0] || 'Исход'
+    mutate(s => {
+      settleEvent(s, ev.id, outcomeIdx, allEvents)
+    }, `Матч «${ev.title}» рассчитан! Победил: ${outcomeName} 🏆`)
+  }
+
+  // Toggle Betting Open/Closed
+  const handleToggleEventClosedAction = (ev: Ev) => {
+    const current = S.st[ev.id]?.s || 'open'
+    const nextStatus = current === 'closed' ? 'open' : 'closed'
+    mutate(s => {
+      if (!s.st[ev.id]) s.st[ev.id] = {}
+      s.st[ev.id].s = nextStatus
+    }, nextStatus === 'closed' ? `Приём ставок на «${ev.title}» закрыт 🔒` : `Приём ставок на «${ev.title}» открыт 🟢`)
+  }
+
+  // Save Event Score / Live Status
+  const handleEditEventSave = () => {
+    if (!editEventModal) return
+    setCustomEvents(prev => prev.map(e => e.id === editEventModal.id ? {
+      ...e,
+      score: editScore,
+      liveTime: editLiveTime,
+      isLive: editIsLive
+    } : e))
+    setEditEventModal(null)
+    notify(`Матч «${editEventModal.title}» обновлен: счёт ${editScore}! ✏️`)
+  }
+
+  // Clear all events safely
+  const handleClearAllEvents = () => {
+    if (confirm('ВНИМАНИЕ: Вы действительно хотите удалить ВСЕ события из линии? Все открытые ставки будут автоматически возвращены.')) {
+      mutate(s => {
+        allEvents.forEach(e => cancelEvent(s, e.id, allEvents))
+      })
+      setCustomEvents([])
+      setSelectedBet(null)
+      notify('Все события удалены из линии. Линия чиста! 🧹')
+    }
   }
 
   const handleLogout = async () => {
@@ -1435,21 +1592,34 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Tournament Pills */}
-              <div className="wl-tournaments-bar">
-                {TOURNAMENT_PILLS.map((pill, idx) => (
+              {/* Tournament Pills & Admin Fast Action */}
+              <div className="wl-tournaments-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', flex: 1 }}>
+                  {TOURNAMENT_PILLS.map((pill, idx) => (
+                    <button
+                      key={idx}
+                      className="wl-tourney-pill"
+                      onClick={() => {
+                        setSearchQuery(pill.name.split(' ')[0])
+                        notify(`Фильтр по турниру: ${pill.name}`)
+                      }}
+                    >
+                      <span className="wl-tourney-badge">{pill.tag}</span>
+                      <span>{pill.name}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {isAdmin && (
                   <button
-                    key={idx}
-                    className="wl-tourney-pill"
-                    onClick={() => {
-                      setSearchQuery(pill.name.split(' ')[0])
-                      notify(`Фильтр по турниру: ${pill.name}`)
-                    }}
+                    className="wl-btn-orange"
+                    style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
+                    onClick={() => setCreateMatchModalOpen(true)}
                   >
-                    <span className="wl-tourney-badge">{pill.tag}</span>
-                    <span>{pill.name}</span>
+                    <PlusCircle size={15} />
+                    <span>+ Создать событие</span>
                   </button>
-                ))}
+                )}
               </div>
 
               {/* Round Filters */}
@@ -1459,14 +1629,14 @@ export default function App() {
                   onClick={() => setSelectedSport(null)}
                 >
                   <div className="wl-round-icon">✓</div>
-                  <span>Все исходы</span>
+                  <span>Все исходы ({allEvents.length})</span>
                 </button>
                 <button
                   className={`wl-round-btn ${view === 'live' ? 'active' : ''}`}
                   onClick={() => setView(view === 'live' ? 'line' : 'live')}
                 >
                   <div className="wl-round-icon" style={{ background: '#ef4444', color: '#fff' }}>●</div>
-                  <span>Live матчи</span>
+                  <span>Live матчи ({allEvents.filter(e => e.isLive).length})</span>
                 </button>
                 <button
                   className={`wl-round-btn ${selectedSport === 0 ? 'active' : ''}`}
@@ -1483,23 +1653,62 @@ export default function App() {
                   <span>Кибер-Хряк</span>
                 </button>
                 <button
-                  className={`wl-round-btn ${selectedSport === 5 ? 'active' : ''}`}
-                  onClick={() => setSelectedSport(5)}
+                  className={`wl-round-btn ${selectedSport === 6 ? 'active' : ''}`}
+                  onClick={() => setSelectedSport(6)}
                 >
-                  <div className="wl-round-icon">🍔</div>
-                  <span>Бургеры</span>
+                  <div className="wl-round-icon">🥊</div>
+                  <span>Хрюк-MMA</span>
                 </button>
               </div>
 
               {/* Matches grouped by League */}
               {groupedByLeague.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '60px 20px', background: 'var(--bg-card)', borderRadius: 14, border: '1px dashed var(--border)' }}>
-                  <div style={{ fontSize: 32, marginBottom: 12 }}>🐷</div>
-                  <h3 style={{ fontSize: 18, marginBottom: 6 }}>Ничего не найдено</h3>
-                  <p style={{ color: 'var(--tx-secondary)', fontSize: 14 }}>
-                    Попробуйте изменить запрос поиска или выбрать другую категорию.
-                  </p>
-                </div>
+                isAdmin ? (
+                  <div style={{ textAlign: 'center', padding: '50px 24px', background: 'var(--bg-card)', borderRadius: 16, border: '1px dashed rgba(255, 85, 0, 0.45)', margin: '14px 0' }}>
+                    <div style={{ fontSize: 44, marginBottom: 12 }}>📋</div>
+                    <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 8, color: '#fff' }}>
+                      Линия событий пуста
+                    </h3>
+                    <p style={{ color: 'var(--tx-secondary)', fontSize: 14, maxWidth: 500, margin: '0 auto 20px', lineHeight: 1.5 }}>
+                      Все старые ставки и тестовые матчи очищены. Вы вошли со статусом <b>ADMIN (egor4kill)</b> — создайте новые матчи или запустите готовые шаблоны в 1 клик:
+                    </p>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
+                      <button
+                        className="wl-btn-orange"
+                        style={{ padding: '12px 26px', fontSize: 15, fontWeight: 800, borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                        onClick={() => setCreateMatchModalOpen(true)}
+                      >
+                        <PlusCircle size={18} />
+                        <span>+ Создать событие в линию</span>
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--tx-muted)', marginBottom: 10, fontWeight: 700 }}>
+                      БЫСТРЫЕ ШАБЛОНЫ МАТЧЕЙ:
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                      <button className="wl-demo-btn" onClick={() => { applyTemplate('football'); setCreateMatchModalOpen(true) }}>
+                        ⚽ Футбол: Спартак vs Зенит
+                      </button>
+                      <button className="wl-demo-btn" onClick={() => { applyTemplate('cs2'); setCreateMatchModalOpen(true) }}>
+                        🎮 CS2: NAVI vs Spirit
+                      </button>
+                      <button className="wl-demo-btn" onClick={() => { applyTemplate('mma'); setCreateMatchModalOpen(true) }}>
+                        🥊 UFC: Махачев vs Царукян
+                      </button>
+                      <button className="wl-demo-btn" onClick={() => { applyTemplate('burger'); setCreateMatchModalOpen(true) }}>
+                        🌭 Поедание бургеров
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '60px 20px', background: 'var(--bg-card)', borderRadius: 14, border: '1px dashed var(--border)' }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🐷</div>
+                    <h3 style={{ fontSize: 18, marginBottom: 6 }}>Линия обновляется</h3>
+                    <p style={{ color: 'var(--tx-secondary)', fontSize: 14 }}>
+                      Администратор готовит свежие события и коэффициенты. Скоро здесь появятся новые матчи!
+                    </p>
+                  </div>
+                )
               ) : (
                 groupedByLeague.map(([leagueName, leagueEvents]) => (
                   <div className="wl-table-container" key={leagueName}>
@@ -1559,12 +1768,14 @@ export default function App() {
                                 )}
                                 <span>•</span>
                                 <span style={{ color: 'var(--tx-muted)' }}>{ev.desc}</span>
-                                <button
-                                  className="wl-match-extra-link"
-                                  onClick={() => toggleMarket(ev.id)}
-                                >
-                                  {isExpanded ? 'Скрыть роспись ▲' : '+14 вариантов ➔'}
-                                </button>
+                                {ev.extraMarkets && ev.extraMarkets.length > 0 && (
+                                  <button
+                                    className="wl-match-extra-link"
+                                    onClick={() => toggleMarket(ev.id)}
+                                  >
+                                    {isExpanded ? 'Скрыть роспись ▲' : `+${ev.extraMarkets.length * 2} вариантов ➔`}
+                                  </button>
+                                )}
                               </div>
                             </div>
 
@@ -1593,34 +1804,98 @@ export default function App() {
                             </div>
                           </div>
 
-                          {isExpanded && (
-                            <div className="wl-extra-markets">
-                              <div className="wl-demo-controls">
-                                <span style={{ color: 'var(--tx-muted)', fontWeight: 600 }}>Быстрый демо-расчёт:</span>
-                                {eventStatus === 'open' && (
+                          {/* Extra Markets (if any) */}
+                          {isExpanded && ev.extraMarkets && (
+                            <div className="wl-extra-markets" style={{ padding: '10px 16px', background: '#111520', borderTop: '1px solid #1a202c' }}>
+                              {ev.extraMarkets.map((market, mIdx) => (
+                                <div key={mIdx} style={{ marginBottom: 8 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 4 }}>
+                                    {market.title}:
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    {market.out.map((o, oIdx) => (
+                                      <div key={oIdx} style={{ background: '#171c28', padding: '6px 12px', borderRadius: 6, fontSize: 12 }}>
+                                        <span>{o[0]}</span> <b style={{ color: 'var(--org)' }}>{o[1].toFixed(2)}</b>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* IN-LINE ADMIN BAR FOR THE PLATFORM OWNER */}
+                          {isAdmin && (
+                            <div className="wl-match-admin-bar">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <ShieldCheck size={13} /> АДМИН:
+                                </span>
+                                <span className={`wl-status-badge ${eventStatus === 'open' ? 'active' : eventStatus === 'done' ? 'active' : 'blocked'}`}>
+                                  {eventStatus === 'open' ? 'Приём открыт 🟢' : eventStatus === 'closed' ? 'Приём закрыт 🔒' : eventStatus === 'done' ? 'Завершён 🏆' : 'Отменён ❌'}
+                                </span>
+
+                                {/* Close/Open toggle */}
+                                {eventStatus !== 'done' && eventStatus !== 'cancel' && (
                                   <button
-                                    className="wl-demo-btn"
-                                    onClick={() => mutate(s => { s.st[ev.id] = { s: 'closed' } }, `Приём ставок закрыт`)}
+                                    className={`wl-admin-action-btn ${isClosed ? 'success' : 'warning'}`}
+                                    onClick={() => handleToggleEventClosedAction(ev)}
                                   >
-                                    Закрыть приём
+                                    {isClosed ? <Unlock size={12} /> : <Lock size={12} />}
+                                    <span>{isClosed ? 'Открыть приём' : 'Закрыть приём'}</span>
                                   </button>
                                 )}
-                                {ev.out.slice(0, 3).map((outcome, oIdx) => (
-                                  <button
-                                    key={oIdx}
-                                    className="wl-demo-btn"
-                                    style={{ borderColor: 'var(--green)' }}
-                                    onClick={() => mutate(s => settleEvent(s, ev.id, oIdx), `Матч рассчитан: победа ${outcome[0]}!`)}
-                                  >
-                                    Выиграл: {outcome[0]}
-                                  </button>
-                                ))}
+
+                                {/* Score & Live Editor */}
                                 <button
-                                  className="wl-demo-btn"
-                                  style={{ color: '#ef4444' }}
-                                  onClick={() => mutate(s => cancelEvent(s, ev.id), `Событие отменено, ставки возвращены`)}
+                                  className="wl-admin-action-btn"
+                                  onClick={() => {
+                                    setEditEventModal(ev)
+                                    setEditScore(ev.score || '0 : 0')
+                                    setEditLiveTime(ev.liveTime || 'Скоро')
+                                    setEditIsLive(Boolean(ev.isLive))
+                                  }}
+                                  title="Редактировать текущий счёт и статус"
                                 >
-                                  Отменить матч
+                                  <Edit3 size={12} />
+                                  <span>Счёт: {ev.score || '0 : 0'}</span>
+                                </button>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                {/* Winner settling */}
+                                {eventStatus !== 'done' && eventStatus !== 'cancel' && (
+                                  <>
+                                    <span style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 600 }}>Рассчитать:</span>
+                                    {ev.out.slice(0, 3).map((outcome, oIdx) => (
+                                      <button
+                                        key={oIdx}
+                                        className="wl-admin-action-btn success"
+                                        onClick={() => handleSettleEventAction(ev, oIdx)}
+                                        title={`Рассчитать победу: ${outcome[0]}`}
+                                      >
+                                        Победил {outcome[0]}
+                                      </button>
+                                    ))}
+                                    <button
+                                      className="wl-admin-action-btn warning"
+                                      onClick={() => handleCancelEventAction(ev)}
+                                      title="Отменить событие и вернуть деньги игрокам"
+                                    >
+                                      <RotateCcw size={12} />
+                                      <span>Отменить матч</span>
+                                    </button>
+                                  </>
+                                )}
+
+                                {/* Safe Deletion Button */}
+                                <button
+                                  className="wl-admin-action-btn danger"
+                                  onClick={() => setDeleteEventModal(ev)}
+                                  title="Удалить событие из линии (с защитой)"
+                                >
+                                  <Trash2 size={12} />
+                                  <span>Удалить</span>
                                 </button>
                               </div>
                             </div>
@@ -2933,13 +3208,33 @@ export default function App() {
               {/* TAB 1: ADD MATCH FORM */}
               {adminTab === 'create' && (
                 <form onSubmit={handleCreateMatch}>
+                  <div style={{ background: '#161c29', border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--org)', marginBottom: 8, letterSpacing: '0.04em' }}>
+                      ⚡ БЫСТРЫЕ ШАБЛОНЫ В 1 КЛИК:
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('football')}>
+                        ⚽ Спартак vs Зенит
+                      </button>
+                      <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('cs2')}>
+                        🎮 CS2: NAVI vs Spirit
+                      </button>
+                      <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('mma')}>
+                        🥊 UFC: Махачев vs Царукян
+                      </button>
+                      <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('burger')}>
+                        🌭 Бургер-батл
+                      </button>
+                    </div>
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
                     <div className="wl-form-group">
                       <label className="wl-form-label">Название матча / вывеска:</label>
                       <input
                         type="text"
                         className="wl-form-input"
-                        placeholder="Например: Спартак Хряк vs Динамо Кабан"
+                        placeholder="Например: Спартак Хряк vs Зенит Боровы"
                         value={newMatchTitle}
                         onChange={e => setNewMatchTitle(e.target.value)}
                         required
@@ -2983,15 +3278,37 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="wl-form-group">
-                    <label className="wl-form-label">Турнир / Лига:</label>
-                    <input
-                      type="text"
-                      className="wl-form-input"
-                      placeholder="Лига"
-                      value={newMatchLeague}
-                      onChange={e => setNewMatchLeague(e.target.value)}
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: 14 }}>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Турнир / Лига:</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        placeholder="Свин-Лига РПЛ"
+                        value={newMatchLeague}
+                        onChange={e => setNewMatchLeague(e.target.value)}
+                      />
+                    </div>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Текущий счёт:</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        placeholder="0 : 0"
+                        value={newMatchScore}
+                        onChange={e => setNewMatchScore(e.target.value)}
+                      />
+                    </div>
+                    <div className="wl-form-group">
+                      <label className="wl-form-label">Время / Статус:</label>
+                      <input
+                        type="text"
+                        className="wl-form-input"
+                        placeholder="Скоро"
+                        value={newMatchTime}
+                        onChange={e => setNewMatchTime(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   {/* Odds inputs */}
@@ -3033,7 +3350,7 @@ export default function App() {
                       onChange={e => setNewMatchIsLive(e.target.checked)}
                     />
                     <label htmlFor="isLiveCheck" style={{ fontSize: 13, cursor: 'pointer' }}>
-                      Опубликовать как активный <b>Live-матч</b> (с красным индикатором)
+                      Опубликовать как активный <b>● LIVE матч</b> (с красным пульсирующим индикатором)
                     </label>
                   </div>
 
@@ -3042,62 +3359,119 @@ export default function App() {
                     className="wl-btn-orange"
                     style={{ width: '100%', height: 46, fontSize: 15, borderRadius: 10, marginTop: 10 }}
                   >
-                    + Опубликовать событие в линию SVINLINE
+                    + Опубликовать событие в линию SVINLINE 🚀
                   </button>
                 </form>
               )}
 
               {/* TAB 2: LIVE MATCH CONTROLLER */}
               {adminTab === 'matches' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 420, overflowY: 'auto' }}>
-                  {allEvents.map(ev => {
-                    const st = S.st[ev.id]?.s || 'open'
-                    return (
-                      <div key={ev.id} style={{ background: '#171b26', border: '1px solid var(--border)', borderRadius: 10, padding: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div>
-                            <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev.league}</span>
-                            <div style={{ fontWeight: 700, fontSize: 14 }}>{ev.title}</div>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-secondary)' }}>
+                      МАТЧИ В ЛИНИИ ({allEvents.length}):
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="wl-demo-btn"
+                        style={{ color: 'var(--org)', borderColor: 'rgba(255,85,0,0.3)' }}
+                        onClick={() => { setAdminModalOpen(false); setCreateMatchModalOpen(true) }}
+                      >
+                        <PlusCircle size={14} /> + Добавить матч
+                      </button>
+                      {allEvents.length > 0 && (
+                        <button
+                          className="wl-demo-btn"
+                          style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+                          onClick={handleClearAllEvents}
+                        >
+                          <Trash2 size={14} /> Очистить все
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {allEvents.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--tx-muted)', fontSize: 13, background: '#111520', borderRadius: 10, border: '1px dashed var(--border)' }}>
+                      В линии нет событий. Нажмите «+ Добавить матч» или перейдите во вкладку «+ Добавить матч в линию»!
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 440, overflowY: 'auto' }}>
+                      {allEvents.map(ev => {
+                        const st = S.st[ev.id]?.s || 'open'
+                        return (
+                          <div key={ev.id} style={{ background: '#171b26', border: '1px solid var(--border)', borderRadius: 10, padding: 12 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                              <div>
+                                <span style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev.league}</span>
+                                <div style={{ fontWeight: 700, fontSize: 14 }}>
+                                  {ev.title} {ev.score && <span className="wl-match-score-badge" style={{ marginLeft: 6 }}>{ev.score}</span>}
+                                </div>
+                              </div>
+                              <span className={`st ${st === 'open' ? 'o' : st === 'closed' ? 'c' : st === 'done' ? 'f' : 'x'}`}>
+                                {st === 'open' ? 'Открыто 🟢' : st === 'closed' ? 'Закрыто 🔒' : st === 'done' ? 'Завершено 🏆' : 'Отменено ❌'}
+                              </span>
+                            </div>
+
+                            {/* Admin Action Buttons */}
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+                              {st !== 'done' && st !== 'cancel' && (
+                                <button
+                                  className="wl-demo-btn"
+                                  onClick={() => handleToggleEventClosedAction(ev)}
+                                >
+                                  {st === 'closed' ? 'Открыть приём' : 'Закрыть приём'}
+                                </button>
+                              )}
+
+                              <button
+                                className="wl-demo-btn"
+                                onClick={() => {
+                                  setEditEventModal(ev)
+                                  setEditScore(ev.score || '0 : 0')
+                                  setEditLiveTime(ev.liveTime || 'Скоро')
+                                  setEditIsLive(Boolean(ev.isLive))
+                                }}
+                              >
+                                <Edit3 size={13} /> Счёт: {ev.score || '0 : 0'}
+                              </button>
+
+                              {/* Settle winners */}
+                              {st !== 'done' && st !== 'cancel' && ev.out.slice(0, 3).map((out, idx) => (
+                                <button
+                                  key={idx}
+                                  className="wl-demo-btn"
+                                  style={{ borderColor: 'var(--green-glow)' }}
+                                  onClick={() => handleSettleEventAction(ev, idx)}
+                                >
+                                  Победил {out[0]}
+                                </button>
+                              ))}
+
+                              {st !== 'done' && st !== 'cancel' && (
+                                <button
+                                  className="wl-demo-btn"
+                                  style={{ color: '#ef4444' }}
+                                  onClick={() => handleCancelEventAction(ev)}
+                                >
+                                  Отменить матч
+                                </button>
+                              )}
+
+                              <button
+                                className="wl-demo-btn"
+                                style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.4)', marginLeft: 'auto' }}
+                                onClick={() => setDeleteEventModal(ev)}
+                                title="Удалить матч из линии с подтверждением"
+                              >
+                                <Trash2 size={13} /> Удалить
+                              </button>
+                            </div>
                           </div>
-                          <span className={`st ${st === 'open' ? 'o' : st === 'closed' ? 'c' : st === 'done' ? 'f' : 'x'}`}>
-                            {st === 'open' ? 'Открыто' : st === 'closed' ? 'Закрыто' : st === 'done' ? 'Завершено' : 'Отменено'}
-                          </span>
-                        </div>
-
-                        {/* Admin Action Buttons */}
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                          {st === 'open' && (
-                            <button
-                              className="wl-demo-btn"
-                              onClick={() => mutate(s => { s.st[ev.id] = { s: 'closed' } }, `Приём ставок на «${ev.title}» закрыт`)}
-                            >
-                              Закрыть приём
-                            </button>
-                          )}
-
-                          {/* Settle winners */}
-                          {ev.out.slice(0, 3).map((out, idx) => (
-                            <button
-                              key={idx}
-                              className="wl-demo-btn"
-                              style={{ borderColor: 'var(--green-glow)' }}
-                              onClick={() => mutate(s => settleEvent(s, ev.id, idx), `Матч завершен! Победил: ${out[0]}. Ставки рассчитаны!`)}
-                            >
-                              Победил {out[0]}
-                            </button>
-                          ))}
-
-                          <button
-                            className="wl-demo-btn"
-                            style={{ color: '#ef4444' }}
-                            onClick={() => mutate(s => cancelEvent(s, ev.id), `Матч отменён, произведён возврат ставок`)}
-                          >
-                            Отменить матч
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3314,6 +3688,300 @@ export default function App() {
                   У этого игрока пока нет совершённых ставок.
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6.1 SAFE DELETE CONFIRMATION MODAL */}
+      {deleteEventModal && (
+        <div className="wl-modal-overlay" style={{ zIndex: 1100 }} onClick={() => setDeleteEventModal(null)}>
+          <div className="wl-confirm-modal-card" onClick={e => e.stopPropagation()}>
+            <div style={{ background: '#251216', padding: '16px 20px', borderBottom: '1px solid rgba(239, 68, 68, 0.3)', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AlertTriangle size={22} color="#ef4444" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: '#ef4444' }}>
+                  Подтверждение удаления события
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>
+                  Защита от случайного удаления
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: '20px' }}>
+              <p style={{ fontSize: 14, lineHeight: 1.5, color: '#e2e8f0', marginBottom: 14 }}>
+                Вы действительно хотите безвозвратно удалить матч <b>«{deleteEventModal.title}»</b> ({deleteEventModal.league}) из линии?
+              </p>
+
+              <div style={{ background: '#1c2232', border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 18, fontSize: 12, color: 'var(--tx-secondary)', lineHeight: 1.4 }}>
+                ⚠️ <b>Внимание:</b> Это действие необратимо. Если на матч были сделаны открытые ставки, они будут автоматически аннулированы с полным возвратом средств игрокам.
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  className="wl-sidebar-quick-btn"
+                  style={{ padding: '10px 18px', fontSize: 14, fontWeight: 700 }}
+                  onClick={() => setDeleteEventModal(null)}
+                >
+                  Отмена
+                </button>
+                <button
+                  className="wl-btn-orange"
+                  style={{ background: '#ef4444', borderColor: '#ef4444', padding: '10px 20px', fontSize: 14, fontWeight: 800, borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={handleDeleteEventConfirmed}
+                >
+                  <Trash2 size={16} />
+                  <span>Да, удалить событие 🗑️</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6.2 EDIT SCORE & LIVE STATUS MODAL */}
+      {editEventModal && (
+        <div className="wl-modal-overlay" style={{ zIndex: 1100 }} onClick={() => setEditEventModal(null)}>
+          <div className="wl-modal-card" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+            <div className="wl-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit3 size={18} color="var(--org)" />
+                <span style={{ fontWeight: 800 }}>Редактирование счёта матча</span>
+              </div>
+              <button onClick={() => setEditEventModal(null)} style={{ color: 'var(--tx-muted)' }}><X size={18} /></button>
+            </div>
+            <div className="wl-modal-body">
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: '#fff' }}>
+                {editEventModal.title}
+              </div>
+              <div className="wl-form-group">
+                <label className="wl-form-label">Текущий счёт:</label>
+                <input
+                  type="text"
+                  className="wl-form-input"
+                  value={editScore}
+                  onChange={e => setEditScore(e.target.value)}
+                  placeholder="например: 2 : 1"
+                />
+              </div>
+              <div className="wl-form-group">
+                <label className="wl-form-label">Время / Статус тайма:</label>
+                <input
+                  type="text"
+                  className="wl-form-input"
+                  value={editLiveTime}
+                  onChange={e => setEditLiveTime(e.target.value)}
+                  placeholder="например: 2-й тайм 75' или Скоро"
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
+                <input
+                  type="checkbox"
+                  id="modalEditIsLiveCheck"
+                  checked={editIsLive}
+                  onChange={e => setEditIsLive(e.target.checked)}
+                />
+                <label htmlFor="modalEditIsLiveCheck" style={{ fontSize: 13, cursor: 'pointer' }}>
+                  Статус <b>● LIVE</b> (показывать в фильтре Live)
+                </label>
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                <button
+                  className="wl-btn-orange"
+                  style={{ flex: 1, height: 42, borderRadius: 8, fontSize: 14 }}
+                  onClick={handleEditEventSave}
+                >
+                  Сохранить изменения
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6.3 STANDALONE CREATE MATCH MODAL */}
+      {createMatchModalOpen && (
+        <div className="wl-modal-overlay" style={{ zIndex: 1100 }} onClick={() => setCreateMatchModalOpen(false)}>
+          <div className="wl-modal-card" style={{ maxWidth: 650 }} onClick={e => e.stopPropagation()}>
+            <div className="wl-modal-header" style={{ background: '#241a0d', borderBottomColor: '#f59e0b44' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <PlusCircle size={20} color="var(--org)" />
+                <span style={{ fontWeight: 800, fontSize: 17, color: 'var(--org)' }}>Создать новое событие в линию</span>
+              </div>
+              <button onClick={() => setCreateMatchModalOpen(false)} style={{ color: 'var(--tx-muted)' }}><X size={18} /></button>
+            </div>
+
+            <div className="wl-modal-body">
+              {/* Quick Template Pills */}
+              <div style={{ background: '#161c29', border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--org)', marginBottom: 8, letterSpacing: '0.04em' }}>
+                  ⚡ БЫСТРЫЕ ШАБЛОНЫ В 1 КЛИК:
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('football')}>
+                    ⚽ Спартак vs Зенит
+                  </button>
+                  <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('cs2')}>
+                    🎮 CS2: NAVI vs Spirit
+                  </button>
+                  <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('mma')}>
+                    🥊 UFC: Махачев vs Царукян
+                  </button>
+                  <button type="button" className="wl-demo-btn" onClick={() => applyTemplate('burger')}>
+                    🌭 Бургер-батл
+                  </button>
+                </div>
+              </div>
+
+              <form onSubmit={handleCreateMatch}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Название матча / вывеска:</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      placeholder="Например: Спартак Хряк vs Зенит Боровы"
+                      value={newMatchTitle}
+                      onChange={e => setNewMatchTitle(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Категория:</label>
+                    <select
+                      className="wl-form-input"
+                      value={newMatchCat}
+                      onChange={e => setNewMatchCat(Number(e.target.value))}
+                    >
+                      {CATS.map((c, i) => (
+                        <option key={i} value={i}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Команда / Участник 1:</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      placeholder="Хозяева"
+                      value={newMatchTeam1}
+                      onChange={e => setNewMatchTeam1(e.target.value)}
+                    />
+                  </div>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Команда / Участник 2:</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      placeholder="Гости"
+                      value={newMatchTeam2}
+                      onChange={e => setNewMatchTeam2(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: 14 }}>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Турнир / Лига:</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      placeholder="Свин-Лига РПЛ"
+                      value={newMatchLeague}
+                      onChange={e => setNewMatchLeague(e.target.value)}
+                    />
+                  </div>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Текущий счёт:</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      placeholder="0 : 0"
+                      value={newMatchScore}
+                      onChange={e => setNewMatchScore(e.target.value)}
+                    />
+                  </div>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Время / Статус:</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      placeholder="Скоро"
+                      value={newMatchTime}
+                      onChange={e => setNewMatchTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="wl-form-group">
+                  <label className="wl-form-label">Описание / Комментарий:</label>
+                  <input
+                    type="text"
+                    className="wl-form-input"
+                    placeholder="Краткое описание для карточки матча"
+                    value={newMatchDesc}
+                    onChange={e => setNewMatchDesc(e.target.value)}
+                  />
+                </div>
+
+                {/* Odds inputs */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 6 }}>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Кэф на Победу 1 (П1):</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      value={newMatchOdds1}
+                      onChange={e => setNewMatchOdds1(e.target.value)}
+                    />
+                  </div>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Кэф на Ничью (X):</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      value={newMatchOddsX}
+                      onChange={e => setNewMatchOddsX(e.target.value)}
+                    />
+                  </div>
+                  <div className="wl-form-group">
+                    <label className="wl-form-label">Кэф на Победу 2 (П2):</label>
+                    <input
+                      type="text"
+                      className="wl-form-input"
+                      value={newMatchOdds2}
+                      onChange={e => setNewMatchOdds2(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
+                  <input
+                    type="checkbox"
+                    id="modalIsLiveCheck"
+                    checked={newMatchIsLive}
+                    onChange={e => setNewMatchIsLive(e.target.checked)}
+                  />
+                  <label htmlFor="modalIsLiveCheck" style={{ fontSize: 13, cursor: 'pointer' }}>
+                    Опубликовать как активный <b>● LIVE матч</b> (с красным пульсирующим индикатором)
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  className="wl-btn-orange"
+                  style={{ width: '100%', height: 46, fontSize: 15, borderRadius: 10, marginTop: 8 }}
+                >
+                  + Опубликовать событие в линию SVINLINE 🚀
+                </button>
+              </form>
             </div>
           </div>
         </div>
