@@ -116,7 +116,7 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
         })}
       </div>
 
-      <div style={{ margin: '14px 0 4px', minHeight: 48 }} aria-live="polite">
+      <div style={{ margin: '14px 0 8px', minHeight: 64, display: 'flex', flexDirection: 'column', justifyContent: 'center' }} aria-live="polite">
         {playing ? (
           <>
             <div style={{ fontFamily: 'var(--font-d)', fontSize: 26, color: 'var(--org)' }}>x{cur} {k > 0 && <span style={{ fontSize: 15, color: 'var(--tx-secondary)' }}>= {fmt(r2(st * cur))} SV₽</span>}</div>
@@ -125,6 +125,8 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
         ) : <div style={{ fontWeight: 700 }}>{msg || 'Выбери число луж и ставку, потом нажми «Начать»'}</div>}
       </div>
 
+      {/* Фиксированная высота панели: окно не прыгает при переходе между «настройка» и «игра» */}
+      <div style={{ minHeight: 140, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       {playing ? (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button className="wl-round-btn" onClick={randomPick}>Случайная клетка</button>
@@ -147,6 +149,7 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
           </div>
         </>
       )}
+      </div>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Баланс: {fmt(r2(bal))} SV₽. Выплата = ставка × икс.</p>
     </div>
   )
