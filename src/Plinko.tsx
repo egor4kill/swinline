@@ -48,26 +48,38 @@ export default function Plinko({ bal, onBet, onWin }: Props) {
   const cb = useRef({ onWin })
   cb.current = { onWin }
   const calm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const STEP = calm ? 40 : 150
+  const STEP = calm ? 40 : 230
 
+  const running = useRef(false)
   const frame = (now: number) => {
-    balls.current = balls.current.filter(b => {
-      const el = (now - b.t0) / STEP, i = Math.floor(el), f = el - i
-      if (i >= b.pts.length - 1) {
-        cb.current.onWin(b.win, `${TABLES[b.risk][b.slot]}x`)
-        setHist(h => [{ id: b.id, m: TABLES[b.risk][b.slot] }, ...h].slice(0, 10))
-        setFlash({ slot: b.slot, n: b.id })
-        return false
-      }
-      const [x0, y0] = b.pts[i], [x1, y1] = b.pts[i + 1]
-      b.x = x0 + (x1 - x0) * (1 - (1 - f) * (1 - f))
-      b.y = y0 + (y1 - y0) * f - Math.sin(Math.PI * f) * (i === 0 ? 0 : 12)
-      return true
+    const done: Ball[] = []
+    try {
+      balls.current = balls.current.filter(b => {
+        const el = (now - b.t0) / STEP, i = Math.floor(el), f = el - i
+        if (i >= b.pts.length - 1) { done.push(b); return false }
+        const [x0, y0] = b.pts[i], [x1, y1] = b.pts[i + 1]
+        b.x = x0 + (x1 - x0) * (1 - (1 - f) * (1 - f))
+        b.y = y0 + (y1 - y0) * f - Math.sin(Math.PI * f) * (i === 0 ? 0 : 12)
+        return true
+      })
+    } catch (e) { console.error(e) }
+    // выплаты вне расчёта кадра: ошибка в одной не останавливает анимацию остальных
+    done.forEach(b => {
+      try { cb.current.onWin(b.win, `${TABLES[b.risk][b.slot]}x`) } catch (e) { console.error(e) }
+      setHist(h => [{ id: b.id, m: TABLES[b.risk][b.slot] }, ...h].slice(0, 10))
+      setFlash({ slot: b.slot, n: b.id })
     })
     setTick(t => t + 1)
-    raf.current = balls.current.length ? requestAnimationFrame(frame) : 0
+    if (balls.current.length) raf.current = requestAnimationFrame(frame)
+    else running.current = false
   }
-  useEffect(() => () => cancelAnimationFrame(raf.current), [])
+  // если ушли с вкладки, пока шарики летят, выплачиваем их сразу, чтобы ставка не пропала
+  useEffect(() => () => {
+    cancelAnimationFrame(raf.current)
+    running.current = false
+    balls.current.forEach(b => { try { cb.current.onWin(b.win, `${TABLES[b.risk][b.slot]}x`) } catch (e) { console.error(e) } })
+    balls.current = []
+  }, [])
 
   const launch = () => {
     const s = Math.floor(parseFloat(stake))
@@ -77,7 +89,7 @@ export default function Plinko({ bal, onBet, onWin }: Props) {
     const d = drop() // результат уже решён, дальше только показ
     const p = path(d.bits)
     balls.current.push({ id: ++idRef.current, pts: p, t0: performance.now(), stake: s, risk, slot: d.slot, win: payout(s, risk, d.slot), x: p[0][0], y: p[0][1] })
-    if (!raf.current) raf.current = requestAnimationFrame(frame)
+    if (!running.current) { running.current = true; raf.current = requestAnimationFrame(frame) }
   }
 
   const pegs: JSX.Element[] = []
