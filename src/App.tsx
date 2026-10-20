@@ -71,6 +71,8 @@ const freshState = () => ({
 
 import Plinko from './Plinko'
 import MudPuddles from './MudPuddles'
+import DailyRewards from './DailyRewards'
+import { useDaily } from './useDaily'
 function loadJSON<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -225,6 +227,7 @@ export default function App() {
   }, [accounts, currentUserId])
 
   const isAdmin = currentUser?.role === 'admin'
+  const daily = useDaily(currentUser?.id)
 
   // 2. Events managed by Admin (starting clean / without old mock events)
   const [customEvents, setCustomEvents] = useState<Ev[]>(() => {
@@ -915,6 +918,18 @@ export default function App() {
     }, 4200)
   }
 
+  // Ежедневная награда: раз в календарный день, серия растёт
+  const claimDaily = () => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Войди через Twitch, чтобы получать награды'); return }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return }
+    const res = daily.claim()
+    if (!res) return
+    mutate(s => {
+      s.bal = r2(s.bal + res.reward)
+      s.log.unshift({ t: Date.now(), x: `Ежедневная награда, день серии ${res.day}`, d: res.reward })
+    }, `🎁 +${fmt(res.reward)} (серия ${res.day} дн.)`)
+  }
+
   // Грязевые лужи: ставка списывается на старте раунда, выплата при «Забрать»
   const puddlesBet = (stake: number) => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return false }
@@ -1359,6 +1374,14 @@ export default function App() {
                 <div className="wl-balance-chip" title="Текущий баланс">
                   <span className="wl-balance-amount">{fmt(S.bal)}</span>
                 </div>
+
+                <button
+                  className={`wl-btn-green ${daily.status.canClaim ? 'pulse' : ''}`}
+                  onClick={() => setView('wallet')}
+                  title="Ежедневная награда"
+                >
+                  🎁 Награда
+                </button>
 
                 <button
                   className="wl-btn-orange"
@@ -2531,6 +2554,8 @@ export default function App() {
               <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
                 Мой счёт и баланс
               </h2>
+
+              <DailyRewards daily={daily} onClaim={claimDaily} />
 
               <div className="wl-banner-card" style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 13, color: 'var(--tx-secondary)' }}>Доступный виртуальный баланс:</div>
