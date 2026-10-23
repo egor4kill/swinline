@@ -1172,6 +1172,10 @@ export default function App() {
 
     // Удаляем и из общей базы (у всех игроков событие исчезнет, их открытые ставки вернутся)
     if (dbEventIds.has(evId)) {
+      // Сначала помечаем открытые ставки в базе возвратом, затем удаляем событие
+      supabase.rpc('admin_settle_bets', { p_event: evId, p_winner: null }).then(res => {
+        if (res.error) console.error('admin_settle_bets (delete) failed:', res.error.message)
+      })
       supabase.from('events').delete().eq('id', evId).then(res => {
         if (res.error) notify(`⚠️ Удалено только локально: ${res.error.message}`)
         else fetchDbEvents()
@@ -1197,6 +1201,10 @@ export default function App() {
         if (res.error) notify(`⚠️ Отмена применилась только у вас: ${res.error.message}`)
         else fetchDbEvents()
       })
+      // Ставки в базе помечаем возвратом
+      supabase.rpc('admin_settle_bets', { p_event: ev.id, p_winner: null }).then(res => {
+        if (res.error) console.error('admin_settle_bets (cancel) failed:', res.error.message)
+      })
     }
   }
 
@@ -1211,6 +1219,10 @@ export default function App() {
       supabase.from('events').update({ status: 'done', winner: outcomeIdx, updated_at: new Date().toISOString() }).eq('id', ev.id).then(res => {
         if (res.error) notify(`⚠️ Расчёт применился только у вас: ${res.error.message}`)
         else fetchDbEvents()
+      })
+      // Ставки всех игроков в базе помечаем выигранными/проигранными
+      supabase.rpc('admin_settle_bets', { p_event: ev.id, p_winner: outcomeIdx }).then(res => {
+        if (res.error) console.error('admin_settle_bets failed:', res.error.message)
       })
     }
   }
@@ -1283,34 +1295,33 @@ export default function App() {
   }
 
   // Admin Surveillance & Actions
-  // Все действия идут через БД с проверкой результата: если RLS отклонил запись
-  // (например, чужой профиль), честно сообщаем об ошибке, а не делаем вид, что получилось.
+  // Действия идут через серверные RPC-функции Supabase (admin_* в SQL-скрипте):
+  // внутри проверяется, что вызывающий — владелец платформы. Ошибки показываем честно.
   const handleAdminTopUp = async (targetId: string, amount: number) => {
     const target = accounts.find(a => a.id === targetId)
     if (!target) return
-    const newBal = r2(target.bal + amount)
-    const { data, error } = await supabase.from('profiles').update({ bal: newBal, updated_at: new Date().toISOString() }).eq('id', targetId).select()
-    if (error || !data || data.length === 0) {
-      notify('❌ База данных отклонила начисление: RLS не позволяет менять чужой профиль из браузера')
+    const { data: newBal, error } = await supabase.rpc('admin_top_up', { p_target: targetId, p_amount: amount })
+    if (error || newBal === null || newBal === undefined) {
+      notify(`❌ Начисление не удалось: ${error?.message || 'неизвестная ошибка'}`)
       return
     }
     setAccounts(prev => prev.map(a => a.id === targetId ? {
       ...a,
-      bal: newBal,
+      bal: Number(newBal),
       log: [{ t: Date.now(), x: `Пополнение от Администратора (+${fmt(amount)})`, d: amount }, ...a.log]
     } : a))
     if (currentUserId === targetId) {
       mutate(s => { s.bal = r2(s.bal + amount) })
     }
-    notify(`Пользователю начислено +${fmt(amount)}`)
+    notify(`Пользователю начислено +${fmt(amount)} (баланс: ${fmt(Number(newBal))})`)
   }
 
   const handleAdminReset = async (targetId: string) => {
     const target = accounts.find(a => a.id === targetId)
     if (!target) return
-    const { data, error } = await supabase.from('profiles').update({ bal: 0, updated_at: new Date().toISOString() }).eq('id', targetId).select()
-    if (error || !data || data.length === 0) {
-      notify('❌ База данных отклонила обнуление: RLS не позволяет менять чужой профиль из браузера')
+    const { data: newBal, error } = await supabase.rpc('admin_reset_balance', { p_target: targetId })
+    if (error || newBal === null || newBal === undefined) {
+      notify(`❌ Обнуление не удалось: ${error?.message || 'неизвестная ошибка'}`)
       return
     }
     setAccounts(prev => prev.map(a => a.id === targetId ? {
@@ -1328,9 +1339,13 @@ export default function App() {
     const target = accounts.find(a => a.id === targetId)
     if (!target) return
     const nextBlocked = !target.isBlocked
-    const { data, error } = await supabase.from('profiles').update({ is_blocked: nextBlocked, updated_at: new Date().toISOString() }).eq('id', targetId).select()
-    if (error || !data || data.length === 0) {
-      notify('❌ База данных отклонила блокировку: нужен серверный RPC для админ-действий')
+    const { data: found, error } = await supabase.rpc('admin_set_blocked', { p_target: targetId, p_blocked: nextBlocked })
+    if (error) {
+      notify(`❌ Блокировка не удалась: ${error.message}`)
+      return
+    }
+    if (!found) {
+      notify('❌ Игрок не найден в базе')
       return
     }
     setAccounts(prev => prev.map(a => a.id === targetId ? { ...a, isBlocked: nextBlocked } : a))
@@ -1343,17 +1358,17 @@ export default function App() {
       notify('Нельзя удалить аккаунт администратора!')
       return
     }
-    if (!confirm(`Удалить игрока «${target?.username || targetId}»?`)) return
-    const { data, error } = await supabase.from('profiles').delete().eq('id', targetId).select()
-    if (error || !data || data.length === 0) {
-      notify('❌ База данных отклонила удаление: нужен серверный RPC для админ-действий')
+    if (!confirm(`Удалить игрока «${target?.username || targetId}»? Это удалит его профиль, ставки и аккаунт авторизации.`)) return
+    const { data: deleted, error } = await supabase.rpc('admin_delete_user', { p_target: targetId })
+    if (error) {
+      notify(`❌ Удаление не удалось: ${error.message}`)
       return
     }
     setAccounts(prev => prev.filter(a => a.id !== targetId))
     if (currentUserId === targetId) {
       setCurrentUserId(null)
     }
-    notify(`Игрок ${target?.username} удален!`)
+    notify(`Игрок ${target?.username} полностью удалён из базы!`)
   }
 
   const handleAdminPurgeEmpty = async () => {
@@ -3856,7 +3871,8 @@ export default function App() {
                         const oddsVal = typeof b.odds === 'number' ? b.odds.toFixed(2) : String(b.odds || '-')
                         const isWon = b.status === 'won' || b.state === 'won'
                         const isLost = b.status === 'lost' || b.state === 'lost'
-                        const statusLabel = isWon ? 'Выигрыш' : isLost ? 'Проигрыш' : 'В игре'
+                        const isRefund = b.status === 'refund' || b.state === 'refund'
+                        const statusLabel = isWon ? 'Выигрыш' : isLost ? 'Проигрыш' : isRefund ? 'Возврат' : 'В игре'
                         return (
                           <tr key={b.id}>
                             <td>
@@ -3866,7 +3882,7 @@ export default function App() {
                             <td style={{ fontWeight: 700 }}>{fmt(Number(b.stake || 0))}</td>
                             <td>{oddsVal}</td>
                             <td>
-                              <span style={{ color: isWon ? 'var(--green)' : isLost ? '#ef4444' : '#f59e0b', fontWeight: 700 }}>
+                              <span style={{ color: isWon ? 'var(--green)' : isLost ? '#ef4444' : isRefund ? '#94a3b8' : '#f59e0b', fontWeight: 700 }}>
                                 {statusLabel}
                               </span>
                             </td>

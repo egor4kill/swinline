@@ -54,6 +54,8 @@ WITH CHECK (auth.uid() = user_id);
 
 -- 5. Guard privileged profile columns against privilege escalation.
 --    Only service_role (and SQL editor) may change role/username/is_blocked.
+--    Серверные RPC-функции (SECURITY DEFINER от postgres, раздел 9) тоже могут:
+--    внутри них current_user = 'postgres'.
 CREATE OR REPLACE FUNCTION public.guard_profile_columns()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -61,6 +63,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF current_user = 'postgres' THEN
+    RETURN NEW;
+  END IF;
   IF coalesce(auth.role(), '') NOT IN ('authenticated', 'anon') THEN
     RETURN NEW;
   END IF;
@@ -206,3 +211,145 @@ DROP TRIGGER IF EXISTS guard_bet_insert ON public.bets;
 CREATE TRIGGER guard_bet_insert
 BEFORE INSERT ON public.bets
 FOR EACH ROW EXECUTE FUNCTION public.guard_bet_insert();
+
+-- ====================================================================
+-- 9. ADMIN RPC (новое): серверные функции админ-панели.
+--    Вызывать может только владелец платформы (is_platform_owner());
+--    функции SECURITY DEFINER, поэтому RLS и guard-триггеры им не мешают.
+--    Клиент вызывает их как supabase.rpc('admin_top_up', {...}) и т.д.
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.admin_top_up(p_target uuid, p_amount numeric)
+RETURNS numeric
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_new numeric;
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может начислять баланс';
+  END IF;
+  UPDATE public.profiles SET bal = greatest(0, bal + p_amount), updated_at = now()
+  WHERE id = p_target
+  RETURNING bal INTO v_new;
+  IF v_new IS NULL THEN
+    RAISE EXCEPTION 'Игрок не найден';
+  END IF;
+  RETURN v_new;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_reset_balance(p_target uuid)
+RETURNS numeric
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_new numeric;
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может обнулять баланс';
+  END IF;
+  UPDATE public.profiles SET bal = 0, updated_at = now()
+  WHERE id = p_target
+  RETURNING bal INTO v_new;
+  IF v_new IS NULL THEN
+    RAISE EXCEPTION 'Игрок не найден';
+  END IF;
+  RETURN v_new;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_set_blocked(p_target uuid, p_blocked boolean)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может блокировать игроков';
+  END IF;
+  IF p_target = auth.uid() THEN
+    RAISE EXCEPTION 'Нельзя блокировать аккаунт владельца';
+  END IF;
+  UPDATE public.profiles SET is_blocked = p_blocked, updated_at = now()
+  WHERE id = p_target AND lower(username) <> 'egor4kill';
+  RETURN FOUND;
+END;
+$$;
+
+-- Полное удаление игрока: ставки, профиль и аккаунт авторизации
+CREATE OR REPLACE FUNCTION public.admin_delete_user(p_target uuid)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_count integer := 0;
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может удалять игроков';
+  END IF;
+  IF p_target = auth.uid() THEN
+    RAISE EXCEPTION 'Нельзя удалить аккаунт владельца';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = p_target AND lower(username) = 'egor4kill') THEN
+    RAISE EXCEPTION 'Нельзя удалить аккаунт владельца';
+  END IF;
+  DELETE FROM public.bets WHERE user_id = p_target;
+  DELETE FROM public.profiles WHERE id = p_target;
+  DELETE FROM auth.users WHERE id = p_target;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$$;
+
+-- Расчёт ставок события в базе: p_winner = индекс исхода (won/lost), NULL = отмена (refund)
+CREATE OR REPLACE FUNCTION public.admin_settle_bets(p_event text, p_winner integer)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_win_pick text;
+  v_count integer := 0;
+  v_rows integer;
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может рассчитывать события';
+  END IF;
+  IF p_winner IS NOT NULL THEN
+    SELECT data->'out'->p_winner->>0 INTO v_win_pick FROM public.events WHERE id = p_event;
+    IF v_win_pick IS NULL THEN
+      RAISE EXCEPTION 'Событие или исход не найдены';
+    END IF;
+    UPDATE public.bets SET status = 'won', payout = round(stake * odds, 2)
+    WHERE event_id = p_event AND status = 'pending' AND coalesce(pick, pick_name) = v_win_pick;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    v_count := v_count + v_rows;
+    UPDATE public.bets SET status = 'lost', payout = 0
+    WHERE event_id = p_event AND status = 'pending';
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    v_count := v_count + v_rows;
+  ELSE
+    UPDATE public.bets SET status = 'refund', payout = stake
+    WHERE event_id = p_event AND status = 'pending';
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+  END IF;
+  RETURN v_count;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION
+  public.admin_top_up(uuid, numeric),
+  public.admin_reset_balance(uuid),
+  public.admin_set_blocked(uuid, boolean),
+  public.admin_delete_user(uuid),
+  public.admin_settle_bets(text, integer)
+TO authenticated, anon;
