@@ -164,13 +164,13 @@ $$;
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_username_lower_key
 ON public.profiles (lower(username));
 
--- Realtime для events (чтобы статусы долетали до всех игроков мгновенно)
+-- Realtime: события линии — всем игрокам; profiles/bets — для синхронизации
+-- своего профиля и ставок между вкладками/устройствами (RLS отдаёт только свои строки)
 DO $$
 BEGIN
-  ALTER PUBLICATION supabase_realtime ADD TABLE public.events;
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-  WHEN undefined_object THEN NULL;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.events; EXCEPTION WHEN duplicate_object THEN NULL; WHEN undefined_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles; EXCEPTION WHEN duplicate_object THEN NULL; WHEN undefined_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.bets; EXCEPTION WHEN duplicate_object THEN NULL; WHEN undefined_object THEN NULL; END;
 END $$;
 
 -- ====================================================================
