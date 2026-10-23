@@ -1,4 +1,4 @@
-# SVINLINE
+# SWINLINE
 
 Пародийный букмекер на виртуальные SV₽. React + TypeScript + Vite + Supabase
 (Auth через Twitch/GitHub, таблицы profiles / bets / events, Realtime).

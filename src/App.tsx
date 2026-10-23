@@ -85,7 +85,7 @@ function loadJSON<T>(key: string, fallback: T): T {
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' SV₽'
 
 const PigLogo = () => (
-  <svg width="28" height="28" viewBox="0 0 100 100" role="img" aria-label="Свин-маскот SVINLINE">
+  <svg width="28" height="28" viewBox="0 0 100 100" role="img" aria-label="Свин-маскот SWINLINE">
     <use href="#pig" />
   </svg>
 )
@@ -1102,7 +1102,7 @@ export default function App() {
       setNewMatchIsLive(true)
       setNewMatchScore('1 : 0')
       setNewMatchTime('Финал 30 сек')
-      setNewMatchDesc('Прямой эфир со столовой SVINLINE!')
+      setNewMatchDesc('Прямой эфир со столовой SWINLINE!')
     }
     notify('Шаблон применён! Можете отредактировать параметры или сразу опубликовать 🚀')
   }
@@ -1128,7 +1128,7 @@ export default function App() {
       score: newMatchScore.trim() || '0 : 0',
       isLive: newMatchIsLive,
       liveTime: newMatchIsLive ? (newMatchTime.trim() || '1-й тайм 1\'') : (newMatchTime.trim() || 'Скоро'),
-      desc: newMatchDesc.trim() || 'Матч добавлен администратором SVINLINE.',
+      desc: newMatchDesc.trim() || 'Матч добавлен администратором SWINLINE.',
       out: [
         ['П1', o1],
         ['Ничья X', ox],
@@ -1414,7 +1414,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* 1. Header (Winline style with SVINLINE branding) */}
+      {/* 1. Header (Winline style with SWINLINE branding) */}
       <header className="wl-header">
         <div className="wl-header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -1422,7 +1422,7 @@ export default function App() {
             <div className="wl-logo-pill" onClick={() => { setView('line'); setSelectedSport(null) }}>
               <PigLogo />
               <div className="wl-logo-text">
-                SVIN<span>LINE</span>
+                SWIN<span>LINE</span>
               </div>
             </div>
 
@@ -2514,7 +2514,7 @@ export default function App() {
                     {/* Central Mascot Hub */}
                     <div className="wl-wheel-center-hub" onClick={!spinning ? spinRoulette : undefined} title="Крутить корыто">
                       <PigLogo />
-                      <span style={{ fontSize: 9, fontWeight: 800, color: '#f59e0b', marginTop: 2, letterSpacing: 0.5 }}>SVIN</span>
+                      <span style={{ fontSize: 9, fontWeight: 800, color: '#f59e0b', marginTop: 2, letterSpacing: 0.5 }}>SWIN</span>
                     </div>
                   </div>
 
@@ -2588,7 +2588,7 @@ export default function App() {
                       🐷🎮
                     </div>
                     <div style={{ fontFamily: 'var(--font-d)', fontWeight: 800, fontSize: 22, marginTop: 12 }}>
-                      SVIN-ESPORTS ARENA
+                      SWIN-ESPORTS ARENA
                     </div>
                     <div style={{ color: 'var(--tx-secondary)', fontSize: 13, marginTop: 4 }}>
                       {streamPlaying ? 'Прямой эфир турнира CS2 • Идёт разминка' : 'Трансляция на паузе'}
@@ -2846,7 +2846,7 @@ export default function App() {
           {view === 'about' && (
             <div style={{ maxWidth: 860, margin: '0 auto' }}>
               <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
-                О компании SVINLINE
+                О компании SWINLINE
               </h2>
 
               {/* CEO Showcase Card */}
@@ -2866,7 +2866,7 @@ export default function App() {
               >
                 <img
                   src={ceoPhoto}
-                  alt="Генеральный директор SVINLINE"
+                  alt="Генеральный директор SWINLINE"
                   style={{
                     width: 120,
                     height: 150,
@@ -2882,10 +2882,10 @@ export default function App() {
                     <ShieldCheck size={14} /> Руководство компании
                   </div>
                   <h3 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginBottom: 6, fontFamily: 'var(--font-d)' }}>
-                    Генеральный директор SVINLINE
+                    Генеральный директор SWINLINE
                   </h3>
                   <div style={{ fontSize: 14, color: 'var(--tx-secondary)', lineHeight: 1.6 }}>
-                    Основатель и генеральный директор букмекерской платформы SVINLINE. Лично курирует честность выплат, надёжность алгоритмов линии, организацию турниров и стратегическое развитие платформы нового поколения.
+                    Основатель и генеральный директор букмекерской платформы SWINLINE. Лично курирует честность выплат, надёжность алгоритмов линии, организацию турниров и стратегическое развитие платформы нового поколения.
                   </div>
                 </div>
               </div>
@@ -2904,7 +2904,7 @@ export default function App() {
               <div className="wl-banner-card highlight">
                 <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Правила платформы</h3>
                 <p style={{ fontSize: 13, color: 'var(--tx-secondary)', lineHeight: 1.6 }}>
-                  SVINLINE — интерактивная игровая платформа. Внутренняя расчетная единица: SV₽. Стартовый баланс: {fmt(START)}, минимальная ставка: {MINBET} SV₽. Все игровые расчеты производятся в единицах SV₽.
+                  SWINLINE — интерактивная игровая платформа. Внутренняя расчетная единица: SV₽. Стартовый баланс: {fmt(START)}, минимальная ставка: {MINBET} SV₽. Все игровые расчеты производятся в единицах SV₽.
                 </p>
               </div>
             </div>
@@ -3243,7 +3243,7 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <ShieldCheck size={22} color="#f59e0b" />
                 <span style={{ fontWeight: 800, fontSize: 17, color: '#f59e0b' }}>
-                  ПАНЕЛЬ АДМИНИСТРАТОРА ЛИНИИ SVINLINE
+                  ПАНЕЛЬ АДМИНИСТРАТОРА ЛИНИИ SWINLINE
                 </span>
               </div>
               <button onClick={() => setAdminModalOpen(false)} style={{ color: 'var(--tx-muted)' }}>
@@ -3552,7 +3552,7 @@ export default function App() {
                     className="wl-btn-orange"
                     style={{ width: '100%', height: 46, fontSize: 15, borderRadius: 10, marginTop: 10 }}
                   >
-                    + Опубликовать событие в линию SVINLINE 🚀
+                    + Опубликовать событие в линию SWINLINE 🚀
                   </button>
                 </form>
               )}
@@ -3723,7 +3723,7 @@ export default function App() {
           <div className="wl-modal-card" style={{ maxWidth: 420, textAlign: 'center', padding: '24px 20px' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <span style={{ fontWeight: 800, fontSize: 18, color: '#fff' }}>
-                Вход в SVINLINE
+                Вход в SWINLINE
               </span>
               <button onClick={() => setAuthModalOpen(false)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={20} />
@@ -4172,7 +4172,7 @@ export default function App() {
                   className="wl-btn-orange"
                   style={{ width: '100%', height: 46, fontSize: 15, borderRadius: 10, marginTop: 8 }}
                 >
-                  + Опубликовать событие в линию SVINLINE 🚀
+                  + Опубликовать событие в линию SWINLINE 🚀
                 </button>
               </form>
             </div>
@@ -4191,7 +4191,7 @@ export default function App() {
       {/* 8. Discreet Footer */}
       <footer className="wl-footer">
         <div>
-          © 2026 SVINLINE (СВИНЛАЙН). Все права защищены. Играйте ответственно. Внутренняя расчетная единица: SV₽. 18+
+          © 2026 SWINLINE (СВИНЛАЙН). Все права защищены. Играйте ответственно. Внутренняя расчетная единица: SV₽. 18+
         </div>
       </footer>
     </div>

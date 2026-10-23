@@ -114,16 +114,16 @@ def create_og_banner():
     pill_y = 65 * scale
     draw.rounded_rectangle([pill_x, pill_y, pill_x + 360 * scale, pill_y + 60 * scale], radius=30 * scale, fill=(24, 30, 44), outline=(255, 85, 0), width=3 * scale)
     draw_pig(draw, pill_x + 35 * scale, pill_y + 30 * scale, 18 * scale)
-    draw.text((pill_x + 65 * scale, pill_y + 11 * scale), "SVINLINE", fill=(255, 255, 255), font=font_large)
+    draw.text((pill_x + 65 * scale, pill_y + 11 * scale), "SWINLINE", fill=(255, 255, 255), font=font_large)
     draw.text((pill_x + 230 * scale, pill_y + 11 * scale), "BET", fill=(255, 85, 0), font=font_large)
 
     # Tag next to pill
     draw.rounded_rectangle([pill_x + 380 * scale, pill_y + 10 * scale, pill_x + 720 * scale, pill_y + 50 * scale], radius=20 * scale, fill=(255, 85, 0, 40), outline=(255, 85, 0))
-    draw.text((pill_x + 400 * scale, pill_y + 16 * scale), "ОФИЦИАЛЬНАЯ ПЛАТФОРМА", fill=(255, 140, 0), font=font_small)
+    draw.text((pill_x + 400 * scale, pill_y + 16 * scale), "ПАРОДИЙНЫЙ БУКМЕКЕР • БЕЗ РЕАЛЬНЫХ ДЕНЕГ", fill=(255, 140, 0), font=font_small)
 
     # Hero Title
     title_y = 155 * scale
-    draw.text((70 * scale, title_y), "SVINLINE", fill=(255, 255, 255), font=font_huge)
+    draw.text((70 * scale, title_y), "SWINLINE", fill=(255, 255, 255), font=font_huge)
     draw.text((70 * scale + 380 * scale, title_y), "ДЕЛАЕТ РАЗНИЦУ", fill=(255, 85, 0), font=font_huge)
 
     # Subtitle
@@ -133,7 +133,7 @@ def create_og_banner():
     # Feature Badges
     badges = [
         ("🔥 Свин-Лига РПЛ", (255, 85, 0)),
-        ("🚀 Хряк-Крэш 24/7 (Мультиплеер)", (16, 185, 129)),
+        ("🚀 Хряк-Крэш 24/7", (16, 185, 129)),
         ("🎡 Корыто Фортуны", (245, 158, 11)),
         ("🟣 Вход через Twitch", (145, 70, 255))
     ]
@@ -151,7 +151,7 @@ def create_og_banner():
     bonus_y = 425 * scale
     draw.rounded_rectangle([70 * scale, bonus_y, sw - 70 * scale, bonus_y + 130 * scale], radius=20 * scale, fill=(22, 28, 42), outline=(255, 85, 0), width=2 * scale)
     draw.text((105 * scale, bonus_y + 24 * scale), "🎁 СТАРТОВЫЙ БОНУС 10 000 SV₽ КАЖДОМУ ИГРОКУ", fill=(255, 215, 0), font=font_large)
-    draw.text((105 * scale, bonus_y + 76 * scale), "Играй онлайн • Побеждай в общих раундах • Забирай иксы в прямом эфире", fill=(180, 195, 220), font=font_small)
+    draw.text((105 * scale, bonus_y + 76 * scale), "Играй онлайн • Раунды каждые 6 секунд • Забирай иксы до x25.0", fill=(180, 195, 220), font=font_small)
 
     # Big Giant Mascot on right side
     mascot_x = sw - 230 * scale
