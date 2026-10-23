@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ROWS, TABLES, RISKS, drop, payout, r2, type Risk } from './plinkoLogic'
+import { ROWS, TABLES, RISKS, r2, type Risk } from './plinkoLogic'
 
+type DropResult = { slot: number; mul: number; win: number }
 type Props = {
   bal: number
-  onBet: (stake: number) => boolean // списывает ставку, вернёт false если нельзя (нет входа, не хватает SV₽)
-  onWin: (amount: number, label: string) => void // начисляет выигрыш
+  // Сервер принимает ставку, решает ячейку и платит; возвращает результат броска
+  onBet: (stake: number, risk: Risk) => Promise<DropResult | null>
 }
 type Ball = { id: number; pts: [number, number][]; t0: number; stake: number; risk: Risk; slot: number; win: number; x: number; y: number }
 
@@ -15,13 +16,26 @@ const pegY = (r: number) => TOP + r * DY
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 const color = (m: number) => (m >= 10 ? '#ff4d4d' : m >= 2 ? '#ff6a00' : m >= 1 ? '#ffb35c' : '#6b6e74')
 
-// Путь: старт над верхушкой, затем удар о колышек в каждом ряду, затем ячейка
+// Путь: старт над верхушкой, удар о колышки, ячейка. Визуальные шаги подбираем так,
+// чтобы сумма «правых» равнялась серверной ячейке — куда упал, решает сервер.
 function path(bits: number[]): [number, number][] {
   const pts: [number, number][] = [[CX, TOP - 44]]
   let k = 0
   for (let r = 0; r < ROWS; r++) { pts.push([pegX(r, k), pegY(r) - 11]); k += bits[r] }
   pts.push([CX + (k - ROWS / 2) * DX, SLOT_Y + 12])
   return pts
+}
+
+function bitsForSlot(slot: number): number[] {
+  const bits = Array(ROWS).fill(0)
+  const idxs = [...Array(ROWS).keys()]
+  for (let i = idxs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idxs[i], idxs[j]] = [idxs[j], idxs[i]]
+  }
+  let left = slot
+  for (const k of idxs) { if (left > 0) { bits[k] = 1; left-- } }
+  return bits
 }
 
 function PigBall({ x, y }: { x: number; y: number }) {
@@ -36,17 +50,18 @@ function PigBall({ x, y }: { x: number; y: number }) {
   )
 }
 
-export default function Plinko({ bal, onBet, onWin }: Props) {
+export default function Plinko({ bal, onBet }: Props) {
   const [stake, setStake] = useState('100')
   const [risk, setRisk] = useState<Risk>('mid')
   const [, setTick] = useState(0)
   const [hist, setHist] = useState<{ id: number; m: number }[]>([])
   const [flash, setFlash] = useState<{ slot: number; n: number } | null>(null)
+  const [busy, setBusy] = useState(false)
   const balls = useRef<Ball[]>([])
   const idRef = useRef(0)
   const raf = useRef(0)
-  const cb = useRef({ onWin })
-  cb.current = { onWin }
+  const cb = useRef({ onBet })
+  cb.current = { onBet }
   const calm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const STEP = calm ? 40 : 230
 
@@ -63,9 +78,8 @@ export default function Plinko({ bal, onBet, onWin }: Props) {
         return true
       })
     } catch (e) { console.error(e) }
-    // выплаты вне расчёта кадра: ошибка в одной не останавливает анимацию остальных
+    // выплата уже прошла на сервере при броске — здесь только показываем результат
     done.forEach(b => {
-      try { cb.current.onWin(b.win, `${TABLES[b.risk][b.slot]}x`) } catch (e) { console.error(e) }
       setHist(h => [{ id: b.id, m: TABLES[b.risk][b.slot] }, ...h].slice(0, 10))
       setFlash({ slot: b.slot, n: b.id })
     })
@@ -73,22 +87,27 @@ export default function Plinko({ bal, onBet, onWin }: Props) {
     if (balls.current.length) raf.current = requestAnimationFrame(frame)
     else running.current = false
   }
-  // если ушли с вкладки, пока шарики летят, выплачиваем их сразу, чтобы ставка не пропала
+  // уходя со вкладки, просто останавливаем анимацию — деньги на сервере в безопасности
   useEffect(() => () => {
     cancelAnimationFrame(raf.current)
     running.current = false
-    balls.current.forEach(b => { try { cb.current.onWin(b.win, `${TABLES[b.risk][b.slot]}x`) } catch (e) { console.error(e) } })
     balls.current = []
   }, [])
 
-  const launch = () => {
+  const launch = async () => {
     const s = Math.floor(parseFloat(stake))
     if (!(s >= MIN_BET)) return alert(`Минимальная ставка: ${MIN_BET} SV₽`)
-    if (balls.current.length >= MAX_BALLS) return
-    if (!onBet(s)) return
-    const d = drop() // результат уже решён, дальше только показ
-    const p = path(d.bits)
-    balls.current.push({ id: ++idRef.current, pts: p, t0: performance.now(), stake: s, risk, slot: d.slot, win: payout(s, risk, d.slot), x: p[0][0], y: p[0][1] })
+    if (balls.current.length >= MAX_BALLS || busy) return
+    setBusy(true)
+    let res: DropResult | null = null
+    try {
+      res = await cb.current.onBet(s, risk)
+    } finally {
+      setBusy(false)
+    }
+    if (!res) return
+    const p = path(bitsForSlot(res.slot))
+    balls.current.push({ id: ++idRef.current, pts: p, t0: performance.now(), stake: s, risk, slot: res.slot, win: res.win, x: p[0][0], y: p[0][1] })
     if (!running.current) { running.current = true; raf.current = requestAnimationFrame(frame) }
   }
 
@@ -124,9 +143,9 @@ export default function Plinko({ bal, onBet, onWin }: Props) {
           style={{ width: 110, padding: '12px', borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
         {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
         <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
-        <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800 }} onClick={launch}>Бросить Пяточка</button>
+        <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: busy ? 0.6 : 1 }} onClick={launch}>{busy ? 'Бросок…' : 'Бросить Пяточка'}</button>
       </div>
-      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Выплата = ставка × икс ячейки. Сейчас на балансе {fmt(r2(bal))} SV₽.</p>
+      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Выплата = ставка × икс ячейки (решает сервер). Сейчас на балансе {fmt(r2(bal))} SV₽.</p>
     </div>
   )
 }

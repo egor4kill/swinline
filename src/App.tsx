@@ -53,7 +53,8 @@ import {
   type Ev,
   type UserAccount
 } from './data'
-import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
+import { payout, r2 } from './logic'
+import { mult as crashMult, flightSeconds } from './crashLogic'
 import { supabase, ADMIN_USERNAME } from './supabase'
 import { SECTORS as ROULETTE_SECTORS } from './wheelLogic'
 import ceoPhoto from './assets/ceo.jpg'
@@ -250,18 +251,21 @@ export default function App() {
         winner: typeof r.winner === 'number' ? r.winner : null
       }))
       const nextIds = new Set(rows.map(r => r.ev.id))
-      // Событие исчезло из базы (удалено админом): возвращаем свои открытые ставки
+      // Событие исчезло из базы (удалено админом): отмечаем свои ставки возвратом.
+      // Деньги начисляет сервер (admin_settle_bets при удалении) — баланс приедет через Realtime.
       seenDbEventIdsRef.current.forEach(id => {
         if (nextIds.has(id)) return
         const prev = sRef.current
         if (!prev || !(prev.bets || []).some((b: any) => b.ev === id && b.state === 'open')) return
         const next = structuredClone(prev)
         next.st = next.st || {}
-        cancelEvent(next, id, [])
+        next.st[id] = { s: 'cancel' }
+        ;(next.bets || []).forEach((b: any) => {
+          if (b.ev !== id || b.state !== 'open') return
+          b.state = 'refund'
+          next.log.unshift({ t: Date.now(), x: 'Возврат (событие удалено), начислено сервером', d: b.stake })
+        })
         setS(next)
-        if (currentUserRef.current && next.bal !== prev.bal) {
-          supabase.from('profiles').update({ bal: next.bal, updated_at: new Date().toISOString() }).eq('id', currentUserRef.current.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
-        }
       })
       seenDbEventIdsRef.current = nextIds
       setDbEvents(rows)
@@ -327,12 +331,13 @@ export default function App() {
   const [wonSectorIdx, setWonSectorIdx] = useState<number | null>(null)
   const [rouletteResult, setRouletteResult] = useState<string | null>(null)
 
-  // 7. Crash Game State (раунды считаются локально в браузере каждого игрока)
+  // 7. Crash Game State — общие раунды из базы: точка краша спрятана на сервере,
+  //    все игроки летят в одной ракете (crash_state + Realtime)
+  const [crashRound, setCrashRound] = useState<{ id: number; startAt: number; bettingSeconds: number; crashed: boolean; crashPoint: number | null } | null>(null)
   const [crashPhase, setCrashPhase] = useState<'betting' | 'flying' | 'crashed'>('betting')
   const [crashMultiplier, setCrashMultiplier] = useState(1.00)
   const [crashCountdown, setCrashCountdown] = useState(6.0)
-  const [crashHistory, setCrashHistory] = useState<number[]>([1.45, 2.80, 1.15, 6.20, 1.05, 3.42, 1.95, 2.15])
-  const [crashRoundId, setCrashRoundId] = useState(1042)
+  const [crashHistory, setCrashHistory] = useState<number[]>([])
   const [crashStake, setCrashStake] = useState('200')
   const [crashAutoCashout, setCrashAutoCashout] = useState('')
   const [myCrashBet, setMyCrashBet] = useState<{
@@ -342,8 +347,10 @@ export default function App() {
     winAmount?: number
   } | null>(null)
   const [liveCrashBets, setLiveCrashBets] = useState<any[]>([])
-  const crashTargetRef = useRef<number>(2.40)
-  const crashStartTimeRef = useRef<number>(Date.now())
+  const crashRoundRef = useRef<{ id: number; startAt: number; bettingSeconds: number; crashed: boolean; crashPoint: number | null } | null>(null)
+  crashRoundRef.current = crashRound
+  const serverOffsetRef = useRef(0) // разница часов сервера и браузера
+  const serverNow = () => Date.now() + serverOffsetRef.current
 
   // 8. Admin Form State for New Match
   const [newMatchTitle, setNewMatchTitle] = useState('')
@@ -419,8 +426,8 @@ export default function App() {
     lastSyncBalRef.current = S.bal
   }, [S.bal, currentUserId])
 
-  // Статусы событий из общей базы применяются у всех игроков:
-  // расчёт/отмена платят по их собственным локальным ставкам, закрытие/открытие блокируют приём
+  // Статусы событий из общей базы применяются у всех игроков: отмечаем исходы локально,
+  // деньги начисляет сервер (admin_settle_bets), баланс приедет через Realtime по profiles
   const appliedEventStatusRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     dbEvents.forEach(d => {
@@ -433,16 +440,13 @@ export default function App() {
       const next = structuredClone(prev)
       next.st = next.st || {}
       if (d.status === 'done' && d.winner !== null) {
-        settleEvent(next, d.ev.id, d.winner, allEvents)
+        markOutcome(next, d.ev.id, 'done', d.winner)
       } else if (d.status === 'cancel') {
-        cancelEvent(next, d.ev.id, allEvents)
+        markOutcome(next, d.ev.id, 'cancel')
       } else {
         next.st[d.ev.id] = { s: d.status === 'closed' ? 'closed' : 'open' }
       }
       setS(next)
-      if (currentUserRef.current && next.bal !== prev.bal) {
-        supabase.from('profiles').update({ bal: next.bal, updated_at: new Date().toISOString() }).eq('id', currentUserRef.current.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
-      }
     })
   }, [dbEvents, allEvents])
 
@@ -533,6 +537,13 @@ export default function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
         fetchDbEvents()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crash_rounds' }, () => {
+        pollCrashState()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crash_bets' }, () => {
+        const r = crashRoundRef.current
+        if (r) fetchCrashBets(r.id)
       })
       .subscribe()
 
@@ -643,36 +654,62 @@ export default function App() {
 
   const notify = (m: string) => setMsg(m)
 
+  // Локальное изменение состояния (косметика: ставки, лог). Баланс меняет только сервер —
+  // все игровые операции идут через RPC и возвращают новый баланс.
   const mutate = (fn: (s: any) => void, message?: string) => {
     const next = structuredClone(S)
-    const oldBal = S.bal
     fn(next)
     setS(next)
     if (message) notify(message)
-
-    if (currentUser && next.bal !== oldBal) {
-      supabase.from('profiles').update({
-        bal: next.bal,
-        updated_at: new Date().toISOString()
-      }).eq('id', currentUser.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
-    }
   }
 
-  const addVirtualMoney = (amount: number = 5000) => {
-    const now = Date.now()
-    if (now - lastDepositRef.current < 2500) {
-      notify('Подождите пару секунд перед следующим начислением')
-      return
-    }
+  // Отмечает исход события локально (статусы ставок + лог), НЕ трогая баланс:
+  // деньги всем игрокам начисляет сервер (admin_settle_bets), баланс приедет через Realtime
+  const markOutcome = (s: any, evId: string, st: 'done' | 'cancel', winner?: number) => {
+    const ev = allEvents.find(e => e.id === evId)
+    s.st = s.st || {}
+    s.st[evId] = st === 'done' ? { s: 'done', w: winner } : { s: 'cancel' }
+    s.bets.forEach((b: any) => {
+      if (b.ev !== evId || b.state !== 'open') return
+      if (st === 'done' && b.i === winner) {
+        b.state = 'won'
+        s.log.unshift({ t: Date.now(), x: 'Выигрыш: ' + (ev ? ev.title : evId) + ' (начислено сервером)', d: payout(b.stake, b.odds) })
+      } else if (st === 'done') {
+        b.state = 'lost'
+        s.log.unshift({ t: Date.now(), x: 'Проигрыш: ' + (ev ? ev.title : evId), d: 0 })
+      } else {
+        b.state = 'refund'
+        s.log.unshift({ t: Date.now(), x: 'Возврат (событие отменено): ' + (ev ? ev.title : evId) + ' (начислено сервером)', d: b.stake })
+      }
+    })
+  }
+
+  // Бесплатное начисление: для вошедших — через сервер (кулдаун и лимит проверяет БД),
+  // для гостей — локальный демо-баланс (тратить его всё равно нельзя)
+  const addVirtualMoney = async (amount: number = 5000) => {
     if (S.bal >= 100000) {
       notify('Баланс уже превышает 100 000 SV₽! Дополнительное начисление не требуется.')
       return
     }
-    lastDepositRef.current = now
-    mutate(s => {
-      s.bal = r2(s.bal + amount)
-      s.log.unshift({ t: Date.now(), x: `Пополнение ${fmt(amount)}`, d: amount })
-    }, `+${fmt(amount)} зачислено на баланс! 🎉`)
+    if (!currentUser) {
+      mutate(s => {
+        s.bal = r2(s.bal + amount)
+        s.log.unshift({ t: Date.now(), x: `Пополнение ${fmt(amount)}`, d: amount })
+      }, `+${fmt(amount)} зачислено на баланс! 🎉`)
+      return
+    }
+    const { data, error } = await supabase.rpc('self_add_free', { p_amount: amount })
+    if (error || !data) {
+      notify(`❌ ${error?.message || 'Не удалось начислить'}`)
+      return
+    }
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Пополнение ${fmt(amount)}`, d: amount })
+      next.bal = Number(data.bal)
+      return next
+    })
+    notify(`+${fmt(amount)} зачислено на баланс! 🎉`)
   }
 
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
@@ -719,10 +756,6 @@ export default function App() {
       setErr('Минимальная сумма ставки — 10 SV₽')
       return
     }
-    if (v > S.bal) {
-      setErr('Недостаточно SV₽ на балансе')
-      return
-    }
 
     const ev = allEvents.find(event => event.id === selectedBet.evId)
     if (!ev) {
@@ -734,132 +767,117 @@ export default function App() {
       return
     }
 
-    const realOdds = Number(ev.out[selectedBet.outcomeIdx]?.[1]) || selectedBet.odds || 1.85
-    const realPickTitle = ev.out[selectedBet.outcomeIdx]?.[0] || selectedBet.outcomeTitle || 'Исход'
-
     busy.current = true
-    const next = structuredClone(S)
-    const res = placeBet(next, selectedBet.evId, selectedBet.outcomeIdx, v, allEvents)
+    // Ставку принимает сервер: проверит баланс, спишет и запишет в bets
+    const { data, error } = await supabase.rpc('place_sports_bet', {
+      p_event: selectedBet.evId,
+      p_outcome: selectedBet.outcomeIdx,
+      p_stake: v
+    })
+    setTimeout(() => { busy.current = false }, 350)
 
-    if (res.err) {
-      busy.current = false
-      setErr(res.err)
+    if (error || !data) {
+      setErr(error?.message || 'Не удалось принять ставку')
       return
     }
 
-    setTimeout(() => { busy.current = false }, 350)
-    setS(next)
-
-    // Sync real bet and balance into Supabase database
-    supabase.from('bets').insert({
-      user_id: currentUser.id,
-      username: currentUser.username,
-      event_id: selectedBet.evId,
-      match_title: ev.title || selectedBet.evId,
-      pick: realPickTitle,
-      pick_name: realPickTitle,
-      odds: realOdds,
+    const next = structuredClone(S)
+    next.bal = Number(data.bal)
+    next.bets.unshift({
+      id: 'b' + Date.now() + Math.random().toString(36).slice(2, 6),
+      ev: selectedBet.evId,
+      i: selectedBet.outcomeIdx,
       stake: v,
-      status: 'pending'
-    }).then(() => {
-      fetchSupabaseUsers()
-    }, err => console.error('Failed to sync bet to Supabase:', err))
-
-    supabase.from('profiles').update({
-      bal: next.bal,
-      updated_at: new Date().toISOString()
-    }).eq('id', currentUser.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
+      odds: Number(data.odds) || selectedBet.odds,
+      state: 'open'
+    })
+    next.log.unshift({ t: Date.now(), x: 'Ставка: ' + ev.title + ' (' + (data.pick || selectedBet.outcomeTitle) + ')', d: -v })
+    setS(next)
+    fetchSupabaseUsers()
 
     setSelectedBet(null)
     setErr('')
     notify(`Ставка ${fmt(v)} принята и сохранена в базе! ✅`)
   }
 
-  // Crash Master Loop
-  useEffect(() => {
-    let timeoutId: any = null
+  // ===== Общий движок Хряк-Крэша: раунды и ставки живут в базе =====
+  const fetchCrashBets = useCallback(async (roundId: number) => {
+    const { data } = await supabase.from('crash_bets').select('*').eq('round_id', roundId).order('created_at', { ascending: true })
+    if (!data) return
+    setLiveCrashBets(data)
+    const mine = data.find((b: any) => b.user_id === currentUserRef.current?.id)
+    setMyCrashBet(mine ? {
+      stake: Number(mine.stake),
+      autoCashout: mine.auto_cashout != null ? Number(mine.auto_cashout) : undefined,
+      cashedOutMul: mine.cashed_out_mul != null ? Number(mine.cashed_out_mul) : undefined,
+      winAmount: mine.win_amount != null ? Number(mine.win_amount) : undefined
+    } : null)
+  }, [])
 
-    const intervalId = setInterval(() => {
-      setCrashPhase(phase => {
-        if (phase === 'betting') {
-          setCrashCountdown(prev => {
-            const next = r2(prev - 0.05)
-            if (next <= 0) {
-              // Time to fly!
-              const r = Math.random()
-              const target = r < 0.03 ? 1.00 : r2(Math.max(1.01, Math.min(25.0, 0.96 / (1 - r * 0.96))))
-              crashTargetRef.current = target
-              crashStartTimeRef.current = Date.now()
-              setCrashMultiplier(1.00)
+  const fetchCrashHistory = useCallback(async () => {
+    const { data } = await supabase.from('crash_rounds').select('crash_point').not('crash_point', 'is', null).order('id', { ascending: false }).limit(12)
+    if (data) setCrashHistory(data.map((r: any) => Number(r.crash_point)))
+  }, [])
 
-              // Keep real user bets
-              setLiveCrashBets(prevBets => prevBets.filter(b => b.isUser))
-
-              return 0
-            }
-            return next
-          })
-          return crashCountdown <= 0.05 ? 'flying' : 'betting'
-        }
-
-        if (phase === 'flying') {
-          const elapsed = (Date.now() - crashStartTimeRef.current) / 1000
-          const currentMul = r2(1.00 + 0.06 * elapsed + 0.022 * Math.pow(elapsed, 1.8))
-
-          if (currentMul >= crashTargetRef.current) {
-            // CRASH!
-            const finalMul = crashTargetRef.current
-            setCrashMultiplier(finalMul)
-            setCrashHistory(prev => [finalMul, ...prev.slice(0, 11)])
-
-            // Mark remaining players as crashed
-            setLiveCrashBets(prev => prev.map(b => (!b.cashedOutMul ? { ...b, crashed: true } : b)))
-
-            // Auto-schedule next round after 3.2s
-            timeoutId = setTimeout(() => {
-              setCrashRoundId(r => r + 1)
-              setCrashMultiplier(1.00)
-              setCrashCountdown(6.0)
-              setMyCrashBet(null)
-              setLiveCrashBets([])
-              setCrashPhase('betting')
-            }, 3200)
-
-            return 'crashed'
-          } else {
-            setCrashMultiplier(currentMul)
-
-
-            // Check auto-cashout for real user
-            setMyCrashBet(currentBet => {
-              if (currentBet && !currentBet.cashedOutMul && currentBet.autoCashout && currentMul >= currentBet.autoCashout) {
-                const winAmount = r2(currentBet.stake * currentBet.autoCashout)
-                mutate(s => {
-                  s.bal = r2(s.bal + winAmount)
-                  s.log.unshift({ t: Date.now(), x: `Авто-вывод в Хряк-Крэш (x${currentBet.autoCashout})`, d: winAmount })
-                }, `Авто-вывод ${fmt(winAmount)} по x${currentBet.autoCashout}! 🎉`)
-
-                setLiveCrashBets(bets => bets.map(b => b.isUser ? { ...b, cashedOutMul: currentBet.autoCashout, winAmount } : b))
-                return { ...currentBet, cashedOutMul: currentBet.autoCashout, winAmount }
-              }
-              return currentBet
-            })
-
-            return 'flying'
-          }
-        }
-
-        return phase
-      })
-    }, 50)
-
-    return () => {
-      clearInterval(intervalId)
-      if (timeoutId) clearTimeout(timeoutId)
+  const pollCrashState = useCallback(async () => {
+    const { data, error } = await supabase.rpc('crash_state')
+    if (error || !data) return
+    serverOffsetRef.current = new Date(data.now).getTime() - Date.now()
+    const next = {
+      id: Number(data.id),
+      startAt: new Date(data.start_at).getTime(),
+      bettingSeconds: Number(data.betting_seconds),
+      crashed: Boolean(data.crashed),
+      crashPoint: data.crash_point === null || data.crash_point === undefined ? null : Number(data.crash_point)
     }
-  }, [crashCountdown])
+    const prev = crashRoundRef.current
+    if (!prev || prev.id !== next.id) {
+      fetchCrashBets(next.id)
+      fetchCrashHistory()
+    }
+    crashRoundRef.current = next
+    setCrashRound(next)
+  }, [fetchCrashBets, fetchCrashHistory])
 
-  const placeCrashBet = () => {
+  // Опрос состояния: во время полёта решается момент краша, в остальное время можно реже
+  useEffect(() => {
+    pollCrashState()
+    const id = setInterval(() => {
+      if (view !== 'games24' || gamesTab !== 'crash') return
+      const r = crashRoundRef.current
+      if (r && r.crashed && r.crashPoint !== null) {
+        const end = r.startAt + (r.bettingSeconds + flightSeconds(r.crashPoint) + 3.2) * 1000
+        if (serverNow() < end - 1200) return // конец раунда уже известен — не спамим запросами
+      }
+      pollCrashState()
+    }, 400)
+    return () => clearInterval(id)
+  }, [pollCrashState, view, gamesTab])
+
+  // Локальная анимация: фаза и мультипликатор считаются от времени старта раунда из базы
+  useEffect(() => {
+    const id = setInterval(() => {
+      const r = crashRoundRef.current
+      if (!r) return
+      const now = serverNow()
+      const bettingEnd = r.startAt + r.bettingSeconds * 1000
+      if (now < bettingEnd) {
+        setCrashPhase('betting')
+        setCrashCountdown(Math.max(0, (bettingEnd - now) / 1000))
+        setCrashMultiplier(1.00)
+      } else if (r.crashed && r.crashPoint !== null) {
+        setCrashPhase('crashed')
+        setCrashMultiplier(r.crashPoint)
+      } else {
+        const t = (now - bettingEnd) / 1000
+        setCrashPhase('flying')
+        setCrashMultiplier(r2(crashMult(t)))
+      }
+    }, 50)
+    return () => clearInterval(id)
+  }, [])
+
+  const placeCrashBet = async () => {
     if (!currentUser) {
       setAuthModalOpen(true)
       notify('Для игры необходимо войти через Twitch!')
@@ -869,6 +887,8 @@ export default function App() {
       notify('Ваш аккаунт заблокирован администратором!')
       return
     }
+    const r = crashRoundRef.current
+    if (!r) return
     if (crashPhase !== 'betting') {
       notify('Приём ставок на текущий раунд завершён. Дождитесь следующего!')
       return
@@ -883,72 +903,69 @@ export default function App() {
       notify('Минимальная ставка — 10 SV₽')
       return
     }
-    if (v > S.bal) {
-      notify('Недостаточно SV₽ на балансе')
+    const autoMul = parseFloat(crashAutoCashout)
+    const validAuto = isFinite(autoMul) && autoMul >= 1.05 ? r2(autoMul) : null
+
+    const { data, error } = await supabase.rpc('crash_place_bet', { p_round: r.id, p_stake: v, p_auto: validAuto })
+    if (error) {
+      notify(`❌ ${error.message}`)
       return
     }
-
-    const autoMul = parseFloat(crashAutoCashout)
-    const validAuto = isFinite(autoMul) && autoMul >= 1.05 ? r2(autoMul) : undefined
-
-    mutate(s => {
-      s.bal = r2(s.bal - v)
-      s.log.unshift({ t: Date.now(), x: `Ставка в раунде Хряк-Крэш #${crashRoundId}`, d: -v })
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Ставка в общем раунде Хряк-Крэш #${r.id}`, d: -v })
+      if (data && data.bal !== undefined) next.bal = Number(data.bal)
+      return next
     })
-
-    setMyCrashBet({
-      stake: v,
-      autoCashout: validAuto
-    })
-
-    setLiveCrashBets(prev => [
-      {
-        id: currentUser.id,
-        name: currentUser.username,
-        avatar: currentUser.avatar,
-        stake: v,
-        isUser: true
-      },
-      ...prev.filter(b => b.id !== currentUser.id)
-    ])
-
-    notify(`Ставка ${fmt(v)} на раунд #${crashRoundId} принята! 🚀`)
+    fetchCrashBets(r.id)
+    notify(`Ставка ${fmt(v)} на общий раунд #${r.id} принята! 🚀`)
   }
 
-  const cancelCrashBet = () => {
-    if (crashPhase !== 'betting' || !myCrashBet) return
+  const cancelCrashBet = async () => {
+    const r = crashRoundRef.current
+    if (!r || !myCrashBet || myCrashBet.cashedOutMul) return
     const refund = myCrashBet.stake
-    mutate(s => {
-      s.bal = r2(s.bal + refund)
-      s.log.unshift({ t: Date.now(), x: `Отмена ставки в Хряк-Крэш #${crashRoundId}`, d: refund })
+    const { data, error } = await supabase.rpc('crash_cancel_bet', { p_round: r.id })
+    if (error) {
+      notify(`❌ ${error.message}`)
+      return
+    }
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Отмена ставки в Хряк-Крэш #${r.id}`, d: refund })
+      if (data && data.bal !== undefined) next.bal = Number(data.bal)
+      return next
     })
     setMyCrashBet(null)
-    setLiveCrashBets(prev => prev.filter(b => !b.isUser))
+    fetchCrashBets(r.id)
     notify(`Ставка ${fmt(refund)} возвращена на баланс!`)
   }
 
-  const cashoutCrash = () => {
-    if (crashPhase !== 'flying' || !myCrashBet || myCrashBet.cashedOutMul) return
+  const cashoutCrash = async () => {
+    const r = crashRoundRef.current
+    if (!r || !myCrashBet || myCrashBet.cashedOutMul) return
 
-    const mul = r2(crashMultiplier)
-    const winAmount = r2(myCrashBet.stake * mul)
-
+    const { data, error } = await supabase.rpc('crash_cashout', { p_round: r.id })
+    if (error) {
+      notify(`❌ ${error.message}`)
+      fetchCrashBets(r.id)
+      return
+    }
+    const mul = Number(data.mul)
+    const winAmount = Number(data.win)
     setMyCrashBet(prev => prev ? { ...prev, cashedOutMul: mul, winAmount } : null)
-
-    setLiveCrashBets(prev => prev.map(b => b.isUser ? {
-      ...b,
-      cashedOutMul: mul,
-      winAmount
-    } : b))
-
-    mutate(s => {
-      s.bal = r2(s.bal + winAmount)
-      s.log.unshift({ t: Date.now(), x: `Выигрыш в общем раунде Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
-    }, `Забрано ${fmt(winAmount)} по коэффициенту ${mul.toFixed(2)}x! 🎉`)
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Выигрыш в общем раунде Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
+      next.bal = Number(data.bal)
+      return next
+    })
+    fetchCrashBets(r.id)
+    notify(`Забрано ${fmt(winAmount)} по коэффициенту ${mul.toFixed(2)}x! 🎉`)
   }
 
-  // Roulette Spin Logic - Physics-based Fortune Wheel
-  const spinRoulette = () => {
+  // Roulette Spin Logic - Physics-based Fortune Wheel (результат решает сервер)
+  const spinRoulette = async () => {
     if (!currentUser) {
       setAuthModalOpen(true)
       notify('Для игры необходимо войти через Twitch!')
@@ -959,22 +976,31 @@ export default function App() {
       return
     }
     if (spinning) return
-    if (S.bal < 100) {
-      notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽».')
+
+    const { data, error } = await supabase.rpc('wheel_spin')
+    if (error || !data) {
+      notify(`❌ ${error?.message || 'Не удалось крутить'}`)
       return
     }
+
     setSpinning(true)
     setRouletteResult(null)
     setWonSectorIdx(null)
 
-    mutate(s => {
-      s.bal = r2(s.bal - 100)
-      s.log.unshift({ t: Date.now(), x: 'Ставка в «Корыто Фортуны»', d: -100 })
-    })
-
-    const winningIdx = Math.floor(Math.random() * ROULETTE_SECTORS.length)
+    const winningIdx = Number(data.sector)
     const sector = ROULETTE_SECTORS[winningIdx]
-    const win = r2(100 * sector.mul)
+    const win = Number(data.win)
+    const bal = Number(data.bal)
+
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: 'Ставка в «Корыто Фортуны»', d: -100 })
+      if (win > 0) {
+        next.log.unshift({ t: Date.now(), x: `Выигрыш в «Корыто Фортуны» (${sector.label} • ${sector.title})`, d: win })
+      }
+      next.bal = bal
+      return next
+    })
 
     // Calculate rotation to land winningIdx at 270 deg (top pointer)
     const sectorCenter = (winningIdx + 0.5) * WHEEL_SEC_DEG
@@ -987,66 +1013,97 @@ export default function App() {
     setWheelRotation(finalRotation)
 
     setTimeout(() => {
-      mutate(s => {
-        if (win > 0) {
-          s.bal = r2(s.bal + win)
-          s.log.unshift({ t: Date.now(), x: `Выигрыш в «Корыто Фортуны» (${sector.label} • ${sector.title})`, d: win })
-        }
-      })
       setSpinning(false)
       setWonSectorIdx(winningIdx)
       setRouletteResult(sector.mul === 0 ? `Увы! Выпало ${sector.label} (${sector.title}) 🐽` : `🎉 Ура! Выпало ${sector.label} — ${sector.title} (+${fmt(win)})!`)
     }, 4200)
   }
 
-  // Ежедневная награда: раз в календарный день, серия растёт
-  const claimDaily = () => {
+  // Ежедневная награда: серия и начисление живут на сервере (claim_daily)
+  const claimDaily = async () => {
     if (!currentUser) { setAuthModalOpen(true); notify('Войди через Twitch, чтобы получать награды'); return }
     if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return }
-    const res = daily.claim()
+    const res = await daily.claim()
     if (!res) return
-    mutate(s => {
-      s.bal = r2(s.bal + res.reward)
-      s.log.unshift({ t: Date.now(), x: `Ежедневная награда, день серии ${res.day}`, d: res.reward })
-    }, `🎁 +${fmt(res.reward)} (серия ${res.day} дн.)`)
+    if ('error' in res) { notify(`❌ ${res.error}`); return }
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Ежедневная награда, день серии ${res.day}`, d: res.reward })
+      next.bal = res.bal
+      return next
+    })
+    notify(`🎁 +${fmt(res.reward)} (серия ${res.day} дн.)`)
   }
 
-  // Грязевые лужи: ставка списывается на старте раунда, выплата при «Забрать»
-  const puddlesBet = (stake: number) => {
-    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return false }
-    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return false }
-    if (S.bal < stake) { notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽».'); return false }
-    mutate(s => {
-      s.bal = r2(s.bal - stake)
-      s.log.unshift({ t: Date.now(), x: 'Ставка в «Грязевые лужи»', d: -stake })
+  // Грязевые лужи: раунд, раскладка луж и выплаты — на сервере
+  const puddlesStart = async (stake: number, mines: number): Promise<string | null> => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
+    const { data, error } = await supabase.rpc('puddles_start', { p_stake: stake, p_mines: mines })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось начать раунд'}`); return null }
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: 'Ставка в «Грязевые лужи»', d: -stake })
+      next.bal = Number(data.bal)
+      return next
     })
-    return true
-  }
-  const puddlesWin = (win: number, label: string) => {
-    if (win <= 0) return
-    mutate(s => {
-      s.bal = r2(s.bal + win)
-      s.log.unshift({ t: Date.now(), x: `Выигрыш в «Грязевые лужи» (${label})`, d: win })
-    })
+    return String(data.round_id)
   }
 
-  // Пяточок-Плинко: ставка списывается при броске, выигрыш приходит, когда шарик упал в ячейку
-  const plinkoBet = (stake: number) => {
-    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return false }
-    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return false }
-    if (S.bal < stake) { notify('Недостаточно SV₽! Нажмите «+ Начислить SV₽».'); return false }
-    mutate(s => {
-      s.bal = r2(s.bal - stake)
-      s.log.unshift({ t: Date.now(), x: 'Ставка в «Пяточок-Плинко»', d: -stake })
-    })
-    return true
+  const puddlesPick = async (roundId: string, cell: number) => {
+    const { data, error } = await supabase.rpc('puddles_pick', { p_round: roundId, p_cell: cell })
+    if (error || !data) { notify(`❌ ${error?.message || 'Ошибка хода'}`); return null }
+    if (data.auto_cashed) {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: `Выигрыш в «Грязевые лужи» (x${data.mul})`, d: Number(data.win) })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
+    return data
   }
-  const plinkoWin = (win: number, label: string) => {
-    if (win <= 0) return
-    mutate(s => {
-      s.bal = r2(s.bal + win)
-      s.log.unshift({ t: Date.now(), x: `Выигрыш в «Пяточок-Плинко» (${label})`, d: win })
+
+  const puddlesCash = async (roundId: string) => {
+    const { data, error } = await supabase.rpc('puddles_cash', { p_round: roundId })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось забрать'}`); return null }
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Выигрыш в «Грязевые лужи» (x${data.mul})`, d: Number(data.win) })
+      next.bal = Number(data.bal)
+      return next
     })
+    return data
+  }
+
+  // Восстановление незакрытого раунда после перезагрузки страницы
+  const puddlesRestore = async (): Promise<{ roundId: string; stake: number; mines: number; opened: number[] } | null> => {
+    const { data } = await supabase
+      .from('puddles_rounds')
+      .select('*')
+      .eq('status', 'play')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (!data) return null
+    return { roundId: String(data.id), stake: Number(data.stake), mines: Number(data.mines_count), opened: (data.opened || []) as number[] }
+  }
+
+  // Пяточок-Плинко: бросок и выплата решаются на сервере, клиент только показывает полёт
+  const plinkoBet = async (stake: number, risk: string): Promise<{ slot: number; mul: number; win: number } | null> => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
+    const { data, error } = await supabase.rpc('plinko_drop', { p_stake: stake, p_risk: risk })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось бросить'}`); return null }
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: 'Ставка в «Пяточок-Плинко»', d: -stake })
+      const win = Number(data.win)
+      if (win > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Пяточок-Плинко» (x${data.mul})`, d: win })
+      next.bal = Number(data.bal)
+      return next
+    })
+    return { slot: Number(data.slot), mul: Number(data.mul), win: Number(data.win) }
   }
 
   // Quick Templates for 1-click match creation
@@ -1164,7 +1221,7 @@ export default function App() {
 
     // If any open bets exist on this event, cancel & refund them first
     mutate(s => {
-      cancelEvent(s, evId, allEvents)
+      markOutcome(s, evId, 'cancel')
     })
 
     // Remove event from customEvents
@@ -1193,7 +1250,7 @@ export default function App() {
   // Cancel Event (refund all placed bets)
   const handleCancelEventAction = (ev: Ev) => {
     mutate(s => {
-      cancelEvent(s, ev.id, allEvents)
+      markOutcome(s, ev.id, 'cancel')
     }, `Матч «${ev.title}» отменен, ставки возвращены игрокам ↩️`)
     // Отмена распространяется на всех игроков через общую базу
     if (dbEventIds.has(ev.id)) {
@@ -1201,9 +1258,9 @@ export default function App() {
         if (res.error) notify(`⚠️ Отмена применилась только у вас: ${res.error.message}`)
         else fetchDbEvents()
       })
-      // Ставки в базе помечаем возвратом
+      // Ставки в базе помечаем возвратом и возвращаем балансы (сервер)
       supabase.rpc('admin_settle_bets', { p_event: ev.id, p_winner: null }).then(res => {
-        if (res.error) console.error('admin_settle_bets (cancel) failed:', res.error.message)
+        if (res.error) notify(`⚠️ Возвраты в базе не проведены: ${res.error.message}`)
       })
     }
   }
@@ -1212,7 +1269,7 @@ export default function App() {
   const handleSettleEventAction = (ev: Ev, outcomeIdx: number) => {
     const outcomeName = ev.out[outcomeIdx]?.[0] || 'Исход'
     mutate(s => {
-      settleEvent(s, ev.id, outcomeIdx, allEvents)
+      markOutcome(s, ev.id, 'done', outcomeIdx)
     }, `Матч «${ev.title}» рассчитан! Победил: ${outcomeName} 🏆`)
     // Расчёт распространяется на всех игроков через общую базу
     if (dbEventIds.has(ev.id)) {
@@ -1220,9 +1277,9 @@ export default function App() {
         if (res.error) notify(`⚠️ Расчёт применился только у вас: ${res.error.message}`)
         else fetchDbEvents()
       })
-      // Ставки всех игроков в базе помечаем выигранными/проигранными
+      // Ставки всех игроков в базе рассчитываются, балансы начисляет сервер
       supabase.rpc('admin_settle_bets', { p_event: ev.id, p_winner: outcomeIdx }).then(res => {
-        if (res.error) console.error('admin_settle_bets failed:', res.error.message)
+        if (res.error) notify(`⚠️ Выплаты в базе не проведены: ${res.error.message}`)
       })
     }
   }
@@ -1267,7 +1324,7 @@ export default function App() {
   const handleClearAllEvents = () => {
     if (confirm('ВНИМАНИЕ: Вы действительно хотите удалить ВСЕ события из линии? Все открытые ставки будут автоматически возвращены.')) {
       mutate(s => {
-        allEvents.forEach(e => cancelEvent(s, e.id, allEvents))
+        allEvents.forEach(e => markOutcome(s, e.id, 'cancel'))
       })
       setCustomEvents([])
       // Чистим и общую базу — событие исчезнет у всех игроков
@@ -1311,7 +1368,7 @@ export default function App() {
       log: [{ t: Date.now(), x: `Пополнение от Администратора (+${fmt(amount)})`, d: amount }, ...a.log]
     } : a))
     if (currentUserId === targetId) {
-      mutate(s => { s.bal = r2(s.bal + amount) })
+      setS(prev => ({ ...prev, bal: Number(newBal) }))
     }
     notify(`Пользователю начислено +${fmt(amount)} (баланс: ${fmt(Number(newBal))})`)
   }
@@ -1330,7 +1387,7 @@ export default function App() {
       log: [{ t: Date.now(), x: 'Сброс баланса Администратором', d: -target.bal }, ...a.log]
     } : a))
     if (currentUserId === targetId) {
-      mutate(s => { s.bal = 0 })
+      setS(prev => ({ ...prev, bal: 0 }))
     }
     notify(`Баланс пользователя обнулён`)
   }
@@ -1702,10 +1759,10 @@ export default function App() {
                 <div className="wl-banner-card">
                   <span className="wl-banner-tag" style={{ background: '#3b82f6', color: '#fff' }}>ХРЯК-КРЭШ</span>
                   <div className="wl-banner-title" style={{ fontSize: 16 }}>
-                    Раунды каждые 6 секунд
+                    Мультиплеер в реальном времени
                   </div>
                   <div className="wl-banner-desc">
-                    Следите за полетом ракеты и забирайте выигрыш с коэффициентами до x25.0!
+                    Общие раунды каждые 6 секунд для всех игроков — забирайте выигрыш с коэффициентами до x25.0!
                   </div>
                 </div>
 
@@ -2047,7 +2104,7 @@ export default function App() {
                   onClick={() => setGamesTab('crash')}
                 >
                   <Zap size={16} color="var(--org)" />
-                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7</span>
+                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7 (Общий)</span>
                 </button>
                 <button
                   className={`wl-round-btn ${gamesTab === 'roulette' ? 'active' : ''}`}
@@ -2100,7 +2157,7 @@ export default function App() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontSize: 12, fontWeight: 900, color: 'var(--org)', background: 'rgba(255,85,0,0.12)', border: '1px solid rgba(255,85,0,0.3)', padding: '4px 10px', borderRadius: 8, letterSpacing: '0.04em' }}>
-                            РАУНД #{crashRoundId}
+                            РАУНД #{crashRound?.id ?? '…'}
                           </span>
                           <span style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 800 }}>
                             ИСТОРИЯ:
@@ -2219,7 +2276,7 @@ export default function App() {
                           )}
                           {crashPhase === 'flying' && (
                             <span style={{ color: 'var(--org)', background: 'rgba(255,85,0,0.15)', border: '1px solid rgba(255,85,0,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                              🚀 ХРЯК В ПОЛЁТЕ! УСПЕЙ ЗАБРАТЬ ВЫИГРЫШ!
+                              🚀 ХРЯК В ПОЛЁТЕ! ВСЕ ОНЛАЙН В ОДНОЙ РАКЕТЕ!
                             </span>
                           )}
                           {crashPhase === 'crashed' && (
@@ -2353,10 +2410,10 @@ export default function App() {
                       <div className="wl-crash-sidebar-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Users size={16} color="var(--org)" />
-                          <span>СТАВКИ РАУНДА ({liveCrashBets.length})</span>
+                          <span>ОНЛАЙН СТАВКИ ({liveCrashBets.length})</span>
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--tx-muted)', fontWeight: 700 }}>
-                          Банк: {fmt(liveCrashBets.reduce((acc, b) => acc + (b.stake || 0), 0))}
+                          Банк: {fmt(liveCrashBets.reduce((acc, b) => acc + Number(b.stake || 0), 0))}
                         </div>
                       </div>
 
@@ -2367,22 +2424,25 @@ export default function App() {
                           </div>
                         ) : (
                           liveCrashBets.map(b => {
-                            const isWon = Boolean(b.cashedOutMul)
-                            const isCrashed = Boolean(b.crashed || (crashPhase === 'crashed' && !b.cashedOutMul))
+                            const isMine = b.user_id === currentUser?.id
+                            const cashedMul = b.cashed_out_mul != null ? Number(b.cashed_out_mul) : null
+                            const winAmount = b.win_amount != null ? Number(b.win_amount) : null
+                            const isWon = cashedMul !== null
+                            const isCrashed = crashPhase === 'crashed' && !isWon
                             return (
                               <div
                                 key={b.id}
-                                className={`wl-crash-bet-card ${b.isUser ? 'me' : ''} ${isWon ? 'won' : ''} ${isCrashed ? 'crashed' : ''}`}
+                                className={`wl-crash-bet-card ${isMine ? 'me' : ''} ${isWon ? 'won' : ''} ${isCrashed ? 'crashed' : ''}`}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                                  <UserAvatar avatar={b.avatar} name={b.name} size={26} />
+                                  <UserAvatar avatar={b.avatar} name={b.username} size={26} />
                                   <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    <div style={{ fontWeight: 800, fontSize: 12, color: b.isUser ? 'var(--org)' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                      {b.name} {b.isUser && '(Вы)'}
+                                    <div style={{ fontWeight: 800, fontSize: 12, color: isMine ? 'var(--org)' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {b.username} {isMine && '(Вы)'}
                                     </div>
-                                    {b.targetMul && !b.cashedOutMul && (
+                                    {b.auto_cashout != null && cashedMul === null && (
                                       <div style={{ fontSize: 10, color: 'var(--tx-muted)' }}>
-                                        авто: x{b.targetMul.toFixed(2)}
+                                        авто: x{Number(b.auto_cashout).toFixed(2)}
                                       </div>
                                     )}
                                   </div>
@@ -2390,11 +2450,11 @@ export default function App() {
 
                                 <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
                                   <div style={{ fontWeight: 700, fontSize: 12 }}>
-                                    {fmt(b.stake)}
+                                    {fmt(Number(b.stake))}
                                   </div>
                                   <div style={{ fontSize: 11, fontWeight: 800 }}>
                                     {isWon ? (
-                                      <span style={{ color: 'var(--green)' }}>+{fmt(b.winAmount)} (x{b.cashedOutMul.toFixed(2)})</span>
+                                      <span style={{ color: 'var(--green)' }}>+{fmt(winAmount || 0)} (x{cashedMul!.toFixed(2)})</span>
                                     ) : isCrashed ? (
                                       <span style={{ color: '#ef4444' }}>0 SV₽ 💥</span>
                                     ) : (
@@ -2413,8 +2473,8 @@ export default function App() {
               })()}
 
               {/* ROULETTE (КОРЫТО ФОРТУНЫ) */}
-              {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} onWin={plinkoWin} />}
-              {gamesTab === 'puddles' && <MudPuddles bal={S.bal} onBet={puddlesBet} onWin={puddlesWin} />}
+              {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} />}
+              {gamesTab === 'puddles' && <MudPuddles bal={S.bal} onStart={puddlesStart} onPick={puddlesPick} onCash={puddlesCash} onRestore={puddlesRestore} />}
 
               {gamesTab === 'roulette' && (
                 <div className="wl-banner-card highlight" style={{ padding: '28px 24px 34px', textAlign: 'center' }}>
@@ -2730,7 +2790,14 @@ export default function App() {
                     style={{ border: '1px solid var(--border)' }}
                     onClick={() => {
                       if (confirm('Сбросить весь баланс и историю ставок?')) {
-                        setS(freshState())
+                        if (currentUser) {
+                          supabase.rpc('self_reset_balance').then(({ data, error }) => {
+                            if (!error && data) setS({ ...freshState(), bal: Number(data.bal) })
+                            else notify('❌ Не удалось сбросить баланс')
+                          })
+                        } else {
+                          setS(freshState())
+                        }
                         setSelectedBet(null)
                         notify('Прогресс сброшен к 10 000 SV₽')
                       }
@@ -3717,7 +3784,14 @@ export default function App() {
                     style={{ border: '1px solid #ef4444', color: '#ef4444', width: '100%', justifyContent: 'center' }}
                     onClick={() => {
                       if (confirm('Сбросить весь банк и историю ставок к начальным 10 000 SV₽?')) {
-                        setS(freshState())
+                        if (currentUser) {
+                          supabase.rpc('self_reset_balance').then(({ data, error }) => {
+                            if (!error && data) setS({ ...freshState(), bal: Number(data.bal) })
+                            else notify('❌ Не удалось сбросить банк')
+                          })
+                        } else {
+                          setS(freshState())
+                        }
                         setSelectedBet(null)
                         notify('Касса и прогресс полностью сброшены')
                       }

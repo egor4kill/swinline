@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { N, multiplier, newRound, r2 } from './puddlesLogic'
+import { N, multiplier, r2 } from './puddlesLogic'
 
+type PickResult = {
+  hit: boolean
+  opened: number[]
+  mines?: number[]
+  auto_cashed?: boolean
+  mul?: number
+  win?: number
+}
+type CashResult = { mul: number; win: number; mines: number[] }
 type Props = {
   bal: number
-  onBet: (stake: number) => boolean // списывает ставку, вернёт false если нельзя
-  onWin: (amount: number, label: string) => void // начисляет выигрыш
+  // Раунд, раскладка луж и выплаты — на сервере; клиент только показывает
+  onStart: (stake: number, mines: number) => Promise<string | null>
+  onPick: (roundId: string, cell: number) => Promise<PickResult | null>
+  onCash: (roundId: string) => Promise<CashResult | null>
+  onRestore: () => Promise<{ roundId: string; stake: number; mines: number; opened: number[] } | null>
 }
 type Phase = 'idle' | 'play' | 'lost' | 'cashed'
 const MIN_BET = 10
@@ -30,58 +42,86 @@ const Puddle = () => (
   </svg>
 )
 
-export default function MudPuddles({ bal, onBet, onWin }: Props) {
+export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: Props) {
   const [stake, setStake] = useState('100')
   const [mines, setMines] = useState(3)
   const [phase, setPhase] = useState<Phase>('idle')
   const [open, setOpen] = useState<number[]>([])
   const [boom, setBoom] = useState<number | null>(null)
-  const [field, setField] = useState<boolean[] | null>(null) // показываем только после конца раунда
+  const [field, setField] = useState<number[] | null>(null) // раскладка показывается после конца раунда
   const [msg, setMsg] = useState('')
-  const round = useRef<{ mines: boolean[]; stake: number; m: number } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const roundRef = useRef<string | null>(null)
+  const stakeRef = useRef(0)
   const openRef = useRef<number[]>([])
-  const cb = useRef({ onWin })
-  cb.current = { onWin }
+  const minesRef = useRef(3)
+  const cb = useRef({ onPick, onCash })
+  cb.current = { onPick, onCash }
 
-  // Ушёл с вкладки посреди раунда: забираем текущий выигрыш (или возвращаем ставку, если ничего не открыто)
-  useEffect(() => () => {
-    const r = round.current
-    if (!r) return
-    const k = openRef.current.length
-    cb.current.onWin(r2(r.stake * multiplier(r.m, k)), k ? 'авто-вывод' : 'возврат')
-    round.current = null
+  // Раунд живёт на сервере: после перезагрузки страницы восстанавливаем незакрытый
+  useEffect(() => {
+    onRestore().then(r => {
+      if (!r) return
+      roundRef.current = r.roundId
+      stakeRef.current = r.stake
+      minesRef.current = r.mines
+      openRef.current = r.opened || []
+      setStake(String(r.stake))
+      setMines(r.mines)
+      setOpen(r.opened || [])
+      setBoom(null); setField(null); setPhase('play'); setMsg('')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const finish = (p: Phase, text: string, r: NonNullable<typeof round.current>) => {
-    setField(r.mines); setPhase(p); setMsg(text)
-    round.current = null // защита от двойного выигрыша
-  }
-
-  const start = () => {
+  const start = async () => {
+    if (busy) return
     const s = Math.floor(parseFloat(stake))
     if (!(s >= MIN_BET)) return setMsg(`Минимальная ставка: ${MIN_BET} SV₽`)
-    if (!onBet(s)) return
-    round.current = { mines: newRound(mines), stake: s, m: mines }
+    setBusy(true)
+    const id = await onStart(s, mines)
+    setBusy(false)
+    if (!id) return
+    roundRef.current = id
+    stakeRef.current = s
+    minesRef.current = mines
     openRef.current = []
     setOpen([]); setBoom(null); setField(null); setPhase('play'); setMsg('')
   }
 
-  const cash = () => {
-    const r = round.current
-    const k = openRef.current.length
-    if (!r || k < 1) return
-    const win = r2(r.stake * multiplier(r.m, k))
-    cb.current.onWin(win, `${multiplier(r.m, k)}x`)
-    finish('cashed', `Забрал ${fmt(win)} SV₽ (x${multiplier(r.m, k)})`, r)
+  const cash = async () => {
+    const r = roundRef.current
+    if (!r || openRef.current.length < 1 || busy) return
+    setBusy(true)
+    const res = await cb.current.onCash(r)
+    setBusy(false)
+    if (!res) return
+    setField(res.mines || null)
+    setPhase('cashed')
+    setMsg(`Забрал ${fmt(res.win)} SV₽ (x${res.mul})`)
   }
 
-  const pick = (i: number) => {
-    const r = round.current
-    if (!r || openRef.current.includes(i)) return
-    if (r.mines[i]) { setBoom(i); finish('lost', 'Лужа! Ставка осталась в грязи.', r); return }
-    openRef.current = [...openRef.current, i]
+  const pick = async (i: number) => {
+    const r = roundRef.current
+    if (!r || busy || openRef.current.includes(i)) return
+    setBusy(true)
+    const res = await cb.current.onPick(r, i)
+    setBusy(false)
+    if (!res) return
+    if (res.hit) {
+      setBoom(i)
+      setField(res.mines || [])
+      setPhase('lost')
+      setMsg('Лужа! Ставка осталась в грязи.')
+      return
+    }
+    openRef.current = res.opened || [...openRef.current, i]
     setOpen(openRef.current)
-    if (openRef.current.length === N - r.m) cash() // открыл всё безопасное — автоматически забираем
+    if (res.auto_cashed) {
+      setField(res.mines || null)
+      setPhase('cashed')
+      setMsg(`Открыл всё безопасное — автоматом забрано ${fmt(res.win || 0)} SV₽ (x${res.mul})`)
+    }
   }
 
   const randomPick = () => {
@@ -91,10 +131,10 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
 
   const k = open.length
   const playing = phase === 'play'
-  const m = round.current?.m ?? mines
+  const m = minesRef.current
   const cur = multiplier(m, k)
   const next = k < N - m ? multiplier(m, k + 1) : null
-  const st = round.current?.stake ?? 0
+  const st = stakeRef.current
 
   return (
     <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
@@ -108,10 +148,10 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
       <div className="mp-grid" role="group" aria-label="Поле 5 на 5">
         {Array.from({ length: N }, (_, i) => {
           const isOpen = open.includes(i), isBoom = boom === i
-          const revealMine = !playing && field?.[i] && !isBoom
+          const revealMine = !playing && field?.includes(i) && !isBoom
           const cls = isBoom ? 'boom' : isOpen ? 'safe' : revealMine ? 'ghost' : ''
           return (
-            <button key={i} className={`mp-tile ${cls}`} disabled={!playing || isOpen} onClick={() => pick(i)} aria-label={`Клетка ${i + 1}`}>
+            <button key={i} className={`mp-tile ${cls}`} disabled={!playing || busy || isOpen} onClick={() => pick(i)} aria-label={`Клетка ${i + 1}`}>
               {isBoom || revealMine ? <Puddle /> : isOpen ? '🐷' : ''}
             </button>
           )
@@ -131,8 +171,8 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
       <div style={{ minHeight: 140, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       {playing ? (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <button className="wl-round-btn" onClick={randomPick}>Случайная клетка</button>
-          <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: k < 1 ? 0.5 : 1 }} disabled={k < 1} onClick={cash}>
+          <button className="wl-round-btn" onClick={randomPick} disabled={busy}>Случайная клетка</button>
+          <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: k < 1 || busy ? 0.5 : 1 }} disabled={k < 1 || busy} onClick={cash}>
             Забрать {k > 0 ? fmt(r2(st * cur)) + ' SV₽' : ''}
           </button>
         </div>
@@ -147,12 +187,12 @@ export default function MudPuddles({ bal, onBet, onWin }: Props) {
               style={{ width: 110, padding: 12, borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
             {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
             <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
-            <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800 }} onClick={start}>{phase === 'idle' ? 'Начать' : 'Ещё раунд'}</button>
+            <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={start}>{busy ? 'Старт…' : phase === 'idle' ? 'Начать' : 'Ещё раунд'}</button>
           </div>
         </>
       )}
       </div>
-      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Баланс: {fmt(r2(bal))} SV₽. Выплата = ставка × икс.</p>
+      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Баланс: {fmt(r2(bal))} SV₽. Раскладку луж и выплату решает сервер.</p>
     </div>
   )
 }

@@ -1,29 +1,37 @@
-import { useEffect, useRef, useState } from 'react'
-import { EMPTY, dayKey, status, claim as claimLogic, type DailyState } from './dailyLogic'
+import { useCallback, useEffect, useState } from 'react'
+import { supabase } from './supabase'
+import { EMPTY, dayKey, status, type DailyState } from './dailyLogic'
 
-const load = (key: string | null): DailyState => {
-  if (!key) return EMPTY
-  try { const o = JSON.parse(localStorage.getItem(key) || 'null'); if (o && typeof o.streak === 'number') return o } catch {}
-  return EMPTY
-}
+export type ClaimResult = { reward: number; day: number; bal: number } | { error: string }
 
-// Прогресс хранится в браузере отдельно для каждого аккаунта. Позже переедет в базу вместе с защитой баланса.
+// Ежедневные награды: серия и факт получения живут на сервере (claim_daily),
+// localStorage больше не источник истины — награду нельзя «передвинуть» из браузера
 export function useDaily(userId?: string | null) {
-  const key = userId ? `svinline.v3.daily.${userId}` : null
-  const [state, setState] = useState<DailyState>(() => load(key))
+  const [state, setState] = useState<DailyState>(EMPTY)
   const [today, setToday] = useState(() => dayKey())
-  const ref = useRef(state)
-  useEffect(() => { const s = load(key); ref.current = s; setState(s) }, [key])
-  useEffect(() => { const t = setInterval(() => setToday(dayKey()), 15000); return () => clearInterval(t) }, [])
 
-  const claim = () => {
-    if (!key) return null
-    const r = claimLogic(ref.current, dayKey()) // проверка по свежему состоянию: двойной клик не выдаст дважды
-    if (!r) return null
-    ref.current = r.state
-    setState(r.state)
-    try { localStorage.setItem(key, JSON.stringify(r.state)) } catch {}
-    return { reward: r.reward, day: r.state.streak }
-  }
-  return { state, today, status: status(state, today), claim, loggedIn: !!key }
+  useEffect(() => {
+    if (!userId) { setState(EMPTY); return }
+    let alive = true
+    supabase.from('daily_claims').select('*').eq('user_id', userId).maybeSingle().then(({ data }) => {
+      if (!alive) return
+      setState(data ? { streak: data.streak, last: data.last_claim } : EMPTY)
+    })
+    return () => { alive = false }
+  }, [userId])
+
+  useEffect(() => {
+    const t = setInterval(() => setToday(dayKey()), 15000)
+    return () => clearInterval(t)
+  }, [])
+
+  const claim = useCallback(async (): Promise<ClaimResult | null> => {
+    if (!userId) return null
+    const { data, error } = await supabase.rpc('claim_daily', { p_today: today })
+    if (error || !data) return { error: error?.message || 'Не удалось забрать награду' }
+    setState({ streak: Number(data.day), last: today })
+    return { reward: Number(data.reward), day: Number(data.day), bal: Number(data.bal) }
+  }, [userId, today])
+
+  return { state, today, status: status(state, today), claim, loggedIn: !!userId }
 }
