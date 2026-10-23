@@ -55,6 +55,7 @@ import {
 } from './data'
 import { payout, r2, placeBet, settleEvent, cancelEvent } from './logic'
 import { supabase, ADMIN_USERNAME } from './supabase'
+import { SECTORS as ROULETTE_SECTORS } from './wheelLogic'
 import ceoPhoto from './assets/ceo.jpg'
 
 const KEY_STATE = 'svinline.v3.state'
@@ -89,16 +90,8 @@ const PigLogo = () => (
   </svg>
 )
 
-const ROULETTE_SECTORS = [
-  { mul: 1.2, label: 'x1.2', title: 'Свин-старт', color: '#ff7700', bg: '#2d1806', emoji: '🐷' },
-  { mul: 0,   label: 'x0',   title: 'В лужу',     color: '#ef4444', bg: '#2b0d10', emoji: '💥' },
-  { mul: 2.0, label: 'x2.0', title: 'Двойной хряк',color: '#10b981', bg: '#082618', emoji: '💎' },
-  { mul: 0.5, label: 'x0.5', title: 'Половинка',  color: '#94a3b8', bg: '#1c2230', emoji: '🐽' },
-  { mul: 3.0, label: 'x3.0', title: 'Тройной куш',color: '#3b82f6', bg: '#0a1d3b', emoji: '⚡' },
-  { mul: 0,   label: 'x0',   title: 'Корыто пусто',color: '#ef4444', bg: '#2b0d10', emoji: '🐽' },
-  { mul: 1.5, label: 'x1.5', title: 'Хрюк-бонус', color: '#eab308', bg: '#2b2308', emoji: '🥓' },
-  { mul: 10.0,label: 'x10',  title: 'ДЖЕКПОТ 👑', color: '#fbbf24', bg: '#3a2804', emoji: '👑' }
-]
+// Колесо «Корыто Фортуны»: секторы и честный RTP (~96%) — в wheelLogic.ts, покрыто тестом
+const WHEEL_SEC_DEG = 360 / ROULETTE_SECTORS.length
 
 
 const getTwitchAvatar = (username?: string, currentAvatar?: string | null): string => {
@@ -225,6 +218,9 @@ export default function App() {
     if (!currentUserId) return null
     return accounts.find(a => a.id === currentUserId) || null
   }, [accounts, currentUserId])
+  // Свежая ссылка для колбэков Realtime/БД, которые не пересоздаются каждый рендер
+  const currentUserRef = useRef<UserAccount | null>(currentUser)
+  currentUserRef.current = currentUser
 
   const isAdmin = currentUser?.role === 'admin'
   const daily = useDaily(currentUser?.id)
@@ -235,10 +231,52 @@ export default function App() {
     return (raw || []).filter(e => !/^e\d+$/.test(e.id))
   })
 
-  // All events in line are the managed custom events
+  // Общая линия из Supabase (таблица events; включается разделом 7 SQL-скрипта).
+  // Пока таблицы нет — молча работаем в локальном режиме, как раньше.
+  const [dbEvents, setDbEvents] = useState<{ ev: Ev; status: string; winner: number | null }[]>([])
+  const seenDbEventIdsRef = useRef<Set<string>>(new Set())
+
+  const fetchDbEvents = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('events').select('*').order('created_at', { ascending: false })
+      if (error) {
+        // PGRST205 = таблицы ещё нет (SQL-скрипт не выполнен) — это не ошибка, просто локальный режим
+        if (error.code !== 'PGRST205') console.warn('Failed to fetch events from Supabase:', error.message)
+        return
+      }
+      const rows = (data || []).map((r: any) => ({
+        ev: { ...(r.data as Ev), id: r.id },
+        status: (r.status as string) || 'open',
+        winner: typeof r.winner === 'number' ? r.winner : null
+      }))
+      const nextIds = new Set(rows.map(r => r.ev.id))
+      // Событие исчезло из базы (удалено админом): возвращаем свои открытые ставки
+      seenDbEventIdsRef.current.forEach(id => {
+        if (nextIds.has(id)) return
+        const prev = sRef.current
+        if (!prev || !(prev.bets || []).some((b: any) => b.ev === id && b.state === 'open')) return
+        const next = structuredClone(prev)
+        next.st = next.st || {}
+        cancelEvent(next, id, [])
+        setS(next)
+        if (currentUserRef.current && next.bal !== prev.bal) {
+          supabase.from('profiles').update({ bal: next.bal, updated_at: new Date().toISOString() }).eq('id', currentUserRef.current.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
+        }
+      })
+      seenDbEventIdsRef.current = nextIds
+      setDbEvents(rows)
+    } catch (e) {
+      console.warn('Failed to fetch events from Supabase:', e)
+    }
+  }, [])
+
+  // Линия = события из общей базы + локальные события админа, которых ещё нет в базе
   const allEvents = useMemo(() => {
-    return customEvents
-  }, [customEvents])
+    const seen = new Set(dbEvents.map(d => d.ev.id))
+    return [...dbEvents.map(d => d.ev), ...customEvents.filter(e => !seen.has(e.id))]
+  }, [dbEvents, customEvents])
+
+  const dbEventIds = useMemo(() => new Set(dbEvents.map(d => d.ev.id)), [dbEvents])
 
   // Modals for safe management & editing
   const [deleteEventModal, setDeleteEventModal] = useState<Ev | null>(null)
@@ -265,6 +303,9 @@ export default function App() {
     }
     return raw
   })
+  // Свежая ссылка на состояние для колбэков Realtime и БД
+  const sRef = useRef<any>(null)
+  sRef.current = S
   const [selectedBet, setSelectedBet] = useState<{ evId: string; outcomeIdx: number; outcomeTitle: string; odds: number } | null>(null)
   const [stake, setStake] = useState('500')
   const [slipOpen, setSlipOpen] = useState(false)
@@ -286,7 +327,7 @@ export default function App() {
   const [wonSectorIdx, setWonSectorIdx] = useState<number | null>(null)
   const [rouletteResult, setRouletteResult] = useState<string | null>(null)
 
-  // 7. Shared Multiplayer Crash Game State
+  // 7. Crash Game State (раунды считаются локально в браузере каждого игрока)
   const [crashPhase, setCrashPhase] = useState<'betting' | 'flying' | 'crashed'>('betting')
   const [crashMultiplier, setCrashMultiplier] = useState(1.00)
   const [crashCountdown, setCrashCountdown] = useState(6.0)
@@ -337,6 +378,8 @@ export default function App() {
 
   // User balance isolation & remote database balance synchronization:
   const lastSyncBalRef = useRef<number | null>(null)
+  // Пользователь, уже заходивший в этом сеансе: отличаем возврат того же аккаунта от смены аккаунта
+  const lastSessionUserRef = useRef<string | null>(null)
   useEffect(() => {
     if (!currentUserId) {
       activeUserLoadedRef.current = null
@@ -346,11 +389,17 @@ export default function App() {
     const acc = accounts.find(a => a.id === currentUserId)
     if (!acc) return
 
-    // 1. On account switch / first load:
+    // 1. Первый вход в этом сеансе (в т.ч. перезагрузка страницы): подтягиваем баланс из базы, историю не трогаем
     if (activeUserLoadedRef.current !== currentUserId) {
+      const isAccountSwitch = lastSessionUserRef.current !== null && lastSessionUserRef.current !== currentUserId
       activeUserLoadedRef.current = currentUserId
+      lastSessionUserRef.current = currentUserId
       lastSyncBalRef.current = acc.bal
-      if (typeof acc.bal === 'number' && acc.bal !== S.bal) {
+      if (isAccountSwitch) {
+        // 1b. Смена аккаунта в этом же браузере: чистим ставки и историю предыдущего пользователя
+        const bal = typeof acc.bal === 'number' ? acc.bal : START
+        setS({ bal, bets: [], log: [{ t: Date.now(), x: 'Вход в аккаунт', d: bal }], st: {} })
+      } else if (typeof acc.bal === 'number' && acc.bal !== S.bal) {
         setS((prev: any) => ({ ...prev, bal: acc.bal }))
       }
       return
@@ -369,6 +418,33 @@ export default function App() {
     setAccounts(prev => prev.map(a => a.id === currentUserId && a.bal !== S.bal ? { ...a, bal: S.bal } : a))
     lastSyncBalRef.current = S.bal
   }, [S.bal, currentUserId])
+
+  // Статусы событий из общей базы применяются у всех игроков:
+  // расчёт/отмена платят по их собственным локальным ставкам, закрытие/открытие блокируют приём
+  const appliedEventStatusRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    dbEvents.forEach(d => {
+      const key = `${d.ev.id}|${d.status}|${d.winner ?? ''}`
+      if (appliedEventStatusRef.current.has(key)) return
+      const local = sRef.current?.st?.[d.ev.id]
+      if (local && local.s === d.status && (d.status !== 'done' || local.w === d.winner)) return
+      appliedEventStatusRef.current.add(key)
+      const prev = sRef.current || freshState()
+      const next = structuredClone(prev)
+      next.st = next.st || {}
+      if (d.status === 'done' && d.winner !== null) {
+        settleEvent(next, d.ev.id, d.winner, allEvents)
+      } else if (d.status === 'cancel') {
+        cancelEvent(next, d.ev.id, allEvents)
+      } else {
+        next.st[d.ev.id] = { s: d.status === 'closed' ? 'closed' : 'open' }
+      }
+      setS(next)
+      if (currentUserRef.current && next.bal !== prev.bal) {
+        supabase.from('profiles').update({ bal: next.bal, updated_at: new Date().toISOString() }).eq('id', currentUserRef.current.id).then(null, err => console.error('Failed to update bal in Supabase:', err))
+      }
+    })
+  }, [dbEvents, allEvents])
 
   // Supabase Auth listener (detects GitHub/Twitch logins and admin ownership)
   useEffect(() => {
@@ -442,7 +518,8 @@ export default function App() {
 
   useEffect(() => {
     fetchSupabaseUsers()
-  }, [fetchSupabaseUsers])
+    fetchDbEvents()
+  }, [fetchSupabaseUsers, fetchDbEvents])
 
   // Supabase Realtime synchronization across all players and admin
   useEffect(() => {
@@ -454,18 +531,22 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bets' }, () => {
         fetchSupabaseUsers()
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
+        fetchDbEvents()
+      })
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [fetchSupabaseUsers])
+  }, [fetchSupabaseUsers, fetchDbEvents])
 
   useEffect(() => {
     if (adminModalOpen) {
       fetchSupabaseUsers()
+      fetchDbEvents()
     }
-  }, [adminModalOpen, fetchSupabaseUsers])
+  }, [adminModalOpen, fetchSupabaseUsers, fetchDbEvents])
 
   const syncSupabaseUser = (u: any, customName?: string, customAvatar?: string) => {
     const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
@@ -694,7 +775,7 @@ export default function App() {
     notify(`Ставка ${fmt(v)} принята и сохранена в базе! ✅`)
   }
 
-  // Shared Multiplayer Crash Master Loop
+  // Crash Master Loop
   useEffect(() => {
     let timeoutId: any = null
 
@@ -812,7 +893,7 @@ export default function App() {
 
     mutate(s => {
       s.bal = r2(s.bal - v)
-      s.log.unshift({ t: Date.now(), x: `Ставка в общем раунде Хряк-Крэш #${crashRoundId}`, d: -v })
+      s.log.unshift({ t: Date.now(), x: `Ставка в раунде Хряк-Крэш #${crashRoundId}`, d: -v })
     })
 
     setMyCrashBet({
@@ -831,7 +912,7 @@ export default function App() {
       ...prev.filter(b => b.id !== currentUser.id)
     ])
 
-    notify(`Ставка ${fmt(v)} на общий раунд #${crashRoundId} принята! 🚀`)
+    notify(`Ставка ${fmt(v)} на раунд #${crashRoundId} принята! 🚀`)
   }
 
   const cancelCrashBet = () => {
@@ -896,7 +977,7 @@ export default function App() {
     const win = r2(100 * sector.mul)
 
     // Calculate rotation to land winningIdx at 270 deg (top pointer)
-    const sectorCenter = (winningIdx + 0.5) * 45
+    const sectorCenter = (winningIdx + 0.5) * WHEEL_SEC_DEG
     let targetAngle = 270 - sectorCenter
     if (targetAngle < 0) targetAngle += 360
 
@@ -1060,6 +1141,12 @@ export default function App() {
     }
 
     setCustomEvents(prev => [newEv, ...prev])
+    // Публикуем в общую базу, чтобы событие увидели все игроки (нужен раздел 7 SQL-скрипта).
+    // Если базы нет — событие останется локальным, как раньше, и мы честно об этом скажем.
+    supabase.from('events').insert({ id: newEv.id, data: newEv, status: 'open', owner_id: currentUser?.id ?? null }).then(res => {
+      if (res.error) notify(`⚠️ Событие видно только вам: общая база недоступна (${res.error.message})`)
+      else fetchDbEvents()
+    }, () => notify('⚠️ Событие видно только вам: сеть недоступна'))
     setNewMatchTitle('')
     setNewMatchTeam1('')
     setNewMatchTeam2('')
@@ -1083,6 +1170,14 @@ export default function App() {
     // Remove event from customEvents
     setCustomEvents(prev => prev.filter(e => e.id !== evId))
 
+    // Удаляем и из общей базы (у всех игроков событие исчезнет, их открытые ставки вернутся)
+    if (dbEventIds.has(evId)) {
+      supabase.from('events').delete().eq('id', evId).then(res => {
+        if (res.error) notify(`⚠️ Удалено только локально: ${res.error.message}`)
+        else fetchDbEvents()
+      }, () => notify('⚠️ Удалено только локально: сеть недоступна'))
+    }
+
     if (selectedBet?.evId === evId) {
       setSelectedBet(null)
     }
@@ -1096,6 +1191,13 @@ export default function App() {
     mutate(s => {
       cancelEvent(s, ev.id, allEvents)
     }, `Матч «${ev.title}» отменен, ставки возвращены игрокам ↩️`)
+    // Отмена распространяется на всех игроков через общую базу
+    if (dbEventIds.has(ev.id)) {
+      supabase.from('events').update({ status: 'cancel', updated_at: new Date().toISOString() }).eq('id', ev.id).then(res => {
+        if (res.error) notify(`⚠️ Отмена применилась только у вас: ${res.error.message}`)
+        else fetchDbEvents()
+      })
+    }
   }
 
   // Settle Event (payout winners)
@@ -1104,6 +1206,13 @@ export default function App() {
     mutate(s => {
       settleEvent(s, ev.id, outcomeIdx, allEvents)
     }, `Матч «${ev.title}» рассчитан! Победил: ${outcomeName} 🏆`)
+    // Расчёт распространяется на всех игроков через общую базу
+    if (dbEventIds.has(ev.id)) {
+      supabase.from('events').update({ status: 'done', winner: outcomeIdx, updated_at: new Date().toISOString() }).eq('id', ev.id).then(res => {
+        if (res.error) notify(`⚠️ Расчёт применился только у вас: ${res.error.message}`)
+        else fetchDbEvents()
+      })
+    }
   }
 
   // Toggle Betting Open/Closed
@@ -1114,6 +1223,11 @@ export default function App() {
       if (!s.st[ev.id]) s.st[ev.id] = {}
       s.st[ev.id].s = nextStatus
     }, nextStatus === 'closed' ? `Приём ставок на «${ev.title}» закрыт 🔒` : `Приём ставок на «${ev.title}» открыт 🟢`)
+    if (dbEventIds.has(ev.id)) {
+      supabase.from('events').update({ status: nextStatus, updated_at: new Date().toISOString() }).eq('id', ev.id).then(res => {
+        if (res.error) notify(`⚠️ Изменение применилось только у вас: ${res.error.message}`)
+      })
+    }
   }
 
   // Save Event Score / Live Status
@@ -1125,6 +1239,14 @@ export default function App() {
       liveTime: editLiveTime,
       isLive: editIsLive
     } : e))
+    // Обновляем и общую базу, если событие там
+    if (dbEventIds.has(editEventModal.id)) {
+      const updated: Ev = { ...editEventModal, score: editScore, liveTime: editLiveTime, isLive: editIsLive }
+      supabase.from('events').update({ data: updated, updated_at: new Date().toISOString() }).eq('id', editEventModal.id).then(res => {
+        if (res.error) notify(`⚠️ Изменения видны только вам: ${res.error.message}`)
+        else fetchDbEvents()
+      })
+    }
     setEditEventModal(null)
     notify(`Матч «${editEventModal.title}» обновлен: счёт ${editScore}! ✏️`)
   }
@@ -1136,6 +1258,12 @@ export default function App() {
         allEvents.forEach(e => cancelEvent(s, e.id, allEvents))
       })
       setCustomEvents([])
+      // Чистим и общую базу — событие исчезнет у всех игроков
+      dbEvents.forEach(d => {
+        supabase.from('events').delete().eq('id', d.ev.id).then(res => {
+          if (res.error) console.error('Failed to delete event from Supabase:', res.error.message)
+        })
+      })
       setSelectedBet(null)
       notify('Все события удалены из линии. Линия чиста! 🧹')
     }
@@ -1155,64 +1283,77 @@ export default function App() {
   }
 
   // Admin Surveillance & Actions
-  const handleAdminTopUp = (targetId: string, amount: number) => {
-    let newBal = 0
-    setAccounts(prev => prev.map(a => {
-      if (a.id === targetId) {
-        newBal = r2(a.bal + amount)
-        const nextLog = [{ t: Date.now(), x: `Пополнение от Администратора (+${fmt(amount)})`, d: amount }, ...a.log]
-        return { ...a, bal: newBal, log: nextLog }
-      }
-      return a
-    }))
+  // Все действия идут через БД с проверкой результата: если RLS отклонил запись
+  // (например, чужой профиль), честно сообщаем об ошибке, а не делаем вид, что получилось.
+  const handleAdminTopUp = async (targetId: string, amount: number) => {
+    const target = accounts.find(a => a.id === targetId)
+    if (!target) return
+    const newBal = r2(target.bal + amount)
+    const { data, error } = await supabase.from('profiles').update({ bal: newBal, updated_at: new Date().toISOString() }).eq('id', targetId).select()
+    if (error || !data || data.length === 0) {
+      notify('❌ База данных отклонила начисление: RLS не позволяет менять чужой профиль из браузера')
+      return
+    }
+    setAccounts(prev => prev.map(a => a.id === targetId ? {
+      ...a,
+      bal: newBal,
+      log: [{ t: Date.now(), x: `Пополнение от Администратора (+${fmt(amount)})`, d: amount }, ...a.log]
+    } : a))
     if (currentUserId === targetId) {
       mutate(s => { s.bal = r2(s.bal + amount) })
     }
-    supabase.from('profiles').update({ bal: newBal, updated_at: new Date().toISOString() }).eq('id', targetId).then(null, err => console.error(err))
     notify(`Пользователю начислено +${fmt(amount)}`)
   }
 
-  const handleAdminReset = (targetId: string) => {
-    setAccounts(prev => prev.map(a => {
-      if (a.id === targetId) {
-        return { ...a, bal: 0, log: [{ t: Date.now(), x: 'Сброс баланса Администратором', d: -a.bal }, ...a.log] }
-      }
-      return a
-    }))
+  const handleAdminReset = async (targetId: string) => {
+    const target = accounts.find(a => a.id === targetId)
+    if (!target) return
+    const { data, error } = await supabase.from('profiles').update({ bal: 0, updated_at: new Date().toISOString() }).eq('id', targetId).select()
+    if (error || !data || data.length === 0) {
+      notify('❌ База данных отклонила обнуление: RLS не позволяет менять чужой профиль из браузера')
+      return
+    }
+    setAccounts(prev => prev.map(a => a.id === targetId ? {
+      ...a,
+      bal: 0,
+      log: [{ t: Date.now(), x: 'Сброс баланса Администратором', d: -target.bal }, ...a.log]
+    } : a))
     if (currentUserId === targetId) {
       mutate(s => { s.bal = 0 })
     }
-    supabase.from('profiles').update({ bal: 0, updated_at: new Date().toISOString() }).eq('id', targetId).then(null, err => console.error(err))
     notify(`Баланс пользователя обнулён`)
   }
 
-  const handleAdminToggleBlock = (targetId: string) => {
-    let nextBlocked = false
-    setAccounts(prev => prev.map(a => {
-      if (a.id === targetId) {
-        nextBlocked = !a.isBlocked
-        notify(`Пользователь ${a.username} ${nextBlocked ? 'заблокирован ⛔' : 'разблокирован ✅'}`)
-        return { ...a, isBlocked: nextBlocked }
-      }
-      return a
-    }))
-    supabase.from('profiles').update({ is_blocked: nextBlocked, updated_at: new Date().toISOString() }).eq('id', targetId).then(null, err => console.error(err))
+  const handleAdminToggleBlock = async (targetId: string) => {
+    const target = accounts.find(a => a.id === targetId)
+    if (!target) return
+    const nextBlocked = !target.isBlocked
+    const { data, error } = await supabase.from('profiles').update({ is_blocked: nextBlocked, updated_at: new Date().toISOString() }).eq('id', targetId).select()
+    if (error || !data || data.length === 0) {
+      notify('❌ База данных отклонила блокировку: нужен серверный RPC для админ-действий')
+      return
+    }
+    setAccounts(prev => prev.map(a => a.id === targetId ? { ...a, isBlocked: nextBlocked } : a))
+    notify(`Пользователь ${target.username} ${nextBlocked ? 'заблокирован ⛔' : 'разблокирован ✅'}`)
   }
 
-  const handleAdminDeleteUser = (targetId: string) => {
+  const handleAdminDeleteUser = async (targetId: string) => {
     const target = accounts.find(a => a.id === targetId)
     if (target?.role === 'admin') {
       notify('Нельзя удалить аккаунт администратора!')
       return
     }
-    if (confirm(`Удалить игрока «${target?.username || targetId}»?`)) {
-      setAccounts(prev => prev.filter(a => a.id !== targetId))
-      if (currentUserId === targetId) {
-        setCurrentUserId(null)
-      }
-      supabase.from('profiles').delete().eq('id', targetId).then(null, err => console.error(err))
-      notify(`Игрок ${target?.username} удален!`)
+    if (!confirm(`Удалить игрока «${target?.username || targetId}»?`)) return
+    const { data, error } = await supabase.from('profiles').delete().eq('id', targetId).select()
+    if (error || !data || data.length === 0) {
+      notify('❌ База данных отклонила удаление: нужен серверный RPC для админ-действий')
+      return
     }
+    setAccounts(prev => prev.filter(a => a.id !== targetId))
+    if (currentUserId === targetId) {
+      setCurrentUserId(null)
+    }
+    notify(`Игрок ${target?.username} удален!`)
   }
 
   const handleAdminPurgeEmpty = async () => {
@@ -1546,7 +1687,7 @@ export default function App() {
                 <div className="wl-banner-card">
                   <span className="wl-banner-tag" style={{ background: '#3b82f6', color: '#fff' }}>ХРЯК-КРЭШ</span>
                   <div className="wl-banner-title" style={{ fontSize: 16 }}>
-                    Мультиплеер в реальном времени
+                    Раунды каждые 6 секунд
                   </div>
                   <div className="wl-banner-desc">
                     Следите за полетом ракеты и забирайте выигрыш с коэффициентами до x25.0!
@@ -1891,7 +2032,7 @@ export default function App() {
                   onClick={() => setGamesTab('crash')}
                 >
                   <Zap size={16} color="var(--org)" />
-                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7 (Общий)</span>
+                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7</span>
                 </button>
                 <button
                   className={`wl-round-btn ${gamesTab === 'roulette' ? 'active' : ''}`}
@@ -1914,7 +2055,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* SHARED MULTIPLAYER CRASH GAME ARENA */}
+              {/* CRASH GAME ARENA */}
               {gamesTab === 'crash' && (() => {
                 const progress = Math.min(1, Math.max(0, (crashMultiplier - 1.0) / 8.0))
                 const curX = 40 + progress * 480
@@ -2058,12 +2199,12 @@ export default function App() {
                         <div className="wl-crash-status">
                           {crashPhase === 'betting' && (
                             <span style={{ color: myCrashBet ? 'var(--green)' : 'var(--org)', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                              {myCrashBet ? '✅ ВАША СТАВКА ПРИНЯТА НА РАУНД' : '⏳ ПРИЁМ СТАВОК НА ОБЩИЙ РАУНД 🚀'}
+                              {myCrashBet ? '✅ ВАША СТАВКА ПРИНЯТА НА РАУНД' : '⏳ ПРИЁМ СТАВОК НА РАУНД 🚀'}
                             </span>
                           )}
                           {crashPhase === 'flying' && (
                             <span style={{ color: 'var(--org)', background: 'rgba(255,85,0,0.15)', border: '1px solid rgba(255,85,0,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                              🚀 ХРЯК В ПОЛЁТЕ! ВСЕ ОНЛАЙН В ОДНОЙ РАКЕТЕ!
+                              🚀 ХРЯК В ПОЛЁТЕ! УСПЕЙ ЗАБРАТЬ ВЫИГРЫШ!
                             </span>
                           )}
                           {crashPhase === 'crashed' && (
@@ -2197,7 +2338,7 @@ export default function App() {
                       <div className="wl-crash-sidebar-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Users size={16} color="var(--org)" />
-                          <span>ОНЛАЙН СТАВКИ ({liveCrashBets.length})</span>
+                          <span>СТАВКИ РАУНДА ({liveCrashBets.length})</span>
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--tx-muted)', fontWeight: 700 }}>
                           Банк: {fmt(liveCrashBets.reduce((acc, b) => acc + (b.stake || 0), 0))}
@@ -2207,7 +2348,7 @@ export default function App() {
                       <div className="wl-crash-sidebar-list">
                         {liveCrashBets.length === 0 ? (
                           <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--tx-muted)', fontSize: 12 }}>
-                            {crashPhase === 'betting' ? 'Делайте ставки на общий раунд! 🚀' : 'В этом раунде нет ставок'}
+                            {crashPhase === 'betting' ? 'Делайте ставки на раунд! 🚀' : 'В этом раунде нет ставок'}
                           </div>
                         ) : (
                           liveCrashBets.map(b => {
@@ -2313,15 +2454,15 @@ export default function App() {
                     >
                       <svg viewBox="0 0 300 300" className="wl-wheel-svg">
                         {ROULETTE_SECTORS.map((sec, idx) => {
-                          const r1 = (idx * 45 * Math.PI) / 180
-                          const r2 = ((idx + 1) * 45 * Math.PI) / 180
+                          const r1 = (idx * WHEEL_SEC_DEG * Math.PI) / 180
+                          const r2 = ((idx + 1) * WHEEL_SEC_DEG * Math.PI) / 180
                           const x1 = 150 + 145 * Math.cos(r1)
                           const y1 = 150 + 145 * Math.sin(r1)
                           const x2 = 150 + 145 * Math.cos(r2)
                           const y2 = 150 + 145 * Math.sin(r2)
                           const path = `M 150 150 L ${x1} ${y1} A 145 145 0 0 1 ${x2} ${y2} Z`
 
-                          const midAngle = (idx + 0.5) * 45
+                          const midAngle = (idx + 0.5) * WHEEL_SEC_DEG
                           const midRad = (midAngle * Math.PI) / 180
                           const textX = 150 + 94 * Math.cos(midRad)
                           const textY = 150 + 94 * Math.sin(midRad)
