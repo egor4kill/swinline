@@ -22,7 +22,7 @@ const W = 640, H = 260, PAD = 26
 const WINDOW = 90          // тиков ленты на экране (тик = 1 секунда)
 const DRAW_MS = 50         // точка отрисовки каждые 50 мс (плавность между тиками)
 const SMOOTH = 0.12        // сглаживание движения к последнему тику
-const POLL_MS = 5000       // страховочный поллинг ленты
+const POLL_MS = 1000       // поллинг ленты (Realtime для этой таблицы молчит — поллинг главный)
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
 const NEWS_UP = [
@@ -46,35 +46,33 @@ export default function RubleChart({ bal, onPredict }: Props) {
   const [hist, setHist] = useState<{ id: number; dir: string; win: boolean; pct: number }[]>([])
   const [, setTick] = useState(0)
 
-  // Общая лента из БД: последние тики + плавная отрисовка между секундными тиками
-  const tapeRef = useRef<number[]>([])        // цены тиков (по секунде)
-  const lastTickMsRef = useRef(0)
-  const drawRef = useRef<number[]>([])        // отрисованные точки (каждые DRAW_MS)
-  const priceRef = useRef(100)                // сглаженная цена на экране
+  // Общая лента из БД. Тики приходят поллингом (раз в секунду, иногда пачками) и
+  // проигрываются в естественном темпе; отрисовка сглаживает движение между тиками.
+  const drawRef = useRef<number[]>([])                 // отрисованные точки (каждые DRAW_MS)
+  const priceRef = useRef(100)                         // сглаженная цена на экране
+  const targetRef = useRef(100)                        // цена последнего проигранного тика
+  const queueRef = useRef<{ ms: number; price: number }[]>([]) // тики на проигрывание
+  const lastTickMsRef = useRef(0)                      // водяной знак загруженных тиков
+  const lastPlayRef = useRef(0)
   const pendingRef = useRef<{ res: RubleResult } | null>(null)
   const resultRef = useRef<{ win: boolean; pct: number } | null>(null)
 
-  const pushTick = (price: number, tickMs: number) => {
-    if (!(tickMs > lastTickMsRef.current)) return
-    lastTickMsRef.current = tickMs
-    tapeRef.current.push(price)
-    if (tapeRef.current.length > WINDOW) tapeRef.current.shift()
+  const ingest = (price: number, ms: number) => {
+    if (!(ms > lastTickMsRef.current)) return
+    lastTickMsRef.current = ms
+    queueRef.current.push({ ms, price })
   }
 
   useEffect(() => {
     let alive = true
     const poll = async () => {
-      // дотягиваем тики, которых не видели (страховка, если Realtime зевнул)
       if (!alive) return
-      if (lastTickMsRef.current > 0) {
-        const from = new Date(lastTickMsRef.current + 1000).toISOString()
-        const { data } = await supabase.from('ruble_prices').select('tick_at,price')
-          .gt('tick_at', from).order('tick_at').limit(120)
-        ;(data || []).forEach(r => pushTick(Number(r.price), Date.parse(r.tick_at)))
-      }
+      const from = new Date(lastTickMsRef.current + 1).toISOString()
+      const { data } = await supabase.from('ruble_prices').select('tick_at,price')
+        .gt('tick_at', from).order('tick_at').limit(120)
+      ;(data || []).forEach(r => ingest(Number(r.price), Date.parse(r.tick_at)))
     }
     ;(async () => {
-      // первичная загрузка: последние WINDOW тиков общей ленты
       let { data } = await supabase.from('ruble_prices').select('tick_at,price')
         .order('tick_at', { ascending: false }).limit(WINDOW)
       if ((data || []).length < WINDOW / 3) {
@@ -85,34 +83,39 @@ export default function RubleChart({ bal, onPredict }: Props) {
       }
       if (!alive) return
       const rows = (data || []).reverse()
-      rows.forEach(r => pushTick(Number(r.price), Date.parse(r.tick_at)))
       const first = rows.length ? Number(rows[0].price) : 100
-      drawRef.current = Array(WINDOW * 2).fill(first)
+      // историю рисуем сразу (без проигрывания), дальше лента едет вживую
+      drawRef.current = rows.length
+        ? rows.map(r => Number(r.price))
+        : Array(WINDOW * 2).fill(100)
       priceRef.current = rows.length ? Number(rows[rows.length - 1].price) : 100
+      targetRef.current = priceRef.current
+      rows.forEach(r => { lastTickMsRef.current = Date.parse(r.tick_at) })
       poll()
     })()
     const pollId = window.setInterval(poll, POLL_MS)
-    const channel = supabase.channel('ruble-tape')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ruble_prices' },
-        m => pushTick(Number(m.new.price), Date.parse(m.new.tick_at)))
-      .subscribe()
-    return () => { alive = false; clearInterval(pollId); supabase.removeChannel(channel) }
+    return () => { alive = false; clearInterval(pollId) }
   }, [])
 
   useEffect(() => {
+    const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     let raf = 0
     let lastDraw = 0
     const loop = (now: number) => {
-      // цель — последний тик общей ленты
-      const tape = tapeRef.current
-      const target = tape.length ? tape[tape.length - 1] : priceRef.current
-      priceRef.current += (target - priceRef.current) * SMOOTH
+      // проигрываем очередь тиков: в обычном темпе ~1/сек, пачку — с плавным ускорением
+      const q = queueRef.current
+      if (q.length && now - lastPlayRef.current >= Math.max(120, Math.min(1000, Math.floor(1000 / q.length)))) {
+        lastPlayRef.current = now
+        targetRef.current = q.shift()!.price
+      }
+      // плавное движение к цели
+      priceRef.current += (targetRef.current - priceRef.current) * (calm ? 0.6 : SMOOTH)
       if (now - lastDraw > DRAW_MS) {
         lastDraw = now
         drawRef.current.push(priceRef.current)
         if (drawRef.current.length > WINDOW * 2) drawRef.current.shift()
       }
-      // ставка сыграла, когда общая лента дошла до момента расчёта
+      // ставка сыграла, когда лента дошла до момента расчёта
       const p = pendingRef.current
       if (p && (lastTickMsRef.current >= p.res.resolveMs || Date.now() > p.res.resolveMs + 5000)) {
         pendingRef.current = null

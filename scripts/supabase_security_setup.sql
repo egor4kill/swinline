@@ -1470,7 +1470,7 @@ BEGIN
   END IF;
   v_cur := v_last + interval '1 second';
   WHILE v_cur <= v_until LOOP
-    v_price := round((v_price * (1 + (random() * 2 - 1) * 0.004) + (100 - v_price) * 0.02)::numeric, 2);
+    v_price := round((v_price * (1 + (random() * 2 - 1) * 0.006) + (100 - v_price) * 0.02)::numeric, 2);
     INSERT INTO public.ruble_prices (tick_at, price) VALUES (v_cur, v_price)
       ON CONFLICT (tick_at) DO NOTHING;
     v_cur := v_cur + interval '1 second';

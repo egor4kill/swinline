@@ -4,7 +4,7 @@
 // Формула шага ленты — зеркало SQL (ruble_ensure, секция 13 в scripts/supabase_security_setup.sql).
 export const TICK_SECONDS = 30
 export const START = 100
-export const TAPE_VOL = 0.004
+export const TAPE_VOL = 0.006
 export const TAPE_PULL = 0.02
 export const PAYOUT = 1.95
 export type Side = 'up' | 'down'
