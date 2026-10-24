@@ -213,6 +213,26 @@ async function run() {
       console.error('Google Drive upload failed:', e.message)
     }
   }
+
+  // 8) чистим Storage: в Supabase держим только текущий месячный документ
+  //    (полная история остаётся на Google Drive; старые месяцы здесь не нужны)
+  try {
+    const listRes = await api(`/storage/v1/object/list/${BUCKET}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefix: '', limit: 100 })
+    })
+    if (listRes.ok) {
+      const objects = await listRes.json()
+      const stale = objects.filter(o => o.name !== file)
+      for (const o of stale) {
+        const del = await api(`/storage/v1/object/${BUCKET}/${encodeURIComponent(o.name)}`, { method: 'DELETE' })
+        console.log(`Storage cleanup: ${o.name} → ${del.ok ? 'удалён' : 'HTTP ' + del.status}`)
+      }
+    }
+  } catch (e) {
+    console.error('Storage cleanup failed:', e.message)
+  }
 }
 
 run().catch(e => { console.error('Archive failed:', e.message); process.exit(1) })
