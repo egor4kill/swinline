@@ -22,7 +22,10 @@ const W = 640, H = 260, PAD = 26
 const WINDOW = 90          // тиков ленты на экране (тик = 1 секунда)
 const DRAW_MS = 50         // точка отрисовки каждые 50 мс (плавность между тиками)
 const SMOOTH = 0.12        // сглаживание движения к последнему тику
-const POLL_MS = 1000       // поллинг ленты (Realtime для этой таблицы молчит — поллинг главный)
+const POLL_MS = 600        // поллинг ленты с запасом перекрытия
+const OVERLAP_S = 5        // каждый запрос забирает последние N секунд заново (от потерь)
+const STALL_MS = 4000      // нет новых тиков столько — зовём ruble_ensure
+const RESEED_MS = 12000    // всё ещё нет — пере-загружаем историю целиком
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
 const NEWS_UP = [
@@ -46,75 +49,93 @@ export default function RubleChart({ bal, onPredict }: Props) {
   const [hist, setHist] = useState<{ id: number; dir: string; win: boolean; pct: number }[]>([])
   const [, setTick] = useState(0)
 
-  // Общая лента из БД. Тики приходят поллингом (раз в секунду, иногда пачками) и
-  // проигрываются в естественном темпе; отрисовка сглаживает движение между тиками.
+  // Общая лента из БД. Тики приходят поллингом (иногда пачками) и проигрываются
+  // в естественном темпе; отрисовка сглаживает движение между тиками.
   const drawRef = useRef<number[]>([])                 // отрисованные точки (каждые DRAW_MS)
   const priceRef = useRef(100)                         // сглаженная цена на экране
   const targetRef = useRef(100)                        // цена последнего проигранного тика
   const queueRef = useRef<{ ms: number; price: number }[]>([]) // тики на проигрывание
   const lastTickMsRef = useRef(0)                      // водяной знак загруженных тиков
   const lastPlayRef = useRef(0)
+  const lastNewTickRef = useRef(0)                     // когда последний раз приходили тики
+  const lastHealRef = useRef(0)
+  const lastReseedRef = useRef(0)
   const pendingRef = useRef<{ res: RubleResult } | null>(null)
   const resultRef = useRef<{ win: boolean; pct: number } | null>(null)
 
   const ingest = (price: number, ms: number) => {
     if (!(ms > lastTickMsRef.current)) return
     lastTickMsRef.current = ms
+    lastNewTickRef.current = Date.now()
     queueRef.current.push({ ms, price })
+    if (queueRef.current.length > 200) queueRef.current.splice(0, queueRef.current.length - 200)
   }
 
   useEffect(() => {
     let alive = true
+
+    const reseed = async () => {
+      // сначала просим сервер дотянуть ленту (дёшево, идемпотентно), потом берём историю
+      try { await supabase.rpc('ruble_ensure') } catch { /* сервер ответит и так */ }
+      const { data, error } = await supabase.from('ruble_prices').select('tick_at,price')
+        .order('tick_at', { ascending: false }).limit(WINDOW)
+      if (error || !alive) return
+      const rows = (data || []).reverse()
+      if (!rows.length) return
+      const first = Number(rows[0].price)
+      drawRef.current = rows.map(r => Number(r.price))
+      if (drawRef.current.length < WINDOW) drawRef.current = Array(WINDOW - drawRef.current.length).fill(first).concat(drawRef.current)
+      while (drawRef.current.length > WINDOW * 2) drawRef.current.shift()
+      priceRef.current = Number(rows[rows.length - 1].price)
+      targetRef.current = priceRef.current
+      queueRef.current = []
+      lastTickMsRef.current = Date.parse(rows[rows.length - 1].tick_at)
+      lastNewTickRef.current = Date.now()
+    }
     const poll = async () => {
       if (!alive) return
-      const from = new Date(lastTickMsRef.current + 1).toISOString()
-      const { data } = await supabase.from('ruble_prices').select('tick_at,price')
-        .gt('tick_at', from).order('tick_at').limit(120)
-      ;(data || []).forEach(r => ingest(Number(r.price), Date.parse(r.tick_at)))
+      try {
+        // перекрытие на OVERLAP_S секунд назад: потери и дыры не страшны, дедуп по времени
+        const from = new Date(Math.max(0, lastTickMsRef.current - OVERLAP_S * 1000)).toISOString()
+        const { data, error } = await supabase.from('ruble_prices').select('tick_at,price')
+          .gt('tick_at', from).order('tick_at').limit(120)
+        if (error || !alive) return
+        ;(data || []).forEach(r => ingest(Number(r.price), Date.parse(r.tick_at)))
+      } catch { /* следующий поллинг повторит */ }
     }
-    ;(async () => {
-      let { data } = await supabase.from('ruble_prices').select('tick_at,price')
-        .order('tick_at', { ascending: false }).limit(WINDOW)
-      if ((data || []).length < WINDOW / 3) {
-        // лента пуста (новый проект) — просим сервер её дотянуть и пробуем снова
-        await supabase.rpc('ruble_ensure')
-        ;({ data } = await supabase.from('ruble_prices').select('tick_at,price')
-          .order('tick_at', { ascending: false }).limit(WINDOW))
-      }
-      if (!alive) return
-      const rows = (data || []).reverse()
-      const first = rows.length ? Number(rows[0].price) : 100
-      // историю рисуем сразу (без проигрывания), дальше лента едет вживую
-      drawRef.current = rows.length
-        ? rows.map(r => Number(r.price))
-        : Array(WINDOW * 2).fill(100)
-      priceRef.current = rows.length ? Number(rows[rows.length - 1].price) : 100
-      targetRef.current = priceRef.current
-      rows.forEach(r => { lastTickMsRef.current = Date.parse(r.tick_at) })
-      poll()
-    })()
+
+    reseed()
     const pollId = window.setInterval(poll, POLL_MS)
-    return () => { alive = false; clearInterval(pollId) }
+    // самозаживление: лента встала — дотягиваем сервером, не помогло — пере-загружаем историю
+    const healId = window.setInterval(() => {
+      if (!alive) return
+      const stalled = Date.now() - lastNewTickRef.current
+      if (stalled > RESEED_MS && Date.now() - lastReseedRef.current > RESEED_MS) {
+        lastReseedRef.current = Date.now()
+        reseed()
+      } else if (stalled > STALL_MS && Date.now() - lastHealRef.current > 20000) {
+        lastHealRef.current = Date.now()
+        Promise.resolve(supabase.rpc('ruble_ensure')).catch(() => {})
+      }
+    }, 2000)
+    return () => { alive = false; clearInterval(pollId); clearInterval(healId) }
   }, [])
 
   useEffect(() => {
     const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    let raf = 0
-    let lastDraw = 0
-    const loop = (now: number) => {
-      // проигрываем очередь тиков: в обычном темпе ~1/сек, пачку — с плавным ускорением
+    // setInterval вместо rAF: не замирает в неактивных/встроенных окнах
+    const loopId = window.setInterval(() => {
+      const now = performance.now()
+      // проигрываем очередь тиков: ~1/сек, пачка — с плавным ускорением
       const q = queueRef.current
       if (q.length && now - lastPlayRef.current >= Math.max(120, Math.min(1000, Math.floor(1000 / q.length)))) {
         lastPlayRef.current = now
         targetRef.current = q.shift()!.price
       }
-      // плавное движение к цели
       priceRef.current += (targetRef.current - priceRef.current) * (calm ? 0.6 : SMOOTH)
-      if (now - lastDraw > DRAW_MS) {
-        lastDraw = now
-        drawRef.current.push(priceRef.current)
-        if (drawRef.current.length > WINDOW * 2) drawRef.current.shift()
-      }
+      // каждая итерация = новая точка отрисовки (интервал = DRAW_MS)
+      drawRef.current.push(priceRef.current)
+      if (drawRef.current.length > WINDOW * 2) drawRef.current.shift()
       // ставка сыграла, когда лента дошла до момента расчёта
       const p = pendingRef.current
       if (p && (lastTickMsRef.current >= p.res.resolveMs || Date.now() > p.res.resolveMs + 5000)) {
@@ -127,10 +148,8 @@ export default function RubleChart({ bal, onPredict }: Props) {
         setBusy(false)
       }
       setTick(t => t + 1)
-      raf = requestAnimationFrame(loop)
-    }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
+    }, DRAW_MS)
+    return () => clearInterval(loopId)
   }, [])
 
   const launch = async (side: Side) => {
@@ -156,10 +175,10 @@ export default function RubleChart({ bal, onPredict }: Props) {
   const lo0 = Math.min(...buf), hi0 = Math.max(...buf)
   const mid = (lo0 + hi0) / 2, half = Math.max((hi0 - lo0) / 2, 0.4) * 1.3
   const y = (v: number) => PAD + (1 - (v - (mid - half)) / (2 * half)) * (H - 2 * PAD)
-  const x = (i: number) => PAD + (i / (buf.length - 1)) * (W - 2 * PAD)
+  const x = (i: number) => PAD + (i / Math.max(1, buf.length - 1)) * (W - 2 * PAD)
   const pts = buf.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   const price = priceRef.current
-  const slope = price - buf[buf.length - 6]
+  const slope = price - buf[Math.max(0, buf.length - 6)]
   const liveColor = slope >= 0 ? '#37c26e' : '#ff4d4d'
   const res = resultRef.current
   const pending = pendingRef.current
