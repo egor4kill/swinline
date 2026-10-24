@@ -520,10 +520,41 @@ export default function App() {
     }
   }, [])
 
+  // Админ видит всех игроков: серверный список admin_list_players
+  // (RLS отдаёт обычному клиенту только его собственный профиль)
+  const fetchAdminPlayers = useCallback(async () => {
+    if (currentUserRef.current?.role !== 'admin') return
+    const { data, error } = await supabase.rpc('admin_list_players')
+    if (error || !Array.isArray(data)) return
+    setAccounts(prev => {
+      const byId = new Map(prev.map(a => [a.id, a]))
+      for (const p of data) {
+        const isOwner = (p.username || '').toLowerCase() === ADMIN_USERNAME.toLowerCase()
+        const existing = byId.get(p.id)
+        byId.set(p.id, {
+          id: p.id,
+          username: p.username,
+          role: (isOwner ? 'admin' : 'user') as 'admin' | 'user',
+          avatar: getTwitchAvatar(p.username, existing?.avatar || p.avatar),
+          title: existing?.title || (isOwner ? 'Владелец платформы (Admin)' : 'Игрок (Twitch)'),
+          bal: Number(p.bal ?? 0),
+          bets: (p.recent_bets || []).map((b: any) => ({ ...b, ev: b.event_id })),
+          log: existing?.log || [],
+          createdAt: new Date(p.created_at || Date.now()).getTime(),
+          isBlocked: Boolean(p.is_blocked),
+          stats: existing?.stats || { totalBets: Number(p.bets_count || 0), wonBets: 0, lostBets: 0, totalProfit: 0 },
+          achievements: existing?.achievements || []
+        })
+      }
+      return purgeEmptyAccounts([...byId.values()])
+    })
+  }, [])
+
   useEffect(() => {
     fetchSupabaseUsers()
+    fetchAdminPlayers()
     fetchDbEvents()
-  }, [fetchSupabaseUsers, fetchDbEvents])
+  }, [fetchSupabaseUsers, fetchAdminPlayers, fetchDbEvents])
 
   // Supabase Realtime synchronization across all players and admin
   useEffect(() => {
@@ -555,9 +586,10 @@ export default function App() {
   useEffect(() => {
     if (adminModalOpen) {
       fetchSupabaseUsers()
+      fetchAdminPlayers()
       fetchDbEvents()
     }
-  }, [adminModalOpen, fetchSupabaseUsers, fetchDbEvents])
+  }, [adminModalOpen, fetchSupabaseUsers, fetchAdminPlayers, fetchDbEvents])
 
   const syncSupabaseUser = (u: any, customName?: string, customAvatar?: string) => {
     const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
@@ -1430,6 +1462,7 @@ export default function App() {
 
   const handleAdminPurgeEmpty = async () => {
     await fetchSupabaseUsers()
+    await fetchAdminPlayers()
     notify('Синхронизировано с базой данных Supabase!')
   }
 

@@ -1177,3 +1177,253 @@ END $$;
 REVOKE EXECUTE ON FUNCTION public.archive_take() FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.archive_take() TO service_role;
+
+-- ====================================================================
+-- 12. БЛОКИРОВКА НА СЕРВЕРЕ + СПИСОК ИГРОКОВ ДЛЯ АДМИНКИ (новое).
+--     assert_not_blocked() теперь вызывается во всех игровых RPC
+--     (ставки/колесо/плинко/лужи/ежедневка/free-money/спорт) — заблокированный
+--     не может играть даже прямыми вызовами API. Возврат своих денег
+--     (отмена/вывод/забрать) не блокируется.
+--     admin_list_players() отдаёт владельцу все профили со ставками —
+--     панель «Слежка за игроками» показывает всех, а не только себя.
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.assert_not_blocked()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_blocked) THEN
+    RAISE EXCEPTION 'Ваш аккаунт заблокирован администратором';
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.crash_place_bet(p_round bigint, p_stake numeric, p_auto numeric DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.crash_rounds%rowtype;
+  v_bal numeric;
+  v_username text;
+  v_avatar text;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.crash_rounds WHERE id = p_round;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF now() < v_round.start_at OR now() >= v_round.start_at + make_interval(secs => v_round.betting_seconds) THEN
+    RAISE EXCEPTION 'Приём ставок на этот раунд закрыт';
+  END IF;
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF p_auto IS NOT NULL AND p_auto < 1.05 THEN RAISE EXCEPTION 'Авто-вывод — не меньше x1.05'; END IF;
+  SELECT bal, username, avatar INTO v_bal, v_username, v_avatar FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽ на балансе'; END IF;
+  UPDATE public.profiles SET bal = bal - p_stake, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.crash_bets (round_id, user_id, username, avatar, stake, auto_cashout)
+    VALUES (p_round, auth.uid(), v_username, v_avatar, p_stake, p_auto);
+  RETURN jsonb_build_object('bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.wheel_spin()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_idx integer;
+  v_mul numeric;
+  v_muls numeric[] := ARRAY[0,0.5,0,1.2,0,0.5,0,1.2,0,0.5,0,1.0,0,0.5,0,10];
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < 100 THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  v_idx := floor(random() * array_length(v_muls, 1))::int;
+  v_mul := v_muls[v_idx + 1];
+  UPDATE public.profiles
+    SET bal = bal - 100 + round(100 * v_mul, 2), updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'wheel', jsonb_build_object('stake', 100, 'sector', v_idx, 'mul', v_mul, 'win', round(100 * v_mul, 2)));
+  RETURN jsonb_build_object('sector', v_idx, 'mul', v_mul, 'win', round(100 * v_mul, 2), 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.plinko_drop(p_stake numeric, p_risk text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_slot integer := 0;
+  v_i integer;
+  v_mul numeric;
+  v_low  numeric[] := ARRAY[6.6,3.3,1.9,1.3,1.1,1,0.5,1,1.1,1.3,1.9,3.3,6.6];
+  v_mid  numeric[] := ARRAY[21,6.5,2.8,1.4,1,0.8,0.5,0.8,1,1.4,2.8,6.5,21];
+  v_high numeric[] := ARRAY[65,15,4.2,1.9,0.9,0.6,0.3,0.6,0.9,1.9,4.2,15,65];
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF p_risk NOT IN ('low', 'mid', 'high') THEN RAISE EXCEPTION 'Неизвестный уровень риска'; END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  FOR v_i IN 1..12 LOOP
+    IF random() < 0.5 THEN v_slot := v_slot + 1; END IF;
+  END LOOP;
+  v_mul := CASE p_risk
+    WHEN 'low' THEN v_low[v_slot + 1]
+    WHEN 'mid' THEN v_mid[v_slot + 1]
+    ELSE v_high[v_slot + 1]
+  END;
+  UPDATE public.profiles
+    SET bal = bal - p_stake + round(p_stake * v_mul, 2), updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'plinko', jsonb_build_object('stake', p_stake, 'risk', p_risk, 'slot', v_slot, 'mul', v_mul, 'win', round(p_stake * v_mul, 2)));
+  RETURN jsonb_build_object('slot', v_slot, 'mul', v_mul, 'win', round(p_stake * v_mul, 2), 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_start(p_stake numeric, p_mines integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_id uuid;
+  v_cells integer[] := ARRAY[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24];
+  v_i integer; v_j integer; v_tmp integer;
+  v_mines integer[];
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF p_mines < 1 OR p_mines > 24 THEN RAISE EXCEPTION 'Луж должно быть от 1 до 24'; END IF;
+  IF EXISTS (SELECT 1 FROM public.puddles_rounds WHERE user_id = auth.uid() AND status = 'play') THEN
+    RAISE EXCEPTION 'Сначала заверши текущий раунд';
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  FOR v_i IN REVERSE 24..1 LOOP
+    v_j := floor(random() * (v_i + 1))::int;
+    v_tmp := v_cells[v_i + 1]; v_cells[v_i + 1] := v_cells[v_j + 1]; v_cells[v_j + 1] := v_tmp;
+  END LOOP;
+  v_mines := v_cells[1:p_mines];
+  UPDATE public.profiles SET bal = bal - p_stake, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.puddles_rounds (user_id, stake, mines_count) VALUES (auth.uid(), p_stake, p_mines) RETURNING id INTO v_id;
+  INSERT INTO public.puddles_secrets (round_id, mines) VALUES (v_id, v_mines);
+  RETURN jsonb_build_object('round_id', v_id, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.claim_daily(p_today date)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_row public.daily_claims%rowtype;
+  v_streak integer;
+  v_reward numeric;
+  v_bal numeric;
+  v_rewards numeric[] := ARRAY[500,600,800,1000,1300,1700,3000];
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_today IS NULL OR p_today < current_date - 1 OR p_today > current_date + 1 THEN
+    RAISE EXCEPTION 'Некорректная дата';
+  END IF;
+  SELECT * INTO v_row FROM public.daily_claims WHERE user_id = auth.uid();
+  IF v_row.user_id IS NOT NULL AND v_row.last_claim = p_today THEN
+    RAISE EXCEPTION 'Награда на сегодня уже забрана';
+  END IF;
+  IF v_row.user_id IS NOT NULL AND v_row.last_claim = p_today - 1 THEN
+    v_streak := v_row.streak + 1;
+  ELSE
+    v_streak := 1;
+  END IF;
+  v_reward := v_rewards[((v_streak - 1) % 7) + 1];
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  INSERT INTO public.daily_claims (user_id, streak, last_claim) VALUES (auth.uid(), v_streak, p_today)
+    ON CONFLICT (user_id) DO UPDATE SET streak = v_streak, last_claim = p_today;
+  UPDATE public.profiles SET bal = bal + v_reward, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  RETURN jsonb_build_object('reward', v_reward, 'day', v_streak, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.self_add_free(p_amount numeric)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_amount NOT IN (5000, 25000, 50000, 250000, 1000000) THEN
+    RAISE EXCEPTION 'Недопустимая сумма начисления';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.free_money WHERE user_id = auth.uid() AND last_at > now() - interval '2.5 seconds') THEN
+    RAISE EXCEPTION 'Подождите пару секунд перед следующим начислением';
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal >= 100000 THEN RAISE EXCEPTION 'Баланс уже превышает 100 000 SV₽ — начисление не требуется'; END IF;
+  UPDATE public.profiles SET bal = bal + p_amount, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.free_money (user_id, last_at) VALUES (auth.uid(), now())
+    ON CONFLICT (user_id) DO UPDATE SET last_at = now();
+  RETURN jsonb_build_object('bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.place_sports_bet(p_event text, p_outcome integer, p_stake numeric)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_event public.events%rowtype;
+  v_bal numeric;
+  v_username text;
+  v_pick text;
+  v_odds numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_event FROM public.events WHERE id = p_event;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Событие не найдено'; END IF;
+  IF v_event.status <> 'open' THEN RAISE EXCEPTION 'Приём ставок на это событие закрыт'; END IF;
+  IF p_outcome IS NULL OR p_outcome < 0 OR p_outcome >= jsonb_array_length(v_event.data->'out') THEN
+    RAISE EXCEPTION 'Некорректный исход';
+  END IF;
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  SELECT bal, username INTO v_bal, v_username FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽ на балансе'; END IF;
+  v_pick := v_event.data->'out'->p_outcome->>0;
+  v_odds := (v_event.data->'out'->p_outcome->>1)::numeric;
+  UPDATE public.profiles SET bal = bal - p_stake, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.bets (user_id, username, event_id, match_title, pick, pick_name, odds, stake, status)
+    VALUES (auth.uid(), v_username, p_event, coalesce(v_event.data->>'title', p_event), v_pick, v_pick, v_odds, p_stake, 'pending');
+  RETURN jsonb_build_object('bal', v_bal, 'pick', v_pick, 'odds', v_odds);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_list_players()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может смотреть список игроков';
+  END IF;
+  RETURN (
+    SELECT coalesce(jsonb_agg(row_to_json(t) ORDER BY t.created_at), '[]'::jsonb)
+    FROM (
+      SELECT p.id, p.username, p.avatar, p.bal, p.is_blocked, p.created_at,
+             (SELECT count(*) FROM public.bets b WHERE b.user_id = p.id) AS bets_count,
+             (SELECT jsonb_agg(jsonb_build_object(
+                       'id', b.id, 'event_id', b.event_id, 'match_title', b.match_title,
+                       'pick', b.pick, 'pick_name', b.pick_name, 'odds', b.odds,
+                       'stake', b.stake, 'status', b.status, 'payout', b.payout,
+                       'created_at', b.created_at) ORDER BY b.created_at DESC)
+              FROM (SELECT * FROM public.bets WHERE user_id = p.id ORDER BY created_at DESC LIMIT 20) b
+             ) AS recent_bets
+      FROM public.profiles p
+    ) t
+  );
+END $$;
+
+GRANT EXECUTE ON FUNCTION public.admin_list_players() TO authenticated, anon;
