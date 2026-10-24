@@ -1429,24 +1429,63 @@ END $$;
 GRANT EXECUTE ON FUNCTION public.admin_list_players() TO authenticated, anon;
 
 -- ====================================================================
--- 13. КУРС РУБЛЯ (новое): бинарные опционы — угадай, вырастет курс
---     за 30 тиков или упадёт. Шанс ~50%, выплата x1.95 → RTP 97.5%.
---     Путь курса генерирует сервер и возвращает целиком (исход решён
---     в момент ставки, клиент только рисует график — как в плинко).
---     Формулы — зеркало src/rubleLogic.ts (START=100, VOL=0.012, 30 тиков).
---     Проверок логов не создаёт своих таблиц: пишем в game_attempts,
---     ретеншн (последние 10 на игрока) и архив обслуживает archive_take().
+-- 13. КУРС РУБЛЯ v2 (новое): ОБЩАЯ БИРЖЕВАЯ ЛЕНТА для всех игроков.
+--     Цена хранится в ruble_prices по секундам: лента идёт всегда
+--     (pg_cron дотягивает её на 5 минут вперёд каждые 10 секунд),
+--     не сбрасывается при перезаходе и одинакова у всех.
+--     Будущие тики скрыты RLS (tick_at <= now()) — «заглянуть вперёд» нельзя.
+--     Ставка: рубль через 30 секунд после ставки против цены на момент
+--     ставки. Угадал направление — x1.95 (RTP 97.5%), «флэт» — в пользу
+--     заведения. Формулы шага — зеркало src/rubleLogic.ts.
 -- ====================================================================
+
+CREATE TABLE IF NOT EXISTS public.ruble_prices (
+  tick_at timestamptz PRIMARY KEY,
+  price numeric NOT NULL
+);
+ALTER TABLE public.ruble_prices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ruble_prices_select_past ON public.ruble_prices;
+CREATE POLICY ruble_prices_select_past
+ON public.ruble_prices FOR SELECT
+USING (tick_at <= now());
+
+-- Дотянуть ленту до указанного момента (по умолчанию +15 минут — запас на задержки крона).
+-- Идемпотентна (ON CONFLICT), сама подчищает ленту старше двух часов.
+CREATE OR REPLACE FUNCTION public.ruble_ensure(p_until timestamptz DEFAULT NULL)
+RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_last timestamptz;
+  v_price numeric;
+  v_cur timestamptz;
+  v_until timestamptz := coalesce(p_until, now() + interval '15 minutes');
+BEGIN
+  SELECT tick_at, price INTO v_last, v_price
+    FROM public.ruble_prices ORDER BY tick_at DESC LIMIT 1;
+  IF v_last IS NULL THEN
+    v_last := date_trunc('second', now());
+    v_price := 100;
+    INSERT INTO public.ruble_prices (tick_at, price) VALUES (v_last, v_price)
+      ON CONFLICT (tick_at) DO NOTHING;
+  END IF;
+  v_cur := v_last + interval '1 second';
+  WHILE v_cur <= v_until LOOP
+    v_price := round((v_price * (1 + (random() * 2 - 1) * 0.004) + (100 - v_price) * 0.02)::numeric, 2);
+    INSERT INTO public.ruble_prices (tick_at, price) VALUES (v_cur, v_price)
+      ON CONFLICT (tick_at) DO NOTHING;
+    v_cur := v_cur + interval '1 second';
+  END LOOP;
+  DELETE FROM public.ruble_prices WHERE tick_at < now() - interval '2 hours';
+END $$;
 
 CREATE OR REPLACE FUNCTION public.ruble_predict(p_side text, p_stake numeric)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_bal numeric;
-  v_price double precision := 100.0;
-  v_ticks jsonb := '[]'::jsonb;
-  v_i integer;
-  v_final numeric;
+  v_tick timestamptz;
+  v_at numeric;
+  v_future numeric;
   v_dir text;
   v_win boolean;
   v_mul numeric;
@@ -1460,12 +1499,20 @@ BEGIN
   IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
   IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
 
-  FOR v_i IN 1..30 LOOP
-    v_price := v_price * (1 + (random() * 2 - 1) * 0.012);
-    v_ticks := v_ticks || to_jsonb(round(v_price::numeric, 2));
-  END LOOP;
-  v_final := round(v_price::numeric, 2);
-  v_dir := CASE WHEN v_final > 100 THEN 'up' WHEN v_final < 100 THEN 'down' ELSE 'flat' END;
+  PERFORM public.ruble_ensure(now() + interval '45 seconds');
+  v_tick := date_trunc('second', now());
+  SELECT price INTO v_at FROM public.ruble_prices WHERE tick_at = v_tick;
+  IF v_at IS NULL THEN
+    SELECT price INTO v_at FROM public.ruble_prices
+      WHERE tick_at < v_tick ORDER BY tick_at DESC LIMIT 1;
+  END IF;
+  SELECT price INTO v_future FROM public.ruble_prices
+    WHERE tick_at = v_tick + interval '30 seconds';
+  IF v_at IS NULL OR v_future IS NULL THEN
+    RAISE EXCEPTION 'Лента ещё не готова — попробуй через секунду';
+  END IF;
+
+  v_dir := CASE WHEN v_future > v_at THEN 'up' WHEN v_future < v_at THEN 'down' ELSE 'flat' END;
   v_win := (p_side = 'up' AND v_dir = 'up') OR (p_side = 'down' AND v_dir = 'down');
   v_mul := CASE WHEN v_win THEN 1.95 ELSE 0 END;
   v_payout := round(p_stake * v_mul, 2);
@@ -1475,11 +1522,29 @@ BEGIN
     WHERE id = auth.uid() RETURNING bal INTO v_bal;
   INSERT INTO public.game_attempts (user_id, game, result)
     VALUES (auth.uid(), 'ruble', jsonb_build_object(
-      'stake', p_stake, 'side', p_side, 'start', 100, 'final', v_final,
+      'stake', p_stake, 'side', p_side, 'start', v_at, 'final', v_future,
       'dir', v_dir, 'mul', v_mul, 'win', v_payout));
 
-  RETURN jsonb_build_object('start', 100, 'final', v_final, 'ticks', v_ticks,
+  RETURN jsonb_build_object('start', v_at, 'final', v_future,
+    'resolve_ms', (extract(epoch FROM (v_tick + interval '30 seconds')) * 1000)::bigint,
     'dir', v_dir, 'win', v_win, 'mul', v_mul, 'payout', v_payout, 'bal', v_bal);
 END $$;
 
+-- Лента в реалтайме: новые тики прилетают подписчикам сами
+DO $pub$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
+                 WHERE pubname = 'supabase_realtime' AND tablename = 'ruble_prices') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.ruble_prices;
+  END IF;
+END $pub$;
+
 GRANT EXECUTE ON FUNCTION public.ruble_predict(text, numeric) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.ruble_ensure(timestamptz) TO authenticated, anon, service_role;
+
+-- Фоновый ход ленты: каждые 10 секунд дотягиваем будущие тики
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+DO $cron$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'ruble-tape') THEN
+    PERFORM cron.schedule('ruble-tape', '*/10 * * * * *', $job$ SELECT public.ruble_ensure() $job$);
+  END IF;
+END $cron$;

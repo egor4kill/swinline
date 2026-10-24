@@ -1,0 +1,18 @@
+name: Ruble tape
+on:
+  schedule:
+    - cron: '* * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Advance shared ruble tape
+        run: |
+          curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/ruble_ensure" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'

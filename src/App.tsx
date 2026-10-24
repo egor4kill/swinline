@@ -1154,8 +1154,7 @@ export default function App() {
       return next
     })
     return {
-      start: Number(data.start), final: Number(data.final),
-      ticks: (data.ticks as unknown[]).map(Number),
+      start: Number(data.start), final: Number(data.final), resolveMs: Number(data.resolve_ms),
       dir: data.dir as RubleResult['dir'], win: Boolean(data.win),
       mul: Number(data.mul), payout: Number(data.payout),
     }
