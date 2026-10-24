@@ -970,3 +970,210 @@ GRANT EXECUTE ON FUNCTION
   public.place_sports_bet(text, integer, numeric),
   public.self_reset_balance()
 TO authenticated, anon;
+
+-- ====================================================================
+-- 11. АРХИВ ИСТОРИИ ИГР (новое): в БД хранятся только последние 10 попыток
+--     каждой игры. Всё старшее archive_take() удаляет и отдаёт архиватору
+--     (scripts/archive_history.mjs, запуск из .github/workflows/archive.yml
+--     каждые 15 минут), который складывает это в красивый Markdown-документ
+--     в приватном бакете Storage «history» (game-history-ГГГГ-ММ.md).
+--     Вызывать archive_take может только сервисный ключ.
+-- ====================================================================
+
+CREATE TABLE IF NOT EXISTS public.game_attempts (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id uuid NOT NULL,
+  game text NOT NULL,
+  result jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.game_attempts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS attempts_select_own ON public.game_attempts;
+
+CREATE POLICY attempts_select_own ON public.game_attempts FOR SELECT USING (auth.uid() = user_id);
+
+CREATE OR REPLACE FUNCTION public.wheel_spin()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_idx integer;
+  v_mul numeric;
+  v_muls numeric[] := ARRAY[0,0.5,0,1.2,0,0.5,0,1.2,0,0.5,0,1.0,0,0.5,0,10];
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < 100 THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  v_idx := floor(random() * array_length(v_muls, 1))::int;
+  v_mul := v_muls[v_idx + 1];
+  UPDATE public.profiles
+    SET bal = bal - 100 + round(100 * v_mul, 2), updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'wheel', jsonb_build_object('stake', 100, 'sector', v_idx, 'mul', v_mul, 'win', round(100 * v_mul, 2)));
+  RETURN jsonb_build_object('sector', v_idx, 'mul', v_mul, 'win', round(100 * v_mul, 2), 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.plinko_drop(p_stake numeric, p_risk text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_slot integer := 0;
+  v_i integer;
+  v_mul numeric;
+  v_low  numeric[] := ARRAY[6.6,3.3,1.9,1.3,1.1,1,0.5,1,1.1,1.3,1.9,3.3,6.6];
+  v_mid  numeric[] := ARRAY[21,6.5,2.8,1.4,1,0.8,0.5,0.8,1,1.4,2.8,6.5,21];
+  v_high numeric[] := ARRAY[65,15,4.2,1.9,0.9,0.6,0.3,0.6,0.9,1.9,4.2,15,65];
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF p_risk NOT IN ('low', 'mid', 'high') THEN RAISE EXCEPTION 'Неизвестный уровень риска'; END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  FOR v_i IN 1..12 LOOP
+    IF random() < 0.5 THEN v_slot := v_slot + 1; END IF;
+  END LOOP;
+  v_mul := CASE p_risk
+    WHEN 'low' THEN v_low[v_slot + 1]
+    WHEN 'mid' THEN v_mid[v_slot + 1]
+    ELSE v_high[v_slot + 1]
+  END;
+  UPDATE public.profiles
+    SET bal = bal - p_stake + round(p_stake * v_mul, 2), updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'plinko', jsonb_build_object('stake', p_stake, 'risk', p_risk, 'slot', v_slot, 'mul', v_mul, 'win', round(p_stake * v_mul, 2)));
+  RETURN jsonb_build_object('slot', v_slot, 'mul', v_mul, 'win', round(p_stake * v_mul, 2), 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_pick(p_round uuid, p_cell integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.puddles_rounds%rowtype;
+  v_mines integer[];
+  v_opened integer[];
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_round FROM public.puddles_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раунд уже завершён'; END IF;
+  IF p_cell < 0 OR p_cell > 24 THEN RAISE EXCEPTION 'Клетка за пределами поля'; END IF;
+  IF p_cell = ANY (v_round.opened) THEN RAISE EXCEPTION 'Клетка уже открыта'; END IF;
+  SELECT mines INTO v_mines FROM public.puddles_secrets WHERE round_id = p_round;
+
+  IF p_cell = ANY (v_mines) THEN
+    UPDATE public.puddles_rounds SET status = 'lost' WHERE id = p_round;
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'puddles', jsonb_build_object('stake', v_round.stake, 'mines', v_round.mines_count, 'opened', array_length(v_round.opened, 1), 'outcome', 'lost'));
+    RETURN jsonb_build_object('hit', true, 'mines', v_mines, 'opened', v_round.opened);
+  END IF;
+
+  UPDATE public.puddles_rounds SET opened = opened || p_cell WHERE id = p_round RETURNING opened INTO v_opened;
+
+  IF array_length(v_opened, 1) >= 25 - v_round.mines_count THEN
+    v_mul := public.puddles_multiplier(v_round.mines_count, array_length(v_opened, 1));
+    v_win := round(v_round.stake * v_mul, 2);
+    UPDATE public.puddles_rounds SET status = 'cashed' WHERE id = p_round;
+    UPDATE public.profiles SET bal = bal + v_win, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'puddles', jsonb_build_object('stake', v_round.stake, 'mines', v_round.mines_count, 'opened', array_length(v_opened, 1), 'outcome', 'cashed', 'mul', v_mul, 'win', v_win));
+    RETURN jsonb_build_object('hit', false, 'opened', v_opened, 'auto_cashed', true, 'mul', v_mul, 'win', v_win, 'bal', v_bal, 'mines', v_mines);
+  END IF;
+
+  RETURN jsonb_build_object('hit', false, 'opened', v_opened);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_cash(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.puddles_rounds%rowtype;
+  v_mines integer[];
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_round FROM public.puddles_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раунд уже завершён'; END IF;
+  IF array_length(v_round.opened, 1) < 1 THEN RAISE EXCEPTION 'Сначала открой хотя бы одну клетку'; END IF;
+  SELECT mines INTO v_mines FROM public.puddles_secrets WHERE round_id = p_round;
+  v_mul := public.puddles_multiplier(v_round.mines_count, array_length(v_round.opened, 1));
+  v_win := round(v_round.stake * v_mul, 2);
+  UPDATE public.puddles_rounds SET status = 'cashed' WHERE id = p_round;
+  UPDATE public.profiles SET bal = bal + v_win, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'puddles', jsonb_build_object('stake', v_round.stake, 'mines', v_round.mines_count, 'opened', array_length(v_round.opened, 1), 'outcome', 'cashed', 'mul', v_mul, 'win', v_win));
+  RETURN jsonb_build_object('mul', v_mul, 'win', v_win, 'bal', v_bal, 'mines', v_mines);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.archive_take()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_max bigint;
+  v_rounds jsonb;
+  v_bets jsonb;
+  v_attempts jsonb;
+  v_puddles jsonb;
+BEGIN
+  IF coalesce(auth.role(), '') <> 'service_role' THEN
+    RAISE EXCEPTION 'Архиватор доступен только сервисному ключу';
+  END IF;
+
+  -- 1) Крэш: раунды старше последних 10 (сначала их ставки, потом сами раунды)
+  SELECT coalesce(max(id), 0) INTO v_max FROM public.crash_rounds;
+  WITH del_bets AS (
+    DELETE FROM public.crash_bets WHERE round_id <= v_max - 10
+    RETURNING round_id, username, stake, auto_cashout, cashed_out_mul, win_amount
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del_bets)), '[]'::jsonb) INTO v_bets FROM del_bets;
+  WITH del_rounds AS (
+    DELETE FROM public.crash_rounds WHERE id <= v_max - 10
+    RETURNING id, start_at, crash_point
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del_rounds) ORDER BY id), '[]'::jsonb) INTO v_rounds FROM del_rounds;
+
+  -- 2) Попытки колесо/плинко/лужи: старше 10 на игрока по каждой игре
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY user_id, game ORDER BY id DESC) AS rn
+    FROM public.game_attempts
+  ), del AS (
+    DELETE FROM public.game_attempts a USING ranked r
+    WHERE r.id = a.id AND r.rn > 10
+    RETURNING a.user_id, a.game, a.result, a.created_at
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del) ORDER BY created_at), '[]'::jsonb) INTO v_attempts FROM del;
+
+  -- 3) Завершённые раунды луж: старше 10 на игрока
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+    FROM public.puddles_rounds WHERE status <> 'play'
+  ), del AS (
+    DELETE FROM public.puddles_rounds p USING ranked r
+    WHERE r.id = p.id AND r.rn > 10
+    RETURNING p.user_id, p.stake, p.mines_count, p.opened, p.status, p.created_at
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del) ORDER BY created_at), '[]'::jsonb) INTO v_puddles FROM del;
+
+  RETURN jsonb_build_object(
+    'crash_rounds', v_rounds,
+    'crash_bets', v_bets,
+    'attempts', v_attempts,
+    'puddles', v_puddles
+  );
+END $$;
+
+REVOKE EXECUTE ON FUNCTION public.archive_take() FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.archive_take() TO service_role;

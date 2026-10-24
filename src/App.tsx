@@ -815,7 +815,7 @@ export default function App() {
   }, [])
 
   const fetchCrashHistory = useCallback(async () => {
-    const { data } = await supabase.from('crash_rounds').select('crash_point').not('crash_point', 'is', null).order('id', { ascending: false }).limit(12)
+    const { data } = await supabase.from('crash_rounds').select('crash_point').not('crash_point', 'is', null).order('id', { ascending: false }).limit(10)
     if (data) setCrashHistory(data.map((r: any) => Number(r.crash_point)))
   }, [])
 
