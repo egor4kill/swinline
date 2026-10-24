@@ -194,6 +194,25 @@ async function run() {
     process.exit(1)
   }
   console.log(`Документ обновлён: ${BUCKET}/${file} (+${total} записей)`)
+
+  // 7) дублируем на Google Drive, если подключён вебхук Apps Script
+  //    (DRIVE_WEBHOOK_URL = https://script.google.com/macros/s/.../exec?token=...)
+  const hook = process.env.DRIVE_WEBHOOK_URL
+  if (hook) {
+    try {
+      const res = await fetch(hook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file, content: doc }),
+        redirect: 'follow'
+      })
+      const text = await res.text()
+      if (res.ok) console.log(`Google Drive: документ «${file}» обновлён`)
+      else console.error(`Google Drive: HTTP ${res.status} ${text.slice(0, 150)}`)
+    } catch (e) {
+      console.error('Google Drive upload failed:', e.message)
+    }
+  }
 }
 
 run().catch(e => { console.error('Archive failed:', e.message); process.exit(1) })
