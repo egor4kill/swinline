@@ -73,6 +73,7 @@ const freshState = () => ({
 
 import Plinko from './Plinko'
 import MudPuddles from './MudPuddles'
+import RubleChart, { type RubleResult } from './RubleChart'
 import DailyRewards from './DailyRewards'
 import { useDaily } from './useDaily'
 function loadJSON<T>(key: string, fallback: T): T {
@@ -292,7 +293,7 @@ export default function App() {
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
-  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles'>('crash')
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble'>('crash')
   const [selectedSport, setSelectedSport] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
@@ -1136,6 +1137,28 @@ export default function App() {
       return next
     })
     return { slot: Number(data.slot), mul: Number(data.mul), win: Number(data.win) }
+  }
+
+  // Курс рубля: путь курса, исход и выплата решает сервер в момент ставки
+  const rublePredict = async (side: 'up' | 'down', stake: number): Promise<RubleResult | null> => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
+    const { data, error } = await supabase.rpc('ruble_predict', { p_side: side, p_stake: stake })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось сделать ставку'}`); return null }
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Ставка на «${side === 'up' ? 'вверх' : 'вниз'}» в «Курс рубля»`, d: -stake })
+      const payout = Number(data.payout)
+      if (payout > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Курс рубля» (x${data.mul})`, d: payout })
+      next.bal = Number(data.bal)
+      return next
+    })
+    return {
+      start: Number(data.start), final: Number(data.final),
+      ticks: (data.ticks as unknown[]).map(Number),
+      dir: data.dir as RubleResult['dir'], win: Boolean(data.win),
+      mul: Number(data.mul), payout: Number(data.payout),
+    }
   }
 
   // Quick Templates for 1-click match creation
@@ -2158,6 +2181,12 @@ export default function App() {
                 >
                   <span>🟤 Грязевые лужи</span>
                 </button>
+                <button
+                  className={`wl-round-btn ${gamesTab === 'ruble' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('ruble')}
+                >
+                  <span>📉 Курс рубля</span>
+                </button>
               </div>
 
               {/* CRASH GAME ARENA */}
@@ -2508,6 +2537,7 @@ export default function App() {
               {/* ROULETTE (КОРЫТО ФОРТУНЫ) */}
               {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} />}
               {gamesTab === 'puddles' && <MudPuddles bal={S.bal} onStart={puddlesStart} onPick={puddlesPick} onCash={puddlesCash} onRestore={puddlesRestore} />}
+              {gamesTab === 'ruble' && <RubleChart bal={S.bal} onPredict={rublePredict} />}
 
               {gamesTab === 'roulette' && (
                 <div className="wl-banner-card highlight" style={{ padding: '28px 24px 34px', textAlign: 'center' }}>

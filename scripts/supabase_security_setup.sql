@@ -1427,3 +1427,59 @@ BEGIN
 END $$;
 
 GRANT EXECUTE ON FUNCTION public.admin_list_players() TO authenticated, anon;
+
+-- ====================================================================
+-- 13. КУРС РУБЛЯ (новое): бинарные опционы — угадай, вырастет курс
+--     за 30 тиков или упадёт. Шанс ~50%, выплата x1.95 → RTP 97.5%.
+--     Путь курса генерирует сервер и возвращает целиком (исход решён
+--     в момент ставки, клиент только рисует график — как в плинко).
+--     Формулы — зеркало src/rubleLogic.ts (START=100, VOL=0.012, 30 тиков).
+--     Проверок логов не создаёт своих таблиц: пишем в game_attempts,
+--     ретеншн (последние 10 на игрока) и архив обслуживает archive_take().
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.ruble_predict(p_side text, p_stake numeric)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_price double precision := 100.0;
+  v_ticks jsonb := '[]'::jsonb;
+  v_i integer;
+  v_final numeric;
+  v_dir text;
+  v_win boolean;
+  v_mul numeric;
+  v_payout numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_side NOT IN ('up', 'down') THEN RAISE EXCEPTION 'Ставка только «вверх» или «вниз»'; END IF;
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+
+  FOR v_i IN 1..30 LOOP
+    v_price := v_price * (1 + (random() * 2 - 1) * 0.012);
+    v_ticks := v_ticks || to_jsonb(round(v_price::numeric, 2));
+  END LOOP;
+  v_final := round(v_price::numeric, 2);
+  v_dir := CASE WHEN v_final > 100 THEN 'up' WHEN v_final < 100 THEN 'down' ELSE 'flat' END;
+  v_win := (p_side = 'up' AND v_dir = 'up') OR (p_side = 'down' AND v_dir = 'down');
+  v_mul := CASE WHEN v_win THEN 1.95 ELSE 0 END;
+  v_payout := round(p_stake * v_mul, 2);
+
+  UPDATE public.profiles
+    SET bal = bal - p_stake + v_payout, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'ruble', jsonb_build_object(
+      'stake', p_stake, 'side', p_side, 'start', 100, 'final', v_final,
+      'dir', v_dir, 'mul', v_mul, 'win', v_payout));
+
+  RETURN jsonb_build_object('start', 100, 'final', v_final, 'ticks', v_ticks,
+    'dir', v_dir, 'win', v_win, 'mul', v_mul, 'payout', v_payout, 'bal', v_bal);
+END $$;
+
+GRANT EXECUTE ON FUNCTION public.ruble_predict(text, numeric) TO authenticated, anon;

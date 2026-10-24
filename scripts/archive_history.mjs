@@ -8,7 +8,7 @@ const KEY = process.env.SUPABASE_SERVICE_KEY
 const BUCKET = 'history'
 
 const RISK_LABEL = { low: 'Тихое корыто', mid: 'Грязь', high: 'Бешеный хряк' }
-const GAME_EMOJI = { wheel: '🎡', plinko: '🐷', puddles: '🟤', crash: '🚀' }
+const GAME_EMOJI = { wheel: '🎡', plinko: '🐷', puddles: '🟤', crash: '🚀', ruble: '📉' }
 const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
 const MONTHS_NOM = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
 
@@ -90,6 +90,10 @@ function formatEntries(batch, users) {
     } else if (a.game === 'plinko') {
       const win = num(r.win) || 0
       text = `${hhmm(a.created_at)} ${GAME_EMOJI.plinko} Плинко — ${u}: ставка ${fmt(r.stake)} (${RISK_LABEL[r.risk] || r.risk}), ячейка ${r.slot}, x${num(r.mul)}, ${win > 0 ? `**+${fmt(win)}**` : 'мимо'}`
+    } else if (a.game === 'ruble') {
+      const win = num(r.win) || 0
+      const pct = Math.round(((num(r.final) - 100) / 100) * 10000) / 100
+      text = `${hhmm(a.created_at)} ${GAME_EMOJI.ruble} Курс рубля — ${u}: ставка ${fmt(r.stake)} на «${r.side === 'up' ? 'вверх' : 'вниз'}», итог ${pct > 0 ? '+' : ''}${pct}%, ${win > 0 ? `**+${fmt(win)}**` : 'мимо'}`
     } else if (a.game === 'puddles') {
       const base = `${hhmm(a.created_at)} ${GAME_EMOJI.puddles} Лужи — ${u}: ставка ${fmt(r.stake)}, ${r.mines} луж, `
       if (r.outcome === 'lost') text = base + `открыл ${r.opened || 0}, попал в лужу (−${fmt(r.stake)})`
