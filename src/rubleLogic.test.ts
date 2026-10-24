@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { TICKS, START, VOL, PAYOUT, genPath, dirOf, winOf, r2, type Side } from './rubleLogic'
+import { TICKS, START, VOL, PAYOUT, genPath, dirOf, winOf, ambientStep, r2, type Side } from './rubleLogic'
 
 // детерминированный ГПСЧ для повторяемости тестов
 function mulberry32(seed: number) {
@@ -63,5 +63,16 @@ describe('курс рубля (бинарные опционы)', () => {
     expect(rtp).toBeLessThan(1.05)
     expect(PAYOUT).toBeCloseTo(0.975 * 2, 4) // честная пара: p=0.5, выплата 1.95
     expect(r2(1.005)).toBe(1) // проверка округления
+  })
+
+  it('фоновый биржевой ход: мелкие шаги, не убегает от 100 (500 шагов)', () => {
+    const rng = mulberry32(99)
+    let p = 100
+    for (let i = 0; i < 500; i++) {
+      const prev = p
+      p = ambientStep(p, rng)
+      expect(Math.abs(p - prev)).toBeLessThan(2) // шаг мелкий — график плавный
+      expect(Math.abs(p - 100)).toBeLessThan(6)  // возврат к базовым 100
+    }
   })
 })

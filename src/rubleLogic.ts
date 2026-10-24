@@ -30,3 +30,11 @@ export function dirOf(final: number): Side | 'flat' {
 export function winOf(side: Side, final: number) {
   return dirOf(final) === side
 }
+
+/** Фоновый «биржевой» ход: плавный случайный шаг с мягким возвратом к 100.
+ *  Это чисто визуальная жизнь графика — исходы ставок решает только сервер. */
+export function ambientStep(p: number, rng: () => number = Math.random) {
+  const pull = (100 - p) * 0.04
+  const noise = (rng() * 2 - 1) * VOL * 0.6 * p
+  return r2(p + pull + noise)
+}

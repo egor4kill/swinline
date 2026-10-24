@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { TICKS, PAYOUT, genPath, r2, type Side } from './rubleLogic'
+import { PAYOUT, ambientStep, r2, type Side } from './rubleLogic'
 
 export type RubleResult = {
   start: number
@@ -18,7 +18,10 @@ type Props = {
 
 const MIN_BET = 10
 const W = 640, H = 260, PAD = 26
-const STEP_MS = 70
+const WINDOW = 90          // точек в видимой истории (по одной каждые ~50 мс)
+const AMBIENT_MS = 300     // новая «биржевая» цель фона
+const TICK_MS = 90         // скорость проигрывания серверного пути
+const SMOOTH = 0.15        // сглаживание движения к цели (каждый кадр)
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
 const NEWS_UP = [
@@ -38,21 +41,68 @@ const NEWS_FLAT = ['Курс остался на месте. Инвесторы 
 export default function RubleChart({ bal, onPredict }: Props) {
   const [stake, setStake] = useState('100')
   const [busy, setBusy] = useState(false)
-  const [shown, setShown] = useState<number[]>([100])
   const [news, setNews] = useState('Курс стабильно непредсказуем. Делайте ставки, господа')
   const [hist, setHist] = useState<{ id: number; dir: string; win: boolean; pct: number }[]>([])
-  const timer = useRef(0)
-  const cb = useRef({ onPredict })
-  cb.current = { onPredict }
+  const [, setTick] = useState(0)
 
-  useEffect(() => () => clearInterval(timer.current), [])
+  // живой график: рисуемая цена → цель (сглаживание), буфер истории, очередь тиков ставки
+  const priceRef = useRef(100)
+  const targetRef = useRef(100)
+  const bufRef = useRef<number[]>(Array(WINDOW).fill(100))
+  const queueRef = useRef<number[]>([])
+  const pendingRef = useRef<{ res: RubleResult; startPrice: number } | null>(null)
+  const resultRef = useRef<{ win: boolean; pct: number } | null>(null)
+  const endsAtRef = useRef(0)
+  const lastAmbRef = useRef(0)
+  const lastPushRef = useRef(0)
+  const lastTickRef = useRef(0)
+
+  useEffect(() => {
+    const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let raf = 0
+    const loop = (now: number) => {
+      // новая биржевая цель, только когда ставка не играет
+      if (!queueRef.current.length && now - lastAmbRef.current > AMBIENT_MS) {
+        lastAmbRef.current = now
+        targetRef.current = ambientStep(targetRef.current)
+      }
+      // серверный путь: следующий тик каждые TICK_MS
+      if (queueRef.current.length && now - lastTickRef.current > TICK_MS) {
+        lastTickRef.current = now
+        targetRef.current = queueRef.current.shift()!
+      }
+      // плавное движение к цели
+      priceRef.current += (targetRef.current - priceRef.current) * (calm ? 0.6 : SMOOTH)
+      // точка истории каждые ~50 мс
+      if (now - lastPushRef.current > 50) {
+        lastPushRef.current = now
+        bufRef.current.push(priceRef.current)
+        if (bufRef.current.length > WINDOW) bufRef.current.shift()
+      }
+      // ставка сыграла: очередь пуста и цена дошла
+      if (pendingRef.current && !queueRef.current.length && now > endsAtRef.current &&
+          Math.abs(priceRef.current - targetRef.current) < 0.01) {
+        const { res, startPrice } = pendingRef.current
+        pendingRef.current = null
+        resultRef.current = { win: res.win, pct: Math.round(((priceRef.current - startPrice) / startPrice) * 10000) / 100 }
+        const pool = res.dir === 'flat' ? NEWS_FLAT : res.dir === 'up' ? NEWS_UP : NEWS_DOWN
+        setNews(pool[Math.floor(Math.random() * pool.length)])
+        setHist(h => [{ id: Date.now(), dir: res.dir, win: res.win, pct: resultRef.current!.pct }, ...h].slice(0, 10))
+        setBusy(false)
+      }
+      setTick(t => t + 1)
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
   const launch = async (side: Side) => {
     const s = Math.floor(parseFloat(stake))
     if (!(s >= MIN_BET)) return alert(`Минимальная ставка: ${MIN_BET} SV₽`)
     if (busy) return
     setBusy(true)
-    clearInterval(timer.current)
+    resultRef.current = null
     let res: RubleResult | null = null
     try {
       res = await cb.current.onPredict(side, s)
@@ -60,56 +110,51 @@ export default function RubleChart({ bal, onPredict }: Props) {
       if (!res) setBusy(false)
     }
     if (!res) return
-    // анимация: открываем тики по одному, исход уже решён сервером
-    const path = [res.start, ...res.ticks]
-    let i = 1
-    timer.current = window.setInterval(() => {
-      setShown(path.slice(0, i + 1))
-      i++
-      if (i > path.length - 1) {
-        clearInterval(timer.current)
-        const pct = Math.round(((res.final - res.start) / res.start) * 10000) / 100
-        setHist(h => [{ id: Date.now(), dir: res.dir, win: res.win, pct }, ...h].slice(0, 10))
-        const pool = res.dir === 'flat' ? NEWS_FLAT : res.dir === 'up' ? NEWS_UP : NEWS_DOWN
-        setNews(pool[Math.floor(Math.random() * pool.length)])
-        setBusy(false)
-      }
-    }, STEP_MS)
+    // вливаем серверный путь в живой график: стартуем с текущей цены,
+    // весь путь сдвигаем на ту же дельту — направление исхода сохраняется
+    const startPrice = priceRef.current
+    const shift = startPrice - res.start
+    queueRef.current = [startPrice, ...res.ticks.map(t => t + shift)]
+    pendingRef.current = { res, startPrice }
+    endsAtRef.current = performance.now() + TICK_MS * (queueRef.current.length + 2)
+    lastTickRef.current = 0
   }
+  const cb = useRef({ onPredict })
+  cb.current = { onPredict }
 
-  // масштаб графика по видимой части пути
-  const lo = Math.min(...shown), hi = Math.max(...shown)
-  const span = Math.max(hi - lo, 0.5)
-  const x = (i: number) => PAD + (i / TICKS) * (W - 2 * PAD)
-  const y = (v: number) => PAD + (1 - (v - lo) / span) * (H - 2 * PAD)
-  const pts = shown.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
-  const last = shown[shown.length - 1]
-  const curUp = last >= shown[0]
-  const revealAll = shown.length >= TICKS + 1
+  // масштаб по видимой истории
+  const buf = bufRef.current
+  const lo0 = Math.min(...buf), hi0 = Math.max(...buf)
+  const mid = (lo0 + hi0) / 2, half = Math.max((hi0 - lo0) / 2, 0.6) * 1.25
+  const y = (v: number) => PAD + (1 - (v - (mid - half)) / (2 * half)) * (H - 2 * PAD)
+  const x = (i: number) => PAD + (i / (WINDOW - 1)) * (W - 2 * PAD)
+  const pts = buf.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+  const price = priceRef.current
+  const slope = price - buf[buf.length - 4]
+  const liveColor = slope >= 0 ? '#37c26e' : '#ff4d4d'
+  const res = resultRef.current
 
   return (
     <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center' }}>
       <span className="wl-banner-tag">ИГРЫ 24/7 • БИНАРНЫЕ ОПЦИОНЫ</span>
       <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>КУРС РУБЛЯ 📉📈</h2>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 14, margin: '0 auto 12px', maxWidth: 560 }}>
-        Угадай, куда пойдёт курс рубля за {TICKS} тиков: вверх или вниз. Угадал — забираешь x{PAYOUT}. ЦБ гарантирует*
+        Живой график рубля идёт круглосуточно. Ставь на «вверх» или «вниз» — угадал за 30 тиков, забираешь x{PAYOUT}. ЦБ гарантирует*
       </p>
       <div style={{ color: 'var(--tx-secondary)', fontSize: 12, fontStyle: 'italic', margin: '0 auto 10px', maxWidth: 560, minHeight: 16 }} aria-live="polite">
         «{news}»
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="График курса рубля" style={{ width: '100%', maxWidth: 640, display: 'block', margin: '0 auto', background: '#1b1c1e', borderRadius: 12 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Живой график курса рубля" style={{ width: '100%', maxWidth: 640, display: 'block', margin: '0 auto', background: '#1b1c1e', borderRadius: 12 }}>
         <line x1={PAD} y1={y(100)} x2={W - PAD} y2={y(100)} stroke="#6b6e74" strokeDasharray="4 4" strokeWidth="1" />
-        <text x={W - PAD - 2} y={y(100) - 5} textAnchor="end" fontSize="11" fill="#6b6e74">старт 100,00 ₽</text>
-        <polyline points={pts} fill="none" stroke={revealAll ? (curUp ? '#37c26e' : '#ff4d4d') : '#e8b53a'} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-        {revealAll && (
-          <g>
-            <circle cx={x(TICKS)} cy={y(last)} r="5" fill={curUp ? '#37c26e' : '#ff4d4d'} />
-            <text x={x(TICKS) - 6} y={y(last) - 10} textAnchor="end" fontSize="14" fontWeight="800" fill={curUp ? '#37c26e' : '#ff4d4d'}>
-              {fmt(last)} ₽ ({curUp ? '+' : ''}{Math.round(((last - 100) / 100) * 10000) / 100}%)
-            </text>
-          </g>
+        <text x={W - PAD - 2} y={y(100) - 5} textAnchor="end" fontSize="11" fill="#6b6e74">официальный курс 100,00 ₽</text>
+        <polyline points={pts} fill="none" stroke={liveColor} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={x(WINDOW - 1)} cy={y(price)} r="4" fill={liveColor} />
+        <text x={W - PAD - 8} y={PAD + 4} textAnchor="end" fontSize="14" fontWeight="800" fill={liveColor}>{fmt(price)} ₽</text>
+        {res && (
+          <text x={PAD + 8} y={PAD + 8} fontSize="15" fontWeight="800" fill={res.win ? '#37c26e' : '#ff4d4d'}>
+            {res.pct > 0 ? '▲ +' : res.pct < 0 ? '▼ ' : '● '}{res.pct}% — {res.win ? `ВЫИГРЫШ x${PAYOUT}` : 'ПРОИГРЫШ'}
+          </text>
         )}
-        {!revealAll && <circle cx={x(shown.length - 1)} cy={y(last)} r="4" fill="#e8b53a" />}
       </svg>
       <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', margin: '10px 0', minHeight: 30 }} aria-live="polite">
         {hist.map(h => (
