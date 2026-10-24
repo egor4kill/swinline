@@ -3,7 +3,7 @@
 // красиво форматирует в Markdown и складывает в приватный бакет Supabase Storage «history»
 // (файл на месяц: game-history-YYYY-MM.md, время московское).
 // Запускается воркфлоу .github/workflows/archive.yml каждые 15 минут.
-const SUPA_URL = 'https://vkgzyeugrxxwlouqrxrh.supabase.co'
+const SUPA_URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
 const BUCKET = 'history'
 
@@ -120,8 +120,8 @@ function formatEntries(batch, users) {
 }
 
 async function run() {
-  if (!KEY) {
-    console.log('SUPABASE_SERVICE_KEY не задан — архивация пропущена')
+  if (!KEY || !SUPA_URL) {
+    console.log('SUPABASE_SERVICE_KEY/SUPABASE_URL не заданы — архивация пропущена')
     return
   }
 

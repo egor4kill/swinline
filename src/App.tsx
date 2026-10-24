@@ -100,7 +100,7 @@ const getTwitchAvatar = (username?: string, currentAvatar?: string | null): stri
     return currentAvatar
   }
   const u = (username || '').toLowerCase().trim()
-  if (u === 'egor4kill') {
+  if (u === ADMIN_USERNAME.toLowerCase()) {
     return 'https://static-cdn.jtvnw.net/jtv_user_pictures/310827f8-113e-442f-9435-bf8637ec3b6a-profile_image-300x300.png'
   }
   if (u === 'lowrensy') {

@@ -1,7 +1,7 @@
 -- ====================================================================
 -- SVINLINE: Row Level Security (RLS) & Database Hardening Script
 -- Execute in Supabase Dashboard -> SQL Editor:
--- https://supabase.com/dashboard/project/vkgzyeugrxxwlouqrxrh/sql
+-- https://supabase.com/dashboard/project/<твой-project-ref>/sql
 --
 -- Goal: no client (anon/authenticated) can read other users' data.
 --
