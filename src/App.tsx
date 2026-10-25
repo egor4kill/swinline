@@ -211,6 +211,8 @@ export default function App() {
   })
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
+  // Личный кабинет: ставки и игровые попытки читаются из базы (RLS отдаёт только свои)
+  const [myStats, setMyStats] = useState<{ bets: any[]; attempts: number } | null>(null)
   const [adminModalOpen, setAdminModalOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'users' | 'create' | 'matches' | 'audit' | 'bank'>('users')
   const [inspectingUser, setInspectingUser] = useState<UserAccount | null>(null)
@@ -594,6 +596,24 @@ export default function App() {
       fetchDbEvents()
     }
   }, [adminModalOpen, fetchSupabaseUsers, fetchAdminPlayers, fetchDbEvents])
+
+  // Личный кабинет: серверная статистика игрока (RLS отдаёт только свои строки)
+  useEffect(() => {
+    if (!profileModalOpen || !currentUser) return
+    let alive = true
+    setMyStats(null)
+    const uid = currentUser.id
+    ;(async () => {
+      const [betsRes, attRes] = await Promise.all([
+        supabase.from('bets').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(50),
+        supabase.from('game_attempts').select('id', { count: 'exact', head: true }).eq('user_id', uid)
+      ])
+      if (!alive) return
+      setMyStats({ bets: (betsRes.data || []) as any[], attempts: attRes.count || 0 })
+    })()
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileModalOpen, currentUserId])
 
   const syncSupabaseUser = (u: any, customName?: string, customAvatar?: string) => {
     const twitchUser = (u.user_metadata?.preferred_username || u.user_metadata?.name || u.user_metadata?.user_name || '').trim()
@@ -3279,13 +3299,13 @@ export default function App() {
       )}
 
       {/* 5. USER PROFILE MODAL */}
-      {profileModalOpen && (
+      {profileModalOpen && currentUser && (
         <div className="wl-modal-overlay" onClick={() => setProfileModalOpen(false)}>
-          <div className="wl-modal-card" onClick={e => e.stopPropagation()}>
+          <div className="wl-modal-card" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
             <div className="wl-modal-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <User size={20} color="var(--org)" />
-                <span style={{ fontWeight: 800, fontSize: 17 }}>Личный кабинет игрока</span>
+                <span style={{ fontWeight: 800, fontSize: 17 }}>Личный кабинет</span>
               </div>
               <button onClick={() => setProfileModalOpen(false)} style={{ color: 'var(--tx-muted)' }}>
                 <X size={18} />
@@ -3294,124 +3314,172 @@ export default function App() {
 
             <div className="wl-modal-body">
               {/* Profile Card */}
-              <div style={{ background: '#1a1f2c', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <UserAvatar avatar={currentUser.avatar} name={currentUser.username} size={60} crown={isAdmin} />
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 800 }}>{currentUser.username}</div>
+              <div style={{
+                background: 'linear-gradient(135deg, #1a1f2c, #151a26)',
+                border: '1px solid var(--border)',
+                borderRadius: 14,
+                padding: 18,
+                marginBottom: 18,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 14
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+                  <UserAvatar avatar={currentUser.avatar} name={currentUser.username} size={64} crown={isAdmin} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 19, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {currentUser.username}
+                    </div>
                     <VipBadge userId={currentUser.id} />
                     <div style={{ fontSize: 12, color: isAdmin ? '#f59e0b' : 'var(--tx-secondary)', fontWeight: 700 }}>
                       {currentUser.title}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--org)', fontWeight: 700, marginTop: 4 }}>
-                      Баланс: {fmt(S.bal)}
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)', marginTop: 4 }}>
+                      В SWINLINE с {new Date(currentUser.createdAt).toLocaleDateString('ru-RU')}
                     </div>
                   </div>
                 </div>
 
-                {isAdmin && (
-                  <span className="wl-admin-badge">
-                    <ShieldCheck size={14} /> ADMIN
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                  {isAdmin && (
+                    <span className="wl-admin-badge">
+                      <ShieldCheck size={14} /> ADMIN
+                    </span>
+                  )}
+                  <span style={{
+                    background: '#1c2232',
+                    border: '1px solid var(--border)',
+                    borderRadius: 999,
+                    padding: '4px 12px',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: 'var(--org)'
+                  }}>
+                    {currentUser.role === 'admin' ? 'Админ' : S.bal >= 50000 ? 'VIP' : 'Игрок'}
                   </span>
+                </div>
+              </div>
+
+              {/* Balance / In-play / Attempts strip */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 18, textAlign: 'center' }}>
+                <div style={{ background: '#161a25', border: '1px solid rgba(255, 85, 0, 0.25)', padding: '12px 8px', borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Баланс</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--org)' }}>{fmt(S.bal)}</div>
+                </div>
+                <div style={{ background: '#161a25', padding: '12px 8px', borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>В игре</div>
+                  <div style={{ fontSize: 15, fontWeight: 800 }}>
+                    {fmt(myStats ? myStats.bets.filter((b: any) => b.status === 'pending').reduce((a: number, b: any) => a + Number(b.stake || 0), 0) : 0)}
+                  </div>
+                </div>
+                <div style={{ background: '#161a25', padding: '12px 8px', borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Игровых попыток</div>
+                  <div style={{ fontSize: 15, fontWeight: 800 }}>{myStats ? myStats.attempts : '—'}</div>
+                </div>
+              </div>
+
+              {/* Bet stats (server) */}
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8 }}>
+                  СТАТИСТИКА СТАВОК (из базы):
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, textAlign: 'center' }}>
+                  <div style={{ background: '#161a25', padding: 10, borderRadius: 10 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Ставок</div>
+                    <div style={{ fontSize: 16, fontWeight: 800 }}>{myStats ? myStats.bets.length : '—'}</div>
+                  </div>
+                  <div style={{ background: '#161a25', padding: 10, borderRadius: 10 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Винрейт</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--green)' }}>
+                      {(() => {
+                        const settled = myStats ? myStats.bets.filter((b: any) => b.status === 'won' || b.status === 'lost') : []
+                        const won = settled.filter((b: any) => b.status === 'won').length
+                        return settled.length ? `${Math.round((won / settled.length) * 100)}%` : '—'
+                      })()}
+                    </div>
+                  </div>
+                  <div style={{ background: '#161a25', padding: 10, borderRadius: 10 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Профит</div>
+                    {(() => {
+                      const settled = myStats ? myStats.bets.filter((b: any) => b.status === 'won' || b.status === 'lost') : []
+                      const net = settled.reduce((a: number, b: any) => a + Number(b.payout || 0) - Number(b.stake || 0), 0)
+                      return (
+                        <div style={{ fontSize: 16, fontWeight: 800, color: settled.length ? (net >= 0 ? 'var(--green)' : '#ef4444') : '#fff' }}>
+                          {settled.length ? `${net >= 0 ? '+' : ''}${fmt(net)}` : '—'}
+                        </div>
+                      )
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent bets (server) */}
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8 }}>
+                  ПОСЛЕДНИЕ СТАВКИ:
+                </div>
+                {!myStats ? (
+                  <div style={{ background: '#161a25', borderRadius: 10, padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--tx-muted)' }}>
+                    Загружаем из базы…
+                  </div>
+                ) : myStats.bets.length === 0 ? (
+                  <div style={{ background: '#161a25', borderRadius: 10, padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--tx-muted)' }}>
+                    Ставок пока нет. Загляни в линию или в игры 24/7!
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 210, overflowY: 'auto' }}>
+                    {myStats.bets.slice(0, 8).map((b: any) => {
+                      const isWon = b.status === 'won'
+                      const isLost = b.status === 'lost'
+                      const isRefund = b.status === 'refund'
+                      const color = isWon ? 'var(--green)' : isLost ? '#ef4444' : isRefund ? '#94a3b8' : '#f59e0b'
+                      const label = isWon ? `+${fmt(Number(b.payout || 0))}` : isLost ? `−${fmt(Number(b.stake || 0))}` : isRefund ? 'возврат' : 'в игре'
+                      return (
+                        <div key={b.id} style={{ background: '#161a25', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {b.match_title || b.event_id}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>
+                              {b.pick_name || b.pick} × {Number(b.odds).toFixed(2)} • {fmt(Number(b.stake))}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 800, color, flexShrink: 0 }}>{label}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
 
-              {/* Avatar Picker & Logout */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8 }}>
-                  СМЕНИТЬ АВАТАР:
-                </div>
-                <div style={{ display: 'flex', gap: 8, fontSize: 22, marginBottom: 16 }}>
-                  {['🐗', '🐷', '🐽', '👑', '🍔', '🚀', '⚡', '🕶️'].map(av => (
-                    <button
-                      key={av}
-                      type="button"
-                      onClick={() => {
-                        setAccounts(prev => prev.map(a => a.id === currentUserId ? { ...a, avatar: av } : a))
-                        notify('Аватар обновлён!')
-                      }}
-                      style={{
-                        padding: 6,
-                        borderRadius: 8,
-                        background: currentUser.avatar === av ? 'var(--org)' : '#1a1f2c',
-                        border: '1px solid var(--border)'
-                      }}
-                    >
-                      {av}
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  className="wl-sidebar-quick-btn"
-                  style={{ border: '1px solid #ef444455', color: '#ef4444', width: '100%', justifyContent: 'center' }}
-                  onClick={handleLogout}
-                >
-                  Выйти из профиля ↪
-                </button>
-              </div>
-
               {/* Achievements */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Award size={14} color="var(--org)" />
-                  ДОСТИЖЕНИЯ И АЧИВКИ:
+              {currentUser.achievements.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Award size={14} color="var(--org)" />
+                    ДОСТИЖЕНИЯ:
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {currentUser.achievements.map((ach, i) => (
+                      <span
+                        key={i}
+                        style={{ background: '#1c2232', border: '1px solid var(--border)', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}
+                      >
+                        🏆 {ach}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {currentUser.achievements.map((ach, i) => (
-                    <span
-                      key={i}
-                      style={{ background: '#1c2232', border: '1px solid var(--border)', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}
-                    >
-                      🏆 {ach}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              )}
 
-              {/* Stats */}
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 8 }}>
-                  СТАТИСТИКА ИГРОКА:
-                </div>
-                {(() => {
-                  const allUserBets = (currentUser.bets || []).concat(S.bets || [])
-                  const settled = allUserBets.filter((b: any) => b.state === 'won' || b.state === 'lost')
-                  const won = settled.filter((b: any) => b.state === 'won').length
-                  const winrate = settled.length > 0 ? `${Math.round((won / settled.length) * 100)}%` : '0%'
-
-                  const sportCounts: Record<string, number> = {}
-                  allUserBets.forEach((b: any) => {
-                    const key = b.league || 'События'
-                    sportCounts[key] = (sportCounts[key] || 0) + 1
-                  })
-                  const topSport = Object.entries(sportCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—'
-                  const userStatus = currentUser.role === 'admin' ? 'Админ' : S.bal >= 50000 ? 'VIP' : 'Игрок'
-
-                  return (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, textAlign: 'center' }}>
-                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Ставок</div>
-                        <div style={{ fontSize: 16, fontWeight: 800 }}>{allUserBets.length}</div>
-                      </div>
-                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Винрейт</div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--green)' }}>{winrate}</div>
-                      </div>
-                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Любимый спорт</div>
-                        <div style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={topSport}>
-                          {topSport}
-                        </div>
-                      </div>
-                      <div style={{ background: '#161a25', padding: 10, borderRadius: 8 }}>
-                        <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>Статус</div>
-                        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--org)' }}>{userStatus}</div>
-                      </div>
-                    </div>
-                  )
-                })()}
-              </div>
+              <button
+                className="wl-sidebar-quick-btn"
+                style={{ border: '1px solid #ef444455', color: '#ef4444', width: '100%', justifyContent: 'center' }}
+                onClick={handleLogout}
+              >
+                Выйти из профиля ↪
+              </button>
             </div>
           </div>
         </div>
