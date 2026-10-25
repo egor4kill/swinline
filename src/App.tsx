@@ -74,6 +74,7 @@ const freshState = () => ({
 import Plinko from './Plinko'
 import MudPuddles from './MudPuddles'
 import RubleChart, { type RubleResult } from './RubleChart'
+import Blackjack from './Blackjack'
 import CasinoStrip, { JackpotOverlay } from './CasinoStrip'
 import VipBadge from './VipBadge'
 import DailyRewards from './DailyRewards'
@@ -233,7 +234,7 @@ export default function App() {
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
-  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble'>('crash')
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack'>('crash')
   const [jackpotWin, setJackpotWin] = useState<number | null>(null)
   const [selectedSport, setSelectedSport] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -1123,6 +1124,16 @@ export default function App() {
     return { slot: Number(data.slot), mul: Number(data.mul), win: Number(data.win) }
   }
 
+  // Хрюк-блэкджек: синхронизация баланса/лога после серверных ходов крупье
+  const bjBal = (bal: number, log: { x: string; d: number } | null) => {
+    setS(prev => {
+      const next = structuredClone(prev)
+      if (log) next.log.unshift({ t: Date.now(), x: log.x, d: log.d })
+      next.bal = bal
+      return next
+    })
+  }
+
   // Курс рубля: путь курса, исход и выплата решает сервер в момент ставки
   const rublePredict = async (side: 'up' | 'down', stake: number): Promise<RubleResult | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
@@ -1637,6 +1648,12 @@ export default function App() {
                 >
                   <span>📉 Курс рубля</span>
                 </button>
+                <button
+                  className={`wl-round-btn ${gamesTab === 'blackjack' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('blackjack')}
+                >
+                  <span>🃏 Хрюк-блэкджек</span>
+                </button>
               </div>
 
               {/* CRASH GAME ARENA */}
@@ -1664,6 +1681,7 @@ export default function App() {
               {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} />}
               {gamesTab === 'puddles' && <MudPuddles bal={S.bal} onStart={puddlesStart} onPick={puddlesPick} onCash={puddlesCash} onRestore={puddlesRestore} />}
               {gamesTab === 'ruble' && <RubleChart bal={S.bal} onPredict={rublePredict} />}
+              {gamesTab === 'blackjack' && <Blackjack bal={S.bal} onBal={bjBal} notify={notify} onNeedAuth={() => setAuthModalOpen(true)} />}
 
               {gamesTab === 'roulette' && (
                 <RouletteWheel

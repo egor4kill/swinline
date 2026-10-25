@@ -1854,3 +1854,575 @@ BEGIN
 END $$;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ====================================================================
+-- 15. ХРЮК-БЛЭКДЖЕК (новое): серверная колода, скрытая карта дилера
+--     (bj_secrets без SELECT-политики), deal/hit/double/stand, блэкджек 3:2,
+--     push = возврат, дабл на двух картах (ровно одна карта и автостоп).
+--     Раунды живы в БД — перезагрузка страницы не теряет раздачу.
+--     Участает в кэшбэке (вместе с wheel/plinko/puddles/ruble)
+--     и в ретеншне (последние 10 раздач на игрока).
+-- ====================================================================
+
+CREATE TABLE IF NOT EXISTS public.bj_rounds (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  stake numeric NOT NULL,
+  doubled boolean NOT NULL DEFAULT false,
+  player_cards integer[] NOT NULL DEFAULT '{}',
+  dealer_visible integer NOT NULL,
+  status text NOT NULL DEFAULT 'play',  -- play | won | lost | push | blackjack
+  payout numeric NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.bj_rounds ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS bj_select_own ON public.bj_rounds;
+CREATE POLICY bj_select_own ON public.bj_rounds FOR SELECT USING (auth.uid() = user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS bj_one_active ON public.bj_rounds (user_id) WHERE status = 'play';
+
+CREATE TABLE IF NOT EXISTS public.bj_secrets (
+  round_id uuid PRIMARY KEY REFERENCES public.bj_rounds(id) ON DELETE CASCADE,
+  dealer_cards integer[] NOT NULL
+);
+ALTER TABLE public.bj_secrets ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.bj_hand_value(p_cards integer[])
+RETURNS integer
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  v_total integer := 0;
+  v_aces integer := 0;
+  c integer;
+  r integer;
+BEGIN
+  IF p_cards IS NULL THEN RETURN 0; END IF;
+  FOREACH c IN ARRAY p_cards LOOP
+    r := c % 13;
+    IF r = 12 THEN v_total := v_total + 11; v_aces := v_aces + 1;
+    ELSIF r >= 9 THEN v_total := v_total + 10;
+    ELSE v_total := v_total + r + 2; END IF;
+  END LOOP;
+  WHILE v_total > 21 AND v_aces > 0 LOOP
+    v_total := v_total - 10; v_aces := v_aces - 1;
+  END LOOP;
+  RETURN v_total;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_is_blackjack(p_cards integer[])
+RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT coalesce(array_length(p_cards, 1), 0) = 2 AND public.bj_hand_value(p_cards) = 21
+$$;
+
+CREATE OR REPLACE FUNCTION public.bj_draw(p_taken integer[])
+RETURNS integer
+LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+  v_card integer;
+  v_tries integer := 0;
+BEGIN
+  LOOP
+    v_card := floor(random() * 52)::int;
+    v_tries := v_tries + 1;
+    IF NOT (v_card = ANY (p_taken)) OR v_tries > 200 THEN RETURN v_card; END IF;
+  END LOOP;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_deal(p_stake numeric)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_taken integer[] := '{}';
+  v_player integer[];
+  v_dealer integer[];
+  v_card integer;
+  v_round uuid;
+  v_player_bj boolean;
+  v_dealer_bj boolean;
+  v_payout numeric := 0;
+  v_status text := 'play';
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF EXISTS (SELECT 1 FROM public.bj_rounds WHERE user_id = auth.uid() AND status = 'play') THEN
+    RAISE EXCEPTION 'Сначала доиграй текущую раздачу';
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+
+  UPDATE public.profiles SET bal = bal - p_stake, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  PERFORM public.casino_take(p_stake);
+
+  FOR i IN 1..4 LOOP
+    v_card := public.bj_draw(v_taken);
+    v_taken := v_taken || v_card;
+    IF i IN (1, 3) THEN v_player := v_player || v_card; ELSE v_dealer := v_dealer || v_card; END IF;
+  END LOOP;
+  v_player_bj := public.bj_is_blackjack(v_player);
+  v_dealer_bj := public.bj_is_blackjack(v_dealer);
+
+  IF v_player_bj AND v_dealer_bj THEN
+    v_status := 'push'; v_payout := p_stake;
+  ELSIF v_player_bj THEN
+    v_status := 'blackjack'; v_payout := round(p_stake * 2.5, 2);
+  ELSIF v_dealer_bj THEN
+    v_status := 'lost'; v_payout := 0;
+  END IF;
+
+  INSERT INTO public.bj_rounds (user_id, stake, player_cards, dealer_visible, status, payout)
+    VALUES (auth.uid(), p_stake, v_player, v_dealer[1], v_status, v_payout)
+    RETURNING id INTO v_round;
+  INSERT INTO public.bj_secrets (round_id, dealer_cards) VALUES (v_round, v_dealer);
+
+  IF v_payout > 0 THEN
+    UPDATE public.profiles SET bal = bal + v_payout, updated_at = now()
+      WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  END IF;
+  IF v_status <> 'play' THEN
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+        'stake', p_stake, 'doubled', false, 'player', public.bj_hand_value(v_player),
+        'dealer', public.bj_hand_value(v_dealer), 'outcome', v_status, 'win', v_payout));
+  END IF;
+  RETURN jsonb_build_object('round_id', v_round, 'player_cards', to_jsonb(v_player),
+    'dealer_visible', v_dealer[1], 'player_value', public.bj_hand_value(v_player),
+    'status', v_status, 'payout', v_payout, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_hit(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_dealer integer[];
+  v_taken integer[];
+  v_card integer;
+  v_value integer;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  SELECT dealer_cards INTO v_dealer FROM public.bj_secrets WHERE round_id = p_round;
+  v_taken := v_round.player_cards || v_dealer;
+  v_card := public.bj_draw(v_taken);
+  UPDATE public.bj_rounds SET player_cards = player_cards || v_card
+    WHERE id = p_round RETURNING player_cards INTO v_round.player_cards;
+  v_value := public.bj_hand_value(v_round.player_cards);
+  IF v_value > 21 THEN
+    UPDATE public.bj_rounds SET status = 'lost', payout = 0 WHERE id = p_round;
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+        'stake', v_round.stake * (CASE WHEN v_round.doubled THEN 2 ELSE 1 END),
+        'doubled', v_round.doubled, 'player', v_value,
+        'dealer', public.bj_hand_value(v_dealer), 'outcome', 'lost', 'win', 0));
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  RETURN jsonb_build_object('player_cards', to_jsonb(v_round.player_cards),
+    'player_value', v_value, 'bust', v_value > 21, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_double(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_bal numeric;
+  v_extra numeric;
+  v_dealer integer[];
+  v_card integer;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  IF coalesce(array_length(v_round.player_
+
+-- ====================================================================
+-- 15. ХРЮК-БЛЭКДЖЕК (новое): серверная колода, скрытая карта дилера
+--     (bj_secrets без SELECT-политики), deal/hit/double/stand, блэкджек 3:2,
+--     push = возврат, дабл на двух картах (ровно одна карта и автостоп).
+--     Раунды живы в БД — перезагрузка страницы не теряет раздачу.
+--     Участает в кэшбэке (вместе с wheel/plinko/puddles/ruble)
+--     и в ретеншне (последние 10 раздач на игрока).
+-- ====================================================================
+
+CREATE TABLE IF NOT EXISTS public.bj_rounds (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  stake numeric NOT NULL,
+  doubled boolean NOT NULL DEFAULT false,
+  player_cards integer[] NOT NULL DEFAULT '{}',
+  dealer_visible integer NOT NULL,
+  status text NOT NULL DEFAULT 'play',  -- play | won | lost | push | blackjack
+  payout numeric NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.bj_rounds ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS bj_select_own ON public.bj_rounds;
+CREATE POLICY bj_select_own ON public.bj_rounds FOR SELECT USING (auth.uid() = user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS bj_one_active ON public.bj_rounds (user_id) WHERE status = 'play';
+
+CREATE TABLE IF NOT EXISTS public.bj_secrets (
+  round_id uuid PRIMARY KEY REFERENCES public.bj_rounds(id) ON DELETE CASCADE,
+  dealer_cards integer[] NOT NULL
+);
+ALTER TABLE public.bj_secrets ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.bj_hand_value(p_cards integer[])
+RETURNS integer
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  v_total integer := 0;
+  v_aces integer := 0;
+  c integer;
+  r integer;
+BEGIN
+  IF p_cards IS NULL THEN RETURN 0; END IF;
+  FOREACH c IN ARRAY p_cards LOOP
+    r := c % 13;
+    IF r = 12 THEN v_total := v_total + 11; v_aces := v_aces + 1;
+    ELSIF r >= 9 THEN v_total := v_total + 10;
+    ELSE v_total := v_total + r + 2; END IF;
+  END LOOP;
+  WHILE v_total > 21 AND v_aces > 0 LOOP
+    v_total := v_total - 10; v_aces := v_aces - 1;
+  END LOOP;
+  RETURN v_total;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_is_blackjack(p_cards integer[])
+RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT coalesce(array_length(p_cards, 1), 0) = 2 AND public.bj_hand_value(p_cards) = 21
+$$;
+
+CREATE OR REPLACE FUNCTION public.bj_draw(p_taken integer[])
+RETURNS integer
+LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+  v_card integer;
+  v_tries integer := 0;
+BEGIN
+  LOOP
+    v_card := floor(random() * 52)::int;
+    v_tries := v_tries + 1;
+    IF NOT (v_card = ANY (p_taken)) OR v_tries > 200 THEN RETURN v_card; END IF;
+  END LOOP;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_deal(p_stake numeric)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_taken integer[] := '{}';
+  v_player integer[];
+  v_dealer integer[];
+  v_card integer;
+  v_round uuid;
+  v_player_bj boolean;
+  v_dealer_bj boolean;
+  v_payout numeric := 0;
+  v_status text := 'play';
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF EXISTS (SELECT 1 FROM public.bj_rounds WHERE user_id = auth.uid() AND status = 'play') THEN
+    RAISE EXCEPTION 'Сначала доиграй текущую раздачу';
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+
+  UPDATE public.profiles SET bal = bal - p_stake, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  PERFORM public.casino_take(p_stake);
+
+  FOR i IN 1..4 LOOP
+    v_card := public.bj_draw(v_taken);
+    v_taken := v_taken || v_card;
+    IF i IN (1, 3) THEN v_player := v_player || v_card; ELSE v_dealer := v_dealer || v_card; END IF;
+  END LOOP;
+  v_player_bj := public.bj_is_blackjack(v_player);
+  v_dealer_bj := public.bj_is_blackjack(v_dealer);
+
+  IF v_player_bj AND v_dealer_bj THEN
+    v_status := 'push'; v_payout := p_stake;
+  ELSIF v_player_bj THEN
+    v_status := 'blackjack'; v_payout := round(p_stake * 2.5, 2);
+  ELSIF v_dealer_bj THEN
+    v_status := 'lost'; v_payout := 0;
+  END IF;
+
+  INSERT INTO public.bj_rounds (user_id, stake, player_cards, dealer_visible, status, payout)
+    VALUES (auth.uid(), p_stake, v_player, v_dealer[1], v_status, v_payout)
+    RETURNING id INTO v_round;
+  INSERT INTO public.bj_secrets (round_id, dealer_cards) VALUES (v_round, v_dealer);
+
+  IF v_payout > 0 THEN
+    UPDATE public.profiles SET bal = bal + v_payout, updated_at = now()
+      WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  END IF;
+  IF v_status <> 'play' THEN
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+        'stake', p_stake, 'doubled', false, 'player', public.bj_hand_value(v_player),
+        'dealer', public.bj_hand_value(v_dealer), 'outcome', v_status, 'win', v_payout));
+  END IF;
+  RETURN jsonb_build_object('round_id', v_round, 'player_cards', to_jsonb(v_player),
+    'dealer_visible', v_dealer[1], 'player_value', public.bj_hand_value(v_player),
+    'status', v_status, 'payout', v_payout, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_hit(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_dealer integer[];
+  v_taken integer[];
+  v_card integer;
+  v_value integer;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  SELECT dealer_cards INTO v_dealer FROM public.bj_secrets WHERE round_id = p_round;
+  v_taken := v_round.player_cards || v_dealer;
+  v_card := public.bj_draw(v_taken);
+  UPDATE public.bj_rounds SET player_cards = player_cards || v_card
+    WHERE id = p_round RETURNING player_cards INTO v_round.player_cards;
+  v_value := public.bj_hand_value(v_round.player_cards);
+  IF v_value > 21 THEN
+    UPDATE public.bj_rounds SET status = 'lost', payout = 0 WHERE id = p_round;
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+        'stake', v_round.stake * (CASE WHEN v_round.doubled THEN 2 ELSE 1 END),
+        'doubled', v_round.doubled, 'player', v_value,
+        'dealer', public.bj_hand_value(v_dealer), 'outcome', 'lost', 'win', 0));
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  RETURN jsonb_build_object('player_cards', to_jsonb(v_round.player_cards),
+    'player_value', v_value, 'bust', v_value > 21, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_double(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_bal numeric;
+  v_extra numeric;
+  v_dealer integer[];
+  v_card integer;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  IF coalesce(array_length(v_round.player_cards, 1), 0) <> 2 THEN
+    RAISE EXCEPTION 'Дабл только на первых двух картах';
+  END IF;
+  IF v_round.doubled THEN RAISE EXCEPTION 'Дабл уже сделан'; END IF;
+  v_extra := v_round.stake;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL OR v_bal < v_extra THEN RAISE EXCEPTION 'Недостаточно SV₽ для дабла'; END IF;
+  UPDATE public.profiles SET bal = bal - v_extra, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  UPDATE public.bj_rounds SET doubled = true WHERE id = p_round;
+  UPDATE public.profiles SET total_wagered = total_wagered + v_extra, updated_at = now() WHERE id = auth.uid();
+  PERFORM public.casino_take(v_extra);
+  -- стандартное правило дабла: ровно одна карта, затем автостоп
+  SELECT dealer_cards INTO v_dealer FROM public.bj_secrets WHERE round_id = p_round;
+  v_card := public.bj_draw(v_round.player_cards || v_dealer);
+  UPDATE public.bj_rounds SET player_cards = player_cards || v_card WHERE id = p_round;
+  RETURN public.bj_stand(p_round);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_stand(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_dealer integer[];
+  v_taken integer[];
+  v_pval integer;
+  v_dval integer;
+  v_stake_total numeric;
+  v_payout numeric;
+  v_status text;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  SELECT dealer_cards INTO v_dealer FROM public.bj_secrets WHERE round_id = p_round;
+  v_taken := v_round.player_cards || v_dealer;
+  WHILE public.bj_hand_value(v_dealer) < 17 LOOP
+    v_dealer := v_dealer || public.bj_draw(v_taken);
+    v_taken := v_taken || v_dealer[array_upper(v_dealer, 1)];
+  END LOOP;
+  UPDATE public.bj_secrets SET dealer_cards = v_dealer WHERE round_id = p_round;
+
+  v_pval := public.bj_hand_value(v_round.player_cards);
+  v_dval := public.bj_hand_value(v_dealer);
+  v_stake_total := v_round.stake * (CASE WHEN v_round.doubled THEN 2 ELSE 1 END);
+
+  IF v_pval > 21 THEN
+    v_status := 'lost'; v_payout := 0;
+  ELSIF v_dval > 21 OR v_pval > v_dval THEN
+    v_status := 'won'; v_payout := round(v_stake_total * 2, 2);
+  ELSIF v_pval = v_dval THEN
+    v_status := 'push'; v_payout := v_stake_total;
+  ELSE
+    v_status := 'lost'; v_payout := 0;
+  END IF;
+
+  UPDATE public.bj_rounds SET status = v_status, payout = v_payout WHERE id = p_round;
+  IF v_payout > 0 THEN
+    UPDATE public.profiles SET bal = bal + v_payout, updated_at = now()
+      WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  ELSE
+    SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  END IF;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+      'stake', v_stake_total, 'doubled', v_round.doubled, 'player', v_pval,
+      'dealer', v_dval, 'outcome', v_status, 'win', v_payout));
+  RETURN jsonb_build_object('player_cards', to_jsonb(v_round.player_cards),
+    'dealer_cards', to_jsonb(v_dealer), 'player_value', v_pval, 'dealer_value', v_dval,
+    'status', v_status, 'payout', v_payout, 'bal', v_bal);
+END $$;
+
+-- Кэшбэк: блэкджек тоже участвует в проигрыше вчерашнего дня
+CREATE OR REPLACE FUNCTION public.claim_cashback()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_claim record;
+  v_loss numeric;
+  v_level integer;
+  v_pct numeric;
+  v_pay numeric;
+  v_bal numeric;
+  v_wagered numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_claim FROM public.cashback_claims WHERE user_id = auth.uid();
+  IF v_claim.user_id IS NOT NULL AND v_claim.last_claim >= current_date THEN
+    RAISE EXCEPTION 'Кэшбэк уже забран сегодня — приходи завтра';
+  END IF;
+  SELECT coalesce(sum((result->>'stake')::numeric), 0)
+       - coalesce(sum(coalesce(result->>'win', '0')::numeric), 0)
+    INTO v_loss
+  FROM public.game_attempts
+  WHERE user_id = auth.uid()
+    AND created_at >= current_date - interval '1 day'
+    AND created_at < current_date
+    AND game IN ('wheel', 'plinko', 'puddles', 'ruble', 'blackjack');
+  IF coalesce(v_loss, 0) < 10 THEN
+    RAISE EXCEPTION 'Вчера ты не проиграл достаточно — кэшбэка нет (и это хорошо)';
+  END IF;
+  SELECT total_wagered INTO v_wagered FROM public.profiles WHERE id = auth.uid();
+  v_level := public.vip_level(v_wagered);
+  v_pct := 3 + v_level;
+  v_pay := round(v_loss * v_pct / 100.0, 2);
+  UPDATE public.profiles SET bal = bal + v_pay, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.cashback_claims (user_id, last_claim) VALUES (auth.uid(), current_date)
+    ON CONFLICT (user_id) DO UPDATE SET last_claim = current_date;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'cashback', jsonb_build_object(
+      'win', v_pay, 'loss', v_loss, 'level', v_level, 'pct', v_pct));
+  RETURN jsonb_build_object('win', v_pay, 'loss', v_loss, 'level', v_level,
+    'levelName', (ARRAY['Бессовестный','Хряк','Свин-магнат','Барон','Свиновладыка'])[v_level + 1],
+    'pct', v_pct, 'bal', v_bal);
+END $$;
+
+-- Ретеншн: архиватор дополнительно чистит завершённые раздачи
+-- (версия archive_take из секции 11 расширена блоком bj_rounds)
+CREATE OR REPLACE FUNCTION public.archive_take()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_max bigint;
+  v_rounds jsonb;
+  v_bets jsonb;
+  v_attempts jsonb;
+  v_puddles jsonb;
+  v_bj jsonb;
+BEGIN
+  IF coalesce(auth.role(), '') <> 'service_role' THEN
+    RAISE EXCEPTION 'Архиватор доступен только сервисному ключу';
+  END IF;
+
+  SELECT coalesce(max(id), 0) INTO v_max FROM public.crash_rounds;
+  WITH del_bets AS (
+    DELETE FROM public.crash_bets WHERE round_id <= v_max - 10
+    RETURNING round_id, username, stake, auto_cashout, cashed_out_mul, win_amount
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del_bets)), '[]'::jsonb) INTO v_bets FROM del_bets;
+  WITH del_rounds AS (
+    DELETE FROM public.crash_rounds WHERE id <= v_max - 10
+    RETURNING id, start_at, crash_point
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del_rounds) ORDER BY id), '[]'::jsonb) INTO v_rounds FROM del_rounds;
+
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY user_id, game ORDER BY id DESC) AS rn
+    FROM public.game_attempts
+  ), del AS (
+    DELETE FROM public.game_attempts a USING ranked r
+    WHERE r.id = a.id AND r.rn > 10
+    RETURNING a.user_id, a.game, a.result, a.created_at
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del) ORDER BY created_at), '[]'::jsonb) INTO v_attempts FROM del;
+
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+    FROM public.puddles_rounds WHERE status <> 'play'
+  ), del AS (
+    DELETE FROM public.puddles_rounds p USING ranked r
+    WHERE r.id = p.id AND r.rn > 10
+    RETURNING p.user_id, p.stake, p.mines_count, p.opened, p.status, p.created_at
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del) ORDER BY created_at), '[]'::jsonb) INTO v_puddles FROM del;
+
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+    FROM public.bj_rounds WHERE status <> 'play'
+  ), del AS (
+    DELETE FROM public.bj_rounds b USING ranked r
+    WHERE r.id = b.id AND r.rn > 10
+    RETURNING b.user_id, b.stake, b.doubled, b.status, b.payout, b.created_at
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(del) ORDER BY created_at), '[]'::jsonb) INTO v_bj FROM del;
+
+  RETURN jsonb_build_object(
+    'crash_rounds', v_rounds, 'crash_bets', v_bets, 'attempts', v_attempts,
+    'puddles', v_puddles, 'blackjack', v_bj
+  );
+END $$;
+
+GRANT EXECUTE ON FUNCTION
+  public.bj_deal(numeric),
+  public.bj_hit(uuid),
+  public.bj_double(uuid),
+  public.bj_stand(uuid)
+TO authenticated, anon;
