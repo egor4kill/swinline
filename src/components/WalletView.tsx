@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import type { UserAccount, Ev } from '../data'
 import { fmt } from '../fmt'
+import { supabase } from '../supabase'
 import DailyRewards from '../DailyRewards'
 import type { useDaily } from '../useDaily'
 
@@ -26,6 +28,22 @@ export default function WalletView({
   claimCashback,
   onResetAll
 }: WalletViewProps) {
+  // История ставок из базы (RLS отдаёт только свои): на любом устройстве одна и та же
+  const [dbBets, setDbBets] = useState<any[] | null>(null)
+  useEffect(() => {
+    if (!currentUser) { setDbBets(null); return }
+    let alive = true
+    setDbBets(null)
+    supabase.from('bets').select('*').eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false }).limit(30)
+      .then(({ data }) => { if (alive) setDbBets((data || []) as any[]) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id])
+  // для вошедшего — серверная история, для гостя — локальная
+  const rows: any[] = currentUser ? (dbBets || []) : (S.bets || [])
+  const rowsMeta: 'db' | 'local' = currentUser ? 'db' : 'local'
+
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
       <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
@@ -59,11 +77,15 @@ export default function WalletView({
         </div>
       </div>
 
-      <h3 style={{ fontSize: 17, fontWeight: 700, margin: '24px 0 12px' }}>История ставок</h3>
+      <h3 style={{ fontSize: 17, fontWeight: 700, margin: '24px 0 12px' }}>
+        История ставок {rowsMeta === 'db' ? '(из базы)' : ''}
+      </h3>
       <div className="wl-table-container">
-        {S.bets.length === 0 ? (
+        {rows.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-muted)' }}>
-            Ставок пока нет. Загляните в линию и выберите исход!
+            {rowsMeta === 'db' && dbBets === null
+              ? 'Загружаем из базы…'
+              : 'Ставок пока нет. Загляните в линию и выберите исход!'}
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -76,19 +98,23 @@ export default function WalletView({
               </tr>
             </thead>
             <tbody>
-              {S.bets.map((b: any) => {
-                const ev = allEvents.find(e => e.id === b.ev)
-                const statusColor = b.state === 'won' ? 'var(--green)' : b.state === 'lost' ? '#ef4444' : 'var(--org)'
-                const statusText = b.state === 'won' ? 'ВЫИГРЫШ' : b.state === 'lost' ? 'ПРОИГРЫШ' : b.state === 'refund' ? 'ВОЗВРАТ' : 'В ИГРЕ'
+              {rows.map((b: any) => {
+                const isDb = rowsMeta === 'db'
+                const ev = isDb ? null : allEvents.find(e => e.id === b.ev)
+                const title = isDb ? (b.match_title || b.event_id) : (ev?.title || b.ev)
+                const pick = isDb ? (b.pick_name || b.pick) : (ev?.out[b.i]?.[0] || 'Исход')
+                const status = isDb ? b.status : b.state
+                const statusColor = status === 'won' ? 'var(--green)' : status === 'lost' ? '#ef4444' : status === 'refund' ? '#94a3b8' : 'var(--org)'
+                const statusText = status === 'won' ? 'ВЫИГРЫШ' : status === 'lost' ? 'ПРОИГРЫШ' : status === 'refund' ? 'ВОЗВРАТ' : 'В ИГРЕ'
 
                 return (
                   <tr key={b.id} style={{ borderBottom: '1px solid #1c2230' }}>
                     <td style={{ padding: '10px 14px' }}>
-                      <div style={{ fontWeight: 700 }}>{ev?.title || b.ev}</div>
-                      <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev?.out[b.i]?.[0] || 'Исход'}</div>
+                      <div style={{ fontWeight: 700 }}>{title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{pick}{isDb && status === 'won' ? ` • выплата ${fmt(Number(b.payout || 0))}` : ''}</div>
                     </td>
-                    <td style={{ padding: '10px 14px', fontWeight: 700 }}>{fmt(b.stake)}</td>
-                    <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{b.odds.toFixed(2)}</td>
+                    <td style={{ padding: '10px 14px', fontWeight: 700 }}>{fmt(Number(b.stake))}</td>
+                    <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{Number(b.odds).toFixed(2)}</td>
                     <td style={{ padding: '10px 14px' }}>
                       <span style={{ color: statusColor, fontWeight: 800, fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#191f2c' }}>
                         {statusText}
