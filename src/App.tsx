@@ -86,91 +86,18 @@ function loadJSON<T>(key: string, fallback: T): T {
   return fallback
 }
 
-const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' SV₽'
-
-const PigLogo = () => (
-  <svg width="28" height="28" viewBox="0 0 100 100" role="img" aria-label="Свин-маскот SWINLINE">
-    <use href="#pig" />
-  </svg>
-)
-
-// Колесо «Корыто Фортуны»: секторы и честный RTP (~96%) — в wheelLogic.ts, покрыто тестом
-const WHEEL_SEC_DEG = 360 / ROULETTE_SECTORS.length
-
-
-const getTwitchAvatar = (username?: string, currentAvatar?: string | null): string => {
-  if (currentAvatar && (currentAvatar.startsWith('http://') || currentAvatar.startsWith('https://'))) {
-    return currentAvatar
-  }
-  const u = (username || '').toLowerCase().trim()
-  if (u === ADMIN_USERNAME.toLowerCase()) {
-    return 'https://static-cdn.jtvnw.net/jtv_user_pictures/310827f8-113e-442f-9435-bf8637ec3b6a-profile_image-300x300.png'
-  }
-  if (u === 'lowrensy') {
-    return 'https://static-cdn.jtvnw.net/jtv_user_pictures/6d72a4ce-1517-408b-8d79-2490b31fa178-profile_image-300x300.png'
-  }
-  if (currentAvatar && currentAvatar !== '👑' && currentAvatar !== '🐗' && currentAvatar !== '🟣') {
-    return currentAvatar
-  }
-  return '🟣'
-}
-
-const UserAvatar = ({
-  avatar,
-  name,
-  size = 28,
-  className = ''
-}: {
-  avatar?: string | null
-  name?: string
-  size?: number
-  crown?: boolean
-  className?: string
-}) => {
-  const [hasError, setHasError] = useState(false)
-  const resolved = getTwitchAvatar(name, avatar)
-  const isImage = !hasError && Boolean(resolved && (resolved.startsWith('http://') || resolved.startsWith('https://') || resolved.startsWith('/') || resolved.startsWith('data:')))
-
-  return (
-    <div
-      className={className}
-      style={{
-        position: 'relative',
-        width: size,
-        height: size,
-        borderRadius: '50%',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        background: '#1a1f2c',
-        border: '1px solid rgba(255,255,255,0.18)',
-        overflow: 'hidden'
-      }}
-    >
-      {isImage ? (
-        <img
-          src={resolved}
-          alt={name || 'Avatar'}
-          style={{
-            width: '100%',
-            height: '100%',
-            borderRadius: '50%',
-            objectFit: 'cover',
-            display: 'block'
-          }}
-          referrerPolicy="no-referrer"
-          onError={() => setHasError(true)}
-        />
-      ) : (
-        <span style={{ fontSize: size * 0.55, fontWeight: 700, userSelect: 'none', color: '#fff' }}>
-          {resolved && resolved.length <= 2 && resolved !== '🟣' ? resolved : (name ? name[0].toUpperCase() : '👤')}
-        </span>
-      )}
-    </div>
-  )
-}
-
+import { fmt } from './fmt'
+import { PigLogo, UserAvatar, getTwitchAvatar } from './components/Avatars'
+import Header from './components/Header'
+import Sidebar from './components/Sidebar'
+import LineView from './components/LineView'
+import CrashArena from './components/games/CrashArena'
+import RouletteWheel, { WHEEL_SEC_DEG } from './components/games/RouletteWheel'
+import EsportsView from './components/EsportsView'
+import WalletView from './components/WalletView'
+import PromosView from './components/PromosView'
+import ResultsView from './components/ResultsView'
+import AboutView from './components/AboutView'
 
 const purgeEmptyAccounts = (list: UserAccount[]): UserAccount[] => {
   const seenUsernames = new Set<string>()
@@ -1456,6 +1383,22 @@ export default function App() {
     notify('Вы вышли из профиля. Режим гостя.')
   }
 
+  // Сброс баланса и истории (кнопка «Сбросить всё» в «Мой счет»)
+  const handleResetAll = () => {
+    if (confirm('Сбросить весь баланс и историю ставок?')) {
+      if (currentUser) {
+        supabase.rpc('self_reset_balance').then(({ data, error }) => {
+          if (!error && data) setS({ ...freshState(), bal: Number(data.bal) })
+          else notify('❌ Не удалось сбросить баланс')
+        })
+      } else {
+        setS(freshState())
+      }
+      setSelectedBet(null)
+      notify('Прогресс сброшен к 10 000 SV₽')
+    }
+  }
+
   // Admin Surveillance & Actions
   // Действия идут через серверные RPC-функции Supabase (admin_* в SQL-скрипте):
   // внутри проверяется, что вызывающий — владелец платформы. Ошибки показываем честно.
@@ -1570,20 +1513,6 @@ export default function App() {
 
   const activeBetsCount = S.bets.filter((b: any) => b.state === 'open').length
 
-  const getSportIcon = (iconName: string) => {
-    switch (iconName) {
-      case 'Trophy': return <Trophy size={16} />
-      case 'Gamepad2': return <Gamepad2 size={16} />
-      case 'Flame': return <Flame size={16} />
-      case 'Building': return <Building size={16} />
-      case 'Sparkles': return <Sparkles size={16} />
-      case 'Swords': return <Swords size={16} />
-      case 'Activity': return <Activity size={16} />
-      case 'Utensils': return <Utensils size={16} />
-      default: return <Sparkles size={16} />
-    }
-  }
-
   const stakeVal = parseFloat(stake)
   const isStakeValid = isFinite(stakeVal) && stakeVal > 0
   const currentOdds = selectedBet?.odds || 1
@@ -1593,612 +1522,71 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* 1. Header (Winline style with SWINLINE branding) */}
-      <header className="wl-header">
-        <div className="wl-header-inner">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-            {/* Logo stadium-pill */}
-            <div className="wl-logo-pill" onClick={() => { setView('line'); setSelectedSport(null) }}>
-              <PigLogo />
-              <div className="wl-logo-text">
-                SWIN<span>LINE</span>
-              </div>
-            </div>
-
-            {/* Navigation links */}
-            <nav className="wl-nav">
-              <button
-                className={`wl-nav-link ${view === 'line' ? 'active' : ''}`}
-                onClick={() => { setView('line'); setSelectedSport(null) }}
-              >
-                Линия
-              </button>
-              <button
-                className={`wl-nav-link ${view === 'live' ? 'active' : ''}`}
-                onClick={() => { setView('live'); setSelectedSport(null) }}
-              >
-                <div className="live-badge-dot" />
-                Live сейчас
-              </button>
-              <button
-                className={`wl-nav-link ${view === 'esports' ? 'active' : ''}`}
-                onClick={() => { setView('esports'); setSelectedSport(4) }}
-              >
-                Киберспорт
-              </button>
-              <button
-                className={`wl-nav-link ${view === 'games24' ? 'active' : ''}`}
-                onClick={() => setView('games24')}
-              >
-                Игры 24/7
-              </button>
-              <button
-                className={`wl-nav-link ${view === 'wallet' ? 'active' : ''}`}
-                onClick={() => setView('wallet')}
-              >
-                Мой счет
-              </button>
-              <button
-                className={`wl-nav-link ${view === 'promos' ? 'active' : ''}`}
-                onClick={() => setView('promos')}
-              >
-                Акции
-              </button>
-              <button
-                className={`wl-nav-link ${view === 'results' ? 'active' : ''}`}
-                onClick={() => setView('results')}
-              >
-                Результаты
-              </button>
-              <button
-                className={`wl-nav-link ${view === 'about' ? 'active' : ''}`}
-                onClick={() => setView('about')}
-              >
-                О компании
-              </button>
-            </nav>
-          </div>
-
-          {/* Right Header: User Account, Admin Badge, Balance & Actions */}
-          <div className="wl-header-right">
-            {currentUser ? (
-              <>
-                {/* Admin Badge if admin */}
-                {isAdmin && (
-                  <button
-                    className="wl-admin-badge"
-                    onClick={() => { setAdminTab('users'); setAdminModalOpen(true) }}
-                    title="Открыть панель администратора"
-                  >
-                    <ShieldCheck size={14} />
-                    <span>АДМИН-ЦЕНТР</span>
-                  </button>
-                )}
-
-                {/* User Profile Chip */}
-                <div
-                  className="wl-user-chip"
-                  onClick={() => setProfileModalOpen(true)}
-                  title="Личный кабинет"
-                >
-                  <UserAvatar avatar={currentUser.avatar} name={currentUser.username} size={30} crown={isAdmin} />
-                  <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700 }}>{currentUser.username}</span>
-                    <span style={{ fontSize: 10, color: isAdmin ? '#f59e0b' : 'var(--tx-muted)' }}>
-                      {currentUser.title}
-                    </span>
-                    <VipBadge userId={currentUser.id} />
-                  </div>
-                </div>
-
-                {/* Balance chip */}
-                <div className="wl-balance-chip" title="Текущий баланс">
-                  <span className="wl-balance-amount">{fmt(S.bal)}</span>
-                </div>
-
-                <button
-                  className={`wl-btn-green ${daily.status.canClaim ? 'pulse' : ''}`}
-                  onClick={() => setView('wallet')}
-                  title="Ежедневная награда"
-                >
-                  🎁 Награда
-                </button>
-
-                <button
-                  className="wl-btn-orange"
-                  onClick={() => addVirtualMoney(5000)}
-                  title="Начислить бесплатные SV₽"
-                >
-                  + Начислить
-                </button>
-
-                <button
-                  className="wl-sidebar-quick-btn"
-                  style={{ border: '1px solid var(--border)', padding: '6px 10px', fontSize: 12 }}
-                  onClick={handleLogout}
-                  title="Выйти из аккаунта"
-                >
-                  Выйти ↪
-                </button>
-              </>
-            ) : (
-              <button
-                className="wl-btn-orange"
-                style={{
-                  background: 'linear-gradient(135deg, #9146ff, #772ce8)',
-                  border: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontWeight: 700,
-                  padding: '9px 18px',
-                  borderRadius: 8,
-                  fontSize: 14,
-                  boxShadow: '0 2px 12px rgba(145, 70, 255, 0.4)'
-                }}
-                onClick={() => handleOAuthLogin('twitch')}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
-                </svg>
-                <span>Войти через Twitch</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
+      <Header
+        view={view}
+        setView={setView}
+        setSelectedSport={setSelectedSport}
+        balance={S.bal}
+        currentUser={currentUser}
+        isAdmin={isAdmin}
+        daily={daily}
+        onOpenAdminCenter={() => { setAdminTab('users'); setAdminModalOpen(true) }}
+        onOpenProfile={() => setProfileModalOpen(true)}
+        onAddMoney={() => addVirtualMoney(5000)}
+        onLogout={handleLogout}
+        onOAuthLogin={handleOAuthLogin}
+      />
 
       {/* 2. Main 3-Column Layout */}
       <div className="wl-layout">
         {/* Left Sidebar */}
-        <aside className="wl-sidebar">
-          <div className="wl-search-box">
-            <Search className="wl-search-icon" size={16} />
-            <input
-              type="text"
-              className="wl-search-input"
-              placeholder="Поиск событий..."
-              value={searchQuery}
-              onChange={e => {
-                setSearchQuery(e.target.value)
-                if (view !== 'line' && view !== 'live' && e.target.value) {
-                  setView('line')
-                }
-              }}
-            />
-            {searchQuery && (
-              <button
-                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: '#888' }}
-                onClick={() => setSearchQuery('')}
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          <div className="wl-sidebar-quick">
-            <button
-              className={`wl-sidebar-quick-btn ${favoritesOnly ? 'active' : ''}`}
-              onClick={() => {
-                setFavoritesOnly(prev => !prev)
-                if (view !== 'line' && view !== 'live') setView('line')
-              }}
-            >
-              <Star size={16} color={favoritesOnly ? 'var(--org)' : '#94a3b8'} />
-              <span>Избранное</span>
-              {Object.values(favorites).filter(Boolean).length > 0 && (
-                <span className="wl-badge-count">{Object.values(favorites).filter(Boolean).length}</span>
-              )}
-            </button>
-
-            <button
-              className={`wl-sidebar-quick-btn ${selectedSport === null && !favoritesOnly ? 'active' : ''}`}
-              onClick={() => {
-                setSelectedSport(null)
-                setFavoritesOnly(false)
-                if (view !== 'line' && view !== 'live') setView('line')
-              }}
-            >
-              <Clock size={16} />
-              <span>Все события</span>
-            </button>
-
-            {isAdmin && (
-              <button
-                className="wl-sidebar-quick-btn"
-                style={{ color: '#f59e0b', background: '#f59e0b11', borderColor: '#f59e0b33' }}
-                onClick={() => setAdminModalOpen(true)}
-              >
-                <PlusCircle size={16} />
-                <span>+ Добавить матч</span>
-              </button>
-            )}
-          </div>
-
-          <div className="wl-sports-list">
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', padding: '6px 12px' }}>
-              Категории ставок
-            </div>
-            {SPORT_CATEGORIES.map(sport => {
-              const isActive = selectedSport === sport.id
-              return (
-                <button
-                  key={sport.id}
-                  className={`wl-sport-item ${isActive ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedSport(isActive ? null : sport.id)
-                    setFavoritesOnly(false)
-                    if (view !== 'line' && view !== 'live') setView('line')
-                  }}
-                >
-                  <div className="wl-sport-left">
-                    <span style={{ color: isActive ? 'var(--org)' : 'inherit' }}>
-                      {getSportIcon(sport.icon)}
-                    </span>
-                    <span>{sport.name}</span>
-                  </div>
-                  <span className="wl-badge-count">{allEvents.filter(e => e.cat === sport.id).length}</span>
-                </button>
-              )
-            })}
-          </div>
-        </aside>
+        <Sidebar
+          view={view}
+          setView={setView}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          favoritesOnly={favoritesOnly}
+          setFavoritesOnly={setFavoritesOnly}
+          favorites={favorites}
+          selectedSport={selectedSport}
+          setSelectedSport={setSelectedSport}
+          isAdmin={isAdmin}
+          onOpenAdmin={() => setAdminModalOpen(true)}
+          allEvents={allEvents}
+        />
 
         {/* Center Main Content */}
         <main className="wl-center">
           {/* A. LINE / LIVE VIEW */}
           {(view === 'line' || view === 'live') && (
-            <>
-              {/* Banners */}
-              <div className="wl-banners-slider">
-                <div className="wl-banner-card highlight">
-                  <span className="wl-banner-tag">СТАРТОВЫЙ БОНУС</span>
-                  <div className="wl-banner-title">
-                    <span>10 000 SV₽</span> ДЛЯ НОВЫХ ИГРОКОВ
-                  </div>
-                  <div className="wl-banner-desc">
-                    Моментальное зачисление на баланс при входе. Делайте ставки на любые спортивные и киберспортивные матчи!
-                  </div>
-                  <div className="wl-banner-mascot">
-                    <PigLogo />
-                  </div>
-                </div>
-
-                <div className="wl-banner-card">
-                  <span className="wl-banner-tag" style={{ background: '#3b82f6', color: '#fff' }}>ХРЯК-КРЭШ</span>
-                  <div className="wl-banner-title" style={{ fontSize: 16 }}>
-                    Мультиплеер в реальном времени
-                  </div>
-                  <div className="wl-banner-desc">
-                    Общие раунды каждые 6 секунд для всех игроков — забирайте выигрыш с коэффициентами до x25.0!
-                  </div>
-                </div>
-
-                <div className="wl-banner-card">
-                  <span className="wl-banner-tag" style={{ background: '#a855f7', color: '#fff' }}>КОРЫТО ФОРТУНЫ</span>
-                  <div className="wl-banner-title" style={{ fontSize: 16 }}>
-                    Колесо множителей
-                  </div>
-                  <div className="wl-banner-desc">
-                    Вращайте колесо и получайте моментальные призы с джекпотом x10.0!
-                  </div>
-                </div>
-              </div>
-
-              {/* Tournament Pills & Admin Fast Action */}
-              <div className="wl-tournaments-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', flex: 1 }}>
-                  {TOURNAMENT_PILLS.map((pill, idx) => (
-                    <button
-                      key={idx}
-                      className="wl-tourney-pill"
-                      onClick={() => {
-                        setSearchQuery(pill.name.split(' ')[0])
-                        notify(`Фильтр по турниру: ${pill.name}`)
-                      }}
-                    >
-                      <span className="wl-tourney-badge">{pill.tag}</span>
-                      <span>{pill.name}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {isAdmin && (
-                  <button
-                    className="wl-btn-orange"
-                    style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
-                    onClick={() => setCreateMatchModalOpen(true)}
-                  >
-                    <PlusCircle size={15} />
-                    <span>+ Создать событие</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Round Filters */}
-              <div className="wl-round-filters">
-                <button
-                  className={`wl-round-btn ${selectedSport === null ? 'active' : ''}`}
-                  onClick={() => setSelectedSport(null)}
-                >
-                  <div className="wl-round-icon">✓</div>
-                  <span>Все исходы ({allEvents.length})</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${view === 'live' ? 'active' : ''}`}
-                  onClick={() => setView(view === 'live' ? 'line' : 'live')}
-                >
-                  <div className="wl-round-icon" style={{ background: '#ef4444', color: '#fff' }}>●</div>
-                  <span>Live матчи ({allEvents.filter(e => e.isLive).length})</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${selectedSport === 0 ? 'active' : ''}`}
-                  onClick={() => setSelectedSport(0)}
-                >
-                  <div className="wl-round-icon">⚽</div>
-                  <span>Свин-Лига РПЛ</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${selectedSport === 4 ? 'active' : ''}`}
-                  onClick={() => setSelectedSport(4)}
-                >
-                  <div className="wl-round-icon">🎮</div>
-                  <span>Кибер-Хряк</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${selectedSport === 6 ? 'active' : ''}`}
-                  onClick={() => setSelectedSport(6)}
-                >
-                  <div className="wl-round-icon">🥊</div>
-                  <span>Хрюк-MMA</span>
-                </button>
-              </div>
-
-              {/* Matches grouped by League */}
-              {groupedByLeague.length === 0 ? (
-                isAdmin ? (
-                  <div style={{ textAlign: 'center', padding: '50px 24px', background: 'var(--bg-card)', borderRadius: 16, border: '1px dashed rgba(255, 85, 0, 0.45)', margin: '14px 0' }}>
-                    <div style={{ fontSize: 44, marginBottom: 12 }}>📋</div>
-                    <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 8, color: '#fff' }}>
-                      Линия событий пуста
-                    </h3>
-                    <p style={{ color: 'var(--tx-secondary)', fontSize: 14, maxWidth: 500, margin: '0 auto 20px', lineHeight: 1.5 }}>
-                      Все старые ставки и тестовые матчи очищены. Вы вошли со статусом <b>ADMIN (egor4kill)</b> — создайте новые матчи или запустите готовые шаблоны в 1 клик:
-                    </p>
-                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
-                      <button
-                        className="wl-btn-orange"
-                        style={{ padding: '12px 26px', fontSize: 15, fontWeight: 800, borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 8 }}
-                        onClick={() => setCreateMatchModalOpen(true)}
-                      >
-                        <PlusCircle size={18} />
-                        <span>+ Создать событие в линию</span>
-                      </button>
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--tx-muted)', marginBottom: 10, fontWeight: 700 }}>
-                      БЫСТРЫЕ ШАБЛОНЫ МАТЧЕЙ:
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                      <button className="wl-demo-btn" onClick={() => { applyTemplate('football'); setCreateMatchModalOpen(true) }}>
-                        ⚽ Футбол: Спартак vs Зенит
-                      </button>
-                      <button className="wl-demo-btn" onClick={() => { applyTemplate('cs2'); setCreateMatchModalOpen(true) }}>
-                        🎮 CS2: NAVI vs Spirit
-                      </button>
-                      <button className="wl-demo-btn" onClick={() => { applyTemplate('mma'); setCreateMatchModalOpen(true) }}>
-                        🥊 UFC: Махачев vs Царукян
-                      </button>
-                      <button className="wl-demo-btn" onClick={() => { applyTemplate('burger'); setCreateMatchModalOpen(true) }}>
-                        🌭 Поедание бургеров
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '60px 20px', background: 'var(--bg-card)', borderRadius: 14, border: '1px dashed var(--border)' }}>
-                    <div style={{ fontSize: 36, marginBottom: 12 }}>🐷</div>
-                    <h3 style={{ fontSize: 18, marginBottom: 6 }}>Линия обновляется</h3>
-                    <p style={{ color: 'var(--tx-secondary)', fontSize: 14 }}>
-                      Администратор готовит свежие события и коэффициенты. Скоро здесь появятся новые матчи!
-                    </p>
-                  </div>
-                )
-              ) : (
-                groupedByLeague.map(([leagueName, leagueEvents]) => (
-                  <div className="wl-table-container" key={leagueName}>
-                    <div className="wl-league-header">
-                      <div className="wl-league-title">
-                        <span>{leagueName}</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--tx-muted)' }}>
-                        Событий: {leagueEvents.length}
-                      </div>
-                    </div>
-
-                    <div className="wl-columns-header">
-                      <div>Событие / Участники</div>
-                      <div className="wl-odds-columns-labels">
-                        <span>1</span>
-                        <span>X</span>
-                        <span>2</span>
-                        <span>Фора 1</span>
-                        <span>Фора 2</span>
-                        <span>Тотал М</span>
-                        <span>Тотал Б</span>
-                      </div>
-                    </div>
-
-                    {leagueEvents.map(ev => {
-                      const eventStatus = S.st[ev.id]?.s || 'open'
-                      const isClosed = eventStatus === 'closed'
-                      const isDone = eventStatus === 'done'
-                      const isCancelled = eventStatus === 'cancel'
-                      const winningIdx = S.st[ev.id]?.w
-                      const isExpanded = !!expandedMarkets[ev.id]
-
-                      return (
-                        <div key={ev.id} style={{ borderBottom: '1px solid #1a202c' }}>
-                          <div className="wl-match-row">
-                            <div className="wl-match-info">
-                              <div className="wl-match-teams">
-                                <button
-                                  onClick={(e) => toggleFavorite(ev.id, e)}
-                                  title="Добавить в избранное"
-                                  style={{ color: favorites[ev.id] ? 'var(--org)' : '#4a5568' }}
-                                >
-                                  <Star size={15} fill={favorites[ev.id] ? 'var(--org)' : 'none'} />
-                                </button>
-                                <span>{ev.title}</span>
-                                {ev.score && (
-                                  <span className="wl-match-score-badge">{ev.score}</span>
-                                )}
-                              </div>
-
-                              <div className="wl-match-meta">
-                                {ev.isLive ? (
-                                  <span className="live-indicator">● {ev.liveTime || 'LIVE'}</span>
-                                ) : (
-                                  <span>{ev.liveTime || 'Скоро'}</span>
-                                )}
-                                <span>•</span>
-                                <span style={{ color: 'var(--tx-muted)' }}>{ev.desc}</span>
-                                {ev.extraMarkets && ev.extraMarkets.length > 0 && (
-                                  <button
-                                    className="wl-match-extra-link"
-                                    onClick={() => toggleMarket(ev.id)}
-                                  >
-                                    {isExpanded ? 'Скрыть роспись ▲' : `+${ev.extraMarkets.length * 2} вариантов ➔`}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="wl-odds-matrix">
-                              {ev.out.slice(0, 7).map((outcome, idx) => {
-                                const isSelected = selectedBet?.evId === ev.id && selectedBet?.outcomeIdx === idx
-                                const isWinner = isDone && winningIdx === idx
-                                const isDisabled = isClosed || isDone || isCancelled
-
-                                return (
-                                  <button
-                                    key={idx}
-                                    className={`wl-odd-box ${isSelected ? 'selected' : ''}`}
-                                    style={{
-                                      borderColor: isWinner ? 'var(--green)' : undefined,
-                                      boxShadow: isWinner ? '0 0 10px rgba(34, 197, 94, 0.4)' : undefined
-                                    }}
-                                    disabled={isDisabled}
-                                    onClick={() => selectOdd(ev, idx, outcome[0], outcome[1])}
-                                  >
-                                    <span className="wl-odd-val">{outcome[1].toFixed(2)}</span>
-                                    <span className="wl-odd-lbl">{outcome[0].split(' ')[0]}</span>
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-
-                          {/* Extra Markets (if any) */}
-                          {isExpanded && ev.extraMarkets && (
-                            <div className="wl-extra-markets" style={{ padding: '10px 16px', background: '#111520', borderTop: '1px solid #1a202c' }}>
-                              {ev.extraMarkets.map((market, mIdx) => (
-                                <div key={mIdx} style={{ marginBottom: 8 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-secondary)', marginBottom: 4 }}>
-                                    {market.title}:
-                                  </div>
-                                  <div style={{ display: 'flex', gap: 8 }}>
-                                    {market.out.map((o, oIdx) => (
-                                      <div key={oIdx} style={{ background: '#171c28', padding: '6px 12px', borderRadius: 6, fontSize: 12 }}>
-                                        <span>{o[0]}</span> <b style={{ color: 'var(--org)' }}>{o[1].toFixed(2)}</b>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* IN-LINE ADMIN BAR FOR THE PLATFORM OWNER */}
-                          {isAdmin && (
-                            <div className="wl-match-admin-bar">
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                  <ShieldCheck size={13} /> АДМИН:
-                                </span>
-                                <span className={`wl-status-badge ${eventStatus === 'open' ? 'active' : eventStatus === 'done' ? 'active' : 'blocked'}`}>
-                                  {eventStatus === 'open' ? 'Приём открыт 🟢' : eventStatus === 'closed' ? 'Приём закрыт 🔒' : eventStatus === 'done' ? 'Завершён 🏆' : 'Отменён ❌'}
-                                </span>
-
-                                {/* Close/Open toggle */}
-                                {eventStatus !== 'done' && eventStatus !== 'cancel' && (
-                                  <button
-                                    className={`wl-admin-action-btn ${isClosed ? 'success' : 'warning'}`}
-                                    onClick={() => handleToggleEventClosedAction(ev)}
-                                  >
-                                    {isClosed ? <Unlock size={12} /> : <Lock size={12} />}
-                                    <span>{isClosed ? 'Открыть приём' : 'Закрыть приём'}</span>
-                                  </button>
-                                )}
-
-                                {/* Score & Live Editor */}
-                                <button
-                                  className="wl-admin-action-btn"
-                                  onClick={() => {
-                                    setEditEventModal(ev)
-                                    setEditScore(ev.score || '0 : 0')
-                                    setEditLiveTime(ev.liveTime || 'Скоро')
-                                    setEditIsLive(Boolean(ev.isLive))
-                                  }}
-                                  title="Редактировать текущий счёт и статус"
-                                >
-                                  <Edit3 size={12} />
-                                  <span>Счёт: {ev.score || '0 : 0'}</span>
-                                </button>
-                              </div>
-
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                {/* Winner settling */}
-                                {eventStatus !== 'done' && eventStatus !== 'cancel' && (
-                                  <>
-                                    <span style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 600 }}>Рассчитать:</span>
-                                    {ev.out.slice(0, 3).map((outcome, oIdx) => (
-                                      <button
-                                        key={oIdx}
-                                        className="wl-admin-action-btn success"
-                                        onClick={() => handleSettleEventAction(ev, oIdx)}
-                                        title={`Рассчитать победу: ${outcome[0]}`}
-                                      >
-                                        Победил {outcome[0]}
-                                      </button>
-                                    ))}
-                                    <button
-                                      className="wl-admin-action-btn warning"
-                                      onClick={() => handleCancelEventAction(ev)}
-                                      title="Отменить событие и вернуть деньги игрокам"
-                                    >
-                                      <RotateCcw size={12} />
-                                      <span>Отменить матч</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {/* Safe Deletion Button */}
-                                <button
-                                  className="wl-admin-action-btn danger"
-                                  onClick={() => setDeleteEventModal(ev)}
-                                  title="Удалить событие из линии (с защитой)"
-                                >
-                                  <Trash2 size={12} />
-                                  <span>Удалить</span>
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))
-              )}
-            </>
+            <LineView
+              view={view}
+              setView={setView}
+              selectedSport={selectedSport}
+              setSelectedSport={setSelectedSport}
+              allEvents={allEvents}
+              groupedByLeague={groupedByLeague}
+              S={S}
+              expandedMarkets={expandedMarkets}
+              favorites={favorites}
+              selectedBet={selectedBet}
+              isAdmin={isAdmin}
+              notify={notify}
+              setSearchQuery={setSearchQuery}
+              setCreateMatchModalOpen={setCreateMatchModalOpen}
+              applyTemplate={applyTemplate}
+              toggleFavorite={toggleFavorite}
+              toggleMarket={toggleMarket}
+              selectOdd={selectOdd}
+              handleToggleEventClosedAction={handleToggleEventClosedAction}
+              handleSettleEventAction={handleSettleEventAction}
+              handleCancelEventAction={handleCancelEventAction}
+              setDeleteEventModal={setDeleteEventModal}
+              setEditEventModal={setEditEventModal}
+              setEditScore={setEditScore}
+              setEditLiveTime={setEditLiveTime}
+              setEditIsLive={setEditIsLive}
+            />
           )}
 
           {/* B. GAMES 24/7 (CRASH & ROULETTE) */}
@@ -2243,349 +1631,25 @@ export default function App() {
               </div>
 
               {/* CRASH GAME ARENA */}
-              {gamesTab === 'crash' && (() => {
-                const progress = Math.min(1, Math.max(0, (crashMultiplier - 1.0) / 8.0))
-                const curX = 40 + progress * 480
-                const curY = 230 - Math.pow(progress, 0.8) * 180
-                const controlX = 40 + progress * 160
-                const controlY = 230
-                const curvePath = `M 40 230 Q ${controlX} ${controlY}, ${curX} ${curY}`
-                const areaPath = `M 40 230 Q ${controlX} ${controlY}, ${curX} ${curY} L ${curX} 230 Z`
-                const isHigh = crashMultiplier >= 10.0 && crashPhase === 'flying'
-                const multiplierColor = crashPhase === 'crashed'
-                  ? '#ef4444'
-                  : myCrashBet?.cashedOutMul
-                  ? 'var(--green)'
-                  : crashMultiplier >= 10.0
-                  ? '#fbbf24'
-                  : crashMultiplier >= 5.0
-                  ? '#c084fc'
-                  : crashMultiplier >= 2.0
-                  ? 'var(--org)'
-                  : '#ffffff'
-
-                return (
-                  <div className="wl-crash-layout">
-                    {/* Left Column: Multiplayer Flight Canvas & Controls */}
-                    <div className={`wl-crash-arena ${crashPhase} ${crashMultiplier > 3.2 && crashPhase === 'flying' ? 'shaking' : ''}`}>
-                      {/* Round Header & Past History Pills */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 900, color: 'var(--org)', background: 'rgba(255,85,0,0.12)', border: '1px solid rgba(255,85,0,0.3)', padding: '4px 10px', borderRadius: 8, letterSpacing: '0.04em' }}>
-                            РАУНД #{crashRound?.id ?? '…'}
-                          </span>
-                          <span style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 800 }}>
-                            ИСТОРИЯ:
-                          </span>
-                        </div>
-                        <div className="wl-crash-history-pills">
-                          {crashHistory.map((h, i) => (
-                            <span
-                              key={i}
-                              className="wl-crash-history-pill"
-                              style={{
-                                color: h >= 2.0 ? 'var(--green)' : h < 1.2 ? '#ef4444' : 'var(--org)',
-                                borderColor: h >= 2.0 ? 'rgba(16, 185, 129, 0.4)' : undefined,
-                                boxShadow: h >= 10.0 ? '0 0 10px rgba(251, 191, 36, 0.4)' : undefined
-                              }}
-                            >
-                              {h.toFixed(2)}x
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* SVG Shared Flight Canvas */}
-                      <div className="wl-crash-display">
-                        <svg className="wl-crash-svg-container" viewBox="0 0 600 260" preserveAspectRatio="none">
-                          <defs>
-                            <linearGradient id="crashAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="#ff5500" stopOpacity="0.3" />
-                              <stop offset="100%" stopColor="#ff5500" stopOpacity="0.0" />
-                            </linearGradient>
-                            <linearGradient id="crashLineGrad" x1="0" y1="0" x2="1" y2="0">
-                              <stop offset="0%" stopColor="#f59e0b" />
-                              <stop offset="100%" stopColor="#ff5500" />
-                            </linearGradient>
-                          </defs>
-
-                          {/* Coordinate Grid */}
-                          <line x1="30" y1="230" x2="570" y2="230" stroke="#1f2738" strokeWidth="2" />
-                          <line x1="30" y1="170" x2="570" y2="170" stroke="#141a27" strokeDasharray="4 4" />
-                          <line x1="30" y1="110" x2="570" y2="110" stroke="#141a27" strokeDasharray="4 4" />
-                          <line x1="30" y1="50" x2="570" y2="50" stroke="#141a27" strokeDasharray="4 4" />
-
-                          <text x="565" y="234" fill="#3a455a" fontSize="10" fontWeight="700">1.0x</text>
-                          <text x="565" y="174" fill="#3a455a" fontSize="10" fontWeight="700">2.0x</text>
-                          <text x="565" y="114" fill="#3a455a" fontSize="10" fontWeight="700">5.0x</text>
-                          <text x="565" y="54" fill="#3a455a" fontSize="10" fontWeight="700">10x</text>
-
-                          {/* Trajectory & Neon Trail during flying/crashed */}
-                          {crashPhase !== 'betting' && (
-                            <>
-                              <path d={areaPath} fill="url(#crashAreaGrad)" />
-                              <path
-                                d={curvePath}
-                                fill="none"
-                                stroke={crashPhase === 'crashed' ? '#ef4444' : 'url(#crashLineGrad)'}
-                                strokeWidth="4"
-                                strokeLinecap="round"
-                                style={{
-                                  filter: crashPhase === 'crashed' ? 'drop-shadow(0 0 8px #ef4444)' : 'drop-shadow(0 0 10px #ff5500)'
-                                }}
-                              />
-                            </>
-                          )}
-
-                          {/* Rocket Pig waiting at launchpad in betting phase */}
-                          {crashPhase === 'betting' && (
-                            <g transform="translate(40, 230) rotate(-6)">
-                              <text x="-14" y="10" fontSize="32" className="wl-rocket-pig">🐷🚀</text>
-                            </g>
-                          )}
-
-                          {/* Flying Rocket Pig with Thruster */}
-                          {crashPhase === 'flying' && (
-                            <g transform={`translate(${curX}, ${curY}) rotate(${-8 - progress * 26})`}>
-                              <text x="-32" y="8" fontSize="24" className="wl-thruster-flame">🔥</text>
-                              <text x="-14" y="10" fontSize="34" className="wl-rocket-pig">🐷🚀</text>
-                            </g>
-                          )}
-
-                          {/* Crash Burst & Shockwave */}
-                          {crashPhase === 'crashed' && (
-                            <g transform={`translate(${curX}, ${curY})`}>
-                              <circle cx="0" cy="0" r="16" className="wl-crash-shockwave" />
-                              <text x="-22" y="14" fontSize="42">💥</text>
-                            </g>
-                          )}
-                        </svg>
-
-                        {/* Multiplier / Countdown HUD */}
-                        {crashPhase === 'betting' ? (
-                          <div style={{ position: 'absolute', top: '48%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none' }}>
-                            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--tx-muted)', letterSpacing: '0.08em', marginBottom: 4 }}>
-                              СЛЕДУЮЩИЙ РАУНД ЧЕРЕЗ:
-                            </div>
-                            <div style={{ fontSize: 48, fontWeight: 900, fontFamily: 'var(--font-d)', color: 'var(--org)', textShadow: '0 0 20px rgba(255,85,0,0.5)' }}>
-                              {crashCountdown.toFixed(1)}s
-                            </div>
-                            <div className="wl-crash-countdown-bar-wrap" style={{ width: 220, margin: '8px auto 0' }}>
-                              <div className="wl-crash-countdown-bar" style={{ width: `${Math.max(0, Math.min(100, (crashCountdown / 6.0) * 100))}%` }} />
-                            </div>
-                          </div>
-                        ) : (
-                          <div
-                            className={`wl-crash-multiplier ${isHigh ? 'high' : ''}`}
-                            style={{ color: multiplierColor }}
-                          >
-                            {crashMultiplier.toFixed(2)}x
-                          </div>
-                        )}
-
-                        <div className="wl-crash-status">
-                          {crashPhase === 'betting' && (
-                            <span style={{ color: myCrashBet ? 'var(--green)' : 'var(--org)', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                              {myCrashBet ? '✅ ВАША СТАВКА ПРИНЯТА НА РАУНД' : '⏳ ПРИЁМ СТАВОК НА РАУНД 🚀'}
-                            </span>
-                          )}
-                          {crashPhase === 'flying' && (
-                            <span style={{ color: 'var(--org)', background: 'rgba(255,85,0,0.15)', border: '1px solid rgba(255,85,0,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                              🚀 ХРЯК В ПОЛЁТЕ! ВСЕ ОНЛАЙН В ОДНОЙ РАКЕТЕ!
-                            </span>
-                          )}
-                          {crashPhase === 'crashed' && (
-                            <span style={{ color: '#ef4444', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                              💥 КРЭШ НА {crashMultiplier.toFixed(2)}x! СВИН УПАЛ В ЛУЖУ
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Multiplayer Control Bar */}
-                      <div style={{ background: '#161a24', padding: 16, borderRadius: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <div style={{ flex: 1, minWidth: 150 }}>
-                          <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА SV₽:</label>
-                          <input
-                            type="text"
-                            className="wl-stake-input"
-                            value={crashStake}
-                            disabled={crashPhase !== 'betting'}
-                            onChange={e => setCrashStake(e.target.value.replace(',', '.'))}
-                          />
-                        </div>
-
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {['100', '200', '500', '1000'].map(val => (
-                            <button
-                              key={val}
-                              className="wl-quick-btn"
-                              style={{ padding: '8px 12px' }}
-                              disabled={crashPhase !== 'betting'}
-                              onClick={() => setCrashStake(val)}
-                            >
-                              +{val}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div style={{ width: 120 }}>
-                          <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>АВТО-ВЫВОД (X):</label>
-                          <input
-                            type="text"
-                            className="wl-stake-input"
-                            placeholder="Напр. 2.00"
-                            value={crashAutoCashout}
-                            disabled={crashPhase !== 'betting'}
-                            onChange={e => setCrashAutoCashout(e.target.value.replace(',', '.'))}
-                          />
-                        </div>
-
-                        <div style={{ width: '100%', maxWidth: 260 }}>
-                          {crashPhase === 'betting' && (
-                            !myCrashBet ? (
-                              <button
-                                className="wl-btn-orange"
-                                style={{ width: '100%', height: 48, fontSize: 15, fontWeight: 800, borderRadius: 10 }}
-                                onClick={placeCrashBet}
-                              >
-                                ПОСТАВИТЬ НА РАУНД 🚀
-                              </button>
-                            ) : (
-                              <button
-                                className="wl-btn-cancel"
-                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, background: '#3b1d22', color: '#ff7878', border: '1px solid #ef4444' }}
-                                onClick={cancelCrashBet}
-                              >
-                                ОТМЕНИТЬ ({fmt(myCrashBet.stake)}) ✖
-                              </button>
-                            )
-                          )}
-
-                          {crashPhase === 'flying' && (
-                            myCrashBet && !myCrashBet.cashedOutMul ? (
-                              <button
-                                className="wl-btn-green pulse"
-                                style={{ width: '100%', height: 48, fontSize: 15, fontWeight: 800, borderRadius: 10 }}
-                                onClick={cashoutCrash}
-                              >
-                                ЗАБРАТЬ {fmt(r2(myCrashBet.stake * crashMultiplier))} 💰
-                              </button>
-                            ) : myCrashBet && myCrashBet.cashedOutMul ? (
-                              <button
-                                disabled
-                                className="wl-btn-green"
-                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.9, cursor: 'default' }}
-                              >
-                                ЗАБРАНО {fmt(myCrashBet.winAmount)} (x{myCrashBet.cashedOutMul.toFixed(2)}) ✅
-                              </button>
-                            ) : (
-                              <button
-                                disabled
-                                className="wl-btn-orange"
-                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.5, cursor: 'not-allowed' }}
-                              >
-                                РАУНД В ПРОЦЕССЕ... 🚀
-                              </button>
-                            )
-                          )}
-
-                          {crashPhase === 'crashed' && (
-                            myCrashBet && myCrashBet.cashedOutMul ? (
-                              <button
-                                disabled
-                                className="wl-btn-green"
-                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.9, cursor: 'default' }}
-                              >
-                                ВЫИГРЫШ {fmt(myCrashBet.winAmount)} 🏆
-                              </button>
-                            ) : myCrashBet && !myCrashBet.cashedOutMul ? (
-                              <button
-                                disabled
-                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, background: '#2c1417', color: '#ef4444', border: '1px solid #ef4444', opacity: 0.85, cursor: 'default' }}
-                              >
-                                СТАВКА СГОРЕЛА 💥
-                              </button>
-                            ) : (
-                              <button
-                                disabled
-                                className="wl-btn-orange"
-                                style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.5, cursor: 'not-allowed' }}
-                              >
-                                КРЭШ НА {crashMultiplier.toFixed(2)}x 💥
-                              </button>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right Column: Live Online Multiplayer Bets Sidebar */}
-                    <div className="wl-crash-sidebar">
-                      <div className="wl-crash-sidebar-header">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Users size={16} color="var(--org)" />
-                          <span>ОНЛАЙН СТАВКИ ({liveCrashBets.length})</span>
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--tx-muted)', fontWeight: 700 }}>
-                          Банк: {fmt(liveCrashBets.reduce((acc, b) => acc + Number(b.stake || 0), 0))}
-                        </div>
-                      </div>
-
-                      <div className="wl-crash-sidebar-list">
-                        {liveCrashBets.length === 0 ? (
-                          <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--tx-muted)', fontSize: 12 }}>
-                            {crashPhase === 'betting' ? 'Делайте ставки на раунд! 🚀' : 'В этом раунде нет ставок'}
-                          </div>
-                        ) : (
-                          liveCrashBets.map(b => {
-                            const isMine = b.user_id === currentUser?.id
-                            const cashedMul = b.cashed_out_mul != null ? Number(b.cashed_out_mul) : null
-                            const winAmount = b.win_amount != null ? Number(b.win_amount) : null
-                            const isWon = cashedMul !== null
-                            const isCrashed = crashPhase === 'crashed' && !isWon
-                            return (
-                              <div
-                                key={b.id}
-                                className={`wl-crash-bet-card ${isMine ? 'me' : ''} ${isWon ? 'won' : ''} ${isCrashed ? 'crashed' : ''}`}
-                              >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                                  <UserAvatar avatar={b.avatar} name={b.username} size={26} />
-                                  <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    <div style={{ fontWeight: 800, fontSize: 12, color: isMine ? 'var(--org)' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                      {b.username} {isMine && '(Вы)'}
-                                    </div>
-                                    {b.auto_cashout != null && cashedMul === null && (
-                                      <div style={{ fontSize: 10, color: 'var(--tx-muted)' }}>
-                                        авто: x{Number(b.auto_cashout).toFixed(2)}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
-                                  <div style={{ fontWeight: 700, fontSize: 12 }}>
-                                    {fmt(Number(b.stake))}
-                                  </div>
-                                  <div style={{ fontSize: 11, fontWeight: 800 }}>
-                                    {isWon ? (
-                                      <span style={{ color: 'var(--green)' }}>+{fmt(winAmount || 0)} (x{cashedMul!.toFixed(2)})</span>
-                                    ) : isCrashed ? (
-                                      <span style={{ color: '#ef4444' }}>0 SV₽ 💥</span>
-                                    ) : (
-                                      <span style={{ color: 'var(--org)' }}>🚀 В игре</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })()}
+              {gamesTab === 'crash' && (
+                <CrashArena
+                  crashMultiplier={crashMultiplier}
+                  crashPhase={crashPhase}
+                  crashCountdown={crashCountdown}
+                  crashRound={crashRound}
+                  crashHistory={crashHistory}
+                  myCrashBet={myCrashBet}
+                  liveCrashBets={liveCrashBets}
+                  crashStake={crashStake}
+                  setCrashStake={setCrashStake}
+                  crashAutoCashout={crashAutoCashout}
+                  setCrashAutoCashout={setCrashAutoCashout}
+                  placeCrashBet={placeCrashBet}
+                  cancelCrashBet={cancelCrashBet}
+                  cashoutCrash={cashoutCrash}
+                  currentUser={currentUser}
+                />
+              )}
 
               {/* ROULETTE (КОРЫТО ФОРТУНЫ) */}
               {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} />}
@@ -2593,522 +1657,58 @@ export default function App() {
               {gamesTab === 'ruble' && <RubleChart bal={S.bal} onPredict={rublePredict} />}
 
               {gamesTab === 'roulette' && (
-                <div className="wl-banner-card highlight" style={{ padding: '28px 24px 34px', textAlign: 'center' }}>
-                  <span className="wl-banner-tag">ИГРЫ 24/7 • БЫСТРЫЕ ИСХОДЫ</span>
-                  <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>
-                    КОРЫТО ФОРТУНЫ 🐷
-                  </h2>
-                  <p style={{ color: 'var(--tx-secondary)', fontSize: 14, marginBottom: 18, maxWidth: 520, margin: '0 auto 18px' }}>
-                    Испытайте удачу! Ставка 100 SV₽. Крутите корыто и забирайте моментальные множители от x0 до x10!
-                  </p>
-
-                  {/* Physics-Based SVG Fortune Wheel */}
-                  <div className="wl-wheel-container">
-                    {/* Outer Rim with LED Bulbs */}
-                    <div className="wl-wheel-rim">
-                      {Array.from({ length: 16 }).map((_, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            position: 'absolute',
-                            width: 8,
-                            height: 8,
-                            borderRadius: '50%',
-                            background: spinning ? (i % 2 === 0 ? '#ff7700' : '#ffd700') : '#475569',
-                            boxShadow: spinning ? '0 0 8px #ff7700' : 'none',
-                            top: `${50 - 48 * Math.cos((i * 22.5 * Math.PI) / 180)}%`,
-                            left: `${50 + 48 * Math.sin((i * 22.5 * Math.PI) / 180)}%`,
-                            transform: 'translate(-50%, -50%)',
-                            transition: 'all 0.2s'
-                          }}
-                        />
-                      ))}
-                    </div>
-
-                    {/* Golden Pointer at 12 o'clock */}
-                    <div className={`wl-wheel-pointer ${spinning ? 'ticking' : ''}`}>
-                      <svg width="32" height="36" viewBox="0 0 32 36">
-                        <path d="M 16 36 L 4 6 Q 16 0 28 6 Z" fill="#fbbf24" stroke="#b45309" strokeWidth="2" filter="drop-shadow(0 2px 4px rgba(0,0,0,0.8))" />
-                        <circle cx="16" cy="10" r="4" fill="#fff" />
-                      </svg>
-                    </div>
-
-                    {/* Rotating SVG Wheel */}
-                    <div
-                      style={{
-                        width: 290,
-                        height: 290,
-                        borderRadius: '50%',
-                        transform: `rotate(${wheelRotation}deg)`,
-                        transition: spinning ? 'transform 4.2s cubic-bezier(0.12, 0.8, 0.2, 1)' : 'none'
-                      }}
-                    >
-                      <svg viewBox="0 0 300 300" className="wl-wheel-svg">
-                        {ROULETTE_SECTORS.map((sec, idx) => {
-                          const r1 = (idx * WHEEL_SEC_DEG * Math.PI) / 180
-                          const r2 = ((idx + 1) * WHEEL_SEC_DEG * Math.PI) / 180
-                          const x1 = 150 + 145 * Math.cos(r1)
-                          const y1 = 150 + 145 * Math.sin(r1)
-                          const x2 = 150 + 145 * Math.cos(r2)
-                          const y2 = 150 + 145 * Math.sin(r2)
-                          const path = `M 150 150 L ${x1} ${y1} A 145 145 0 0 1 ${x2} ${y2} Z`
-
-                          const midAngle = (idx + 0.5) * WHEEL_SEC_DEG
-                          const midRad = (midAngle * Math.PI) / 180
-                          const textX = 150 + 94 * Math.cos(midRad)
-                          const textY = 150 + 94 * Math.sin(midRad)
-
-                          const isWinner = wonSectorIdx === idx && !spinning
-
-                          return (
-                            <g key={idx}>
-                              <path
-                                d={path}
-                                fill={isWinner ? '#f59e0b' : sec.bg}
-                                stroke="rgba(255,255,255,0.18)"
-                                strokeWidth="1.5"
-                                style={{
-                                  transition: 'fill 0.3s',
-                                  filter: isWinner ? 'drop-shadow(0 0 12px #f59e0b)' : 'none'
-                                }}
-                              />
-                              <g transform={`rotate(${midAngle + 90}, ${textX}, ${textY})`}>
-                                <text
-                                  x={textX}
-                                  y={textY - 8}
-                                  fill="#fff"
-                                  fontSize="16"
-                                  textAnchor="middle"
-                                  dominantBaseline="central"
-                                >
-                                  {sec.emoji}
-                                </text>
-                                <text
-                                  x={textX}
-                                  y={textY + 12}
-                                  fill={isWinner ? '#000' : sec.color}
-                                  fontSize="13"
-                                  fontWeight="800"
-                                  fontFamily="var(--font-d)"
-                                  textAnchor="middle"
-                                  dominantBaseline="central"
-                                >
-                                  {sec.label}
-                                </text>
-                              </g>
-                            </g>
-                          )
-                        })}
-                      </svg>
-                    </div>
-
-                    {/* Central Mascot Hub */}
-                    <div className="wl-wheel-center-hub" onClick={!spinning ? spinRoulette : undefined} title="Крутить корыто">
-                      <PigLogo />
-                      <span style={{ fontSize: 9, fontWeight: 800, color: '#f59e0b', marginTop: 2, letterSpacing: 0.5 }}>SWIN</span>
-                    </div>
-                  </div>
-
-                  {/* Result Box */}
-                  {rouletteResult && (
-                    <div style={{
-                      padding: '12px 20px',
-                      borderRadius: 12,
-                      background: 'linear-gradient(135deg, #171d2b, #1f2738)',
-                      border: '1px solid var(--org)',
-                      color: '#fff',
-                      fontSize: 16,
-                      fontWeight: 800,
-                      marginBottom: 20,
-                      display: 'inline-block',
-                      boxShadow: '0 4px 20px rgba(255, 85, 0, 0.25)'
-                    }}>
-                      {rouletteResult}
-                    </div>
-                  )}
-
-                  <div>
-                    <button
-                      className="wl-btn-orange"
-                      style={{ fontSize: 16, padding: '14px 42px', borderRadius: 12, fontWeight: 800 }}
-                      disabled={spinning}
-                      onClick={spinRoulette}
-                    >
-                      {spinning ? 'Корыто крутится...' : 'Крутить за 100 SV₽ 🎰'}
-                    </button>
-                  </div>
-                </div>
+                <RouletteWheel
+                  spinning={spinning}
+                  wheelRotation={wheelRotation}
+                  wonSectorIdx={wonSectorIdx}
+                  rouletteResult={rouletteResult}
+                  spinRoulette={spinRoulette}
+                />
               )}
             </div>
           )}
 
           {/* C. ESPORTS STREAM VIEW */}
           {view === 'esports' && (
-            <div>
-              <div style={{ background: '#141822', padding: '14px 18px', borderRadius: 12, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: 12, color: 'var(--org)', fontWeight: 800 }}>THUNDERPICK WORLD CHAMPIONSHIP • ГРАНД-ФИНАЛ</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, marginTop: 2 }}>
-                    FURIA Piglets vs BetBoom Svin Team
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <div style={{ fontSize: 24, fontFamily: 'var(--font-d)', fontWeight: 800, color: 'var(--org)' }}>
-                    1 : 0
-                  </div>
-                  <div className="wl-badge-count" style={{ background: '#22c55e22', color: '#22c55e', borderColor: '#22c55e55' }}>
-                    КАРТА 2 • ПЕРЕРЫВ
-                  </div>
-                </div>
-              </div>
-
-              <div className="wl-esports-arena">
-                <div className="wl-stream-player">
-                  <div className="wl-stream-hud">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '4px 10px', borderRadius: 999 }}>
-                      <div className="live-badge-dot" />
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>LIVE 1080p • Прямой эфир</span>
-                    </div>
-                    <div style={{ background: 'rgba(0,0,0,0.6)', padding: '4px 10px', borderRadius: 999, fontSize: 12 }}>
-                      Карта: Dust 2
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 64, animation: streamPlaying ? 'pulse 2s infinite' : 'none' }}>
-                      🐷🎮
-                    </div>
-                    <div style={{ fontFamily: 'var(--font-d)', fontWeight: 800, fontSize: 22, marginTop: 12 }}>
-                      SWIN-ESPORTS ARENA
-                    </div>
-                    <div style={{ color: 'var(--tx-secondary)', fontSize: 13, marginTop: 4 }}>
-                      {streamPlaying ? 'Прямой эфир турнира CS2 • Идёт разминка' : 'Трансляция на паузе'}
-                    </div>
-                  </div>
-
-                  <div className="wl-stream-bottom-bar">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <button onClick={() => setStreamPlaying(p => !p)} style={{ color: '#fff' }}>
-                        {streamPlaying ? <Pause size={20} /> : <Play size={20} />}
-                      </button>
-                      <button style={{ color: '#fff' }}>
-                        <Volume2 size={20} />
-                      </button>
-                      <span style={{ fontSize: 12, color: 'var(--tx-secondary)' }}>01:24:19</span>
-                    </div>
-                    <div>
-                      <button style={{ color: '#fff' }}>
-                        <Maximize2 size={18} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="wl-esports-stats-panel">
-                  <div style={{ fontWeight: 800, fontSize: 15, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
-                    Командная статистика
-                  </div>
-
-                  <div className="wl-stat-row">
-                    <div className="wl-stat-labels">
-                      <span>FURIA: 55%</span>
-                      <span>Винрейт на карте</span>
-                      <span>50% :BetBoom</span>
-                    </div>
-                    <div className="wl-stat-bar-outer">
-                      <div className="wl-stat-bar-team1" style={{ width: '55%' }} />
-                      <div className="wl-stat-bar-team2" style={{ width: '45%' }} />
-                    </div>
-                  </div>
-
-                  <div className="wl-stat-row">
-                    <div className="wl-stat-labels">
-                      <span>FURIA: 58%</span>
-                      <span>Пистолетные раунды</span>
-                      <span>52% :BetBoom</span>
-                    </div>
-                    <div className="wl-stat-bar-outer">
-                      <div className="wl-stat-bar-team1" style={{ width: '58%' }} />
-                      <div className="wl-stat-bar-team2" style={{ width: '42%' }} />
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                      <MessageSquare size={14} /> Чат матча
-                    </div>
-                    <div style={{ maxHeight: 130, minHeight: 70, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, marginBottom: 8 }}>
-                      {chatMessages.length === 0 ? (
-                        <div style={{ color: 'var(--tx-muted)', textAlign: 'center', padding: '15px 0' }}>Сообщений пока нет. Будьте первыми!</div>
-                      ) : (
-                        chatMessages.map((msg, i) => (
-                          <div key={i} style={{ background: '#1a1f2b', padding: '4px 8px', borderRadius: 6, color: '#e2e8f0' }}>
-                            {msg}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <form
-                      onSubmit={e => {
-                        e.preventDefault()
-                        if (!esportsChatInput.trim()) return
-                        const sender = currentUser?.username || 'Гость'
-                        setChatMessages(prev => [...prev.slice(-30), `${sender}: ${esportsChatInput.trim()}`])
-                        setEsportsChatInput('')
-                      }}
-                      style={{ display: 'flex', gap: 6 }}
-                    >
-                      <input
-                        type="text"
-                        className="wl-search-input"
-                        placeholder="Написать в чат..."
-                        value={esportsChatInput}
-                        onChange={e => setEsportsChatInput(e.target.value)}
-                        style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
-                      />
-                      <button
-                        type="submit"
-                        className="wl-btn-orange"
-                        style={{ padding: '4px 12px', fontSize: 12, height: 32, borderRadius: 8 }}
-                      >
-                        Отправить
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <EsportsView
+              streamPlaying={streamPlaying}
+              setStreamPlaying={setStreamPlaying}
+              chatMessages={chatMessages}
+              setChatMessages={setChatMessages}
+              esportsChatInput={esportsChatInput}
+              setEsportsChatInput={setEsportsChatInput}
+              currentUser={currentUser}
+            />
           )}
 
           {/* D. WALLET / PROFILE VIEW */}
           {view === 'wallet' && (
-            <div style={{ maxWidth: 860, margin: '0 auto' }}>
-              <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
-                Мой счёт и баланс
-              </h2>
-
-              <DailyRewards daily={daily} onClaim={claimDaily} />
-
-              <div className="wl-banner-card" style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, color: 'var(--tx-secondary)' }}>Доступный виртуальный баланс:</div>
-                <div style={{ fontFamily: 'var(--font-d)', fontSize: 36, fontWeight: 800, color: 'var(--org)', margin: '8px 0 16px' }}>
-                  {fmt(S.bal)}
-                </div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <button className="wl-btn-orange" onClick={() => addVirtualMoney(5000)}>
-                    + 5 000 SV₽
-                  </button>
-                  <button className="wl-btn-orange" style={{ background: '#3b82f6' }} onClick={() => addVirtualMoney(25000)}>
-                    + 25 000 SV₽
-                  </button>
-                  <button className="wl-btn-orange" style={{ background: '#7c3aed' }} onClick={claimCashback}>
-                    💰 Забрать кэшбэк
-                  </button>
-                  <button
-                    className="wl-sidebar-quick-btn"
-                    style={{ border: '1px solid var(--border)' }}
-                    onClick={() => {
-                      if (confirm('Сбросить весь баланс и историю ставок?')) {
-                        if (currentUser) {
-                          supabase.rpc('self_reset_balance').then(({ data, error }) => {
-                            if (!error && data) setS({ ...freshState(), bal: Number(data.bal) })
-                            else notify('❌ Не удалось сбросить баланс')
-                          })
-                        } else {
-                          setS(freshState())
-                        }
-                        setSelectedBet(null)
-                        notify('Прогресс сброшен к 10 000 SV₽')
-                      }
-                    }}
-                  >
-                    Сбросить всё
-                  </button>
-                </div>
-              </div>
-
-              <h3 style={{ fontSize: 17, fontWeight: 700, margin: '24px 0 12px' }}>История ставок</h3>
-              <div className="wl-table-container">
-                {S.bets.length === 0 ? (
-                  <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-muted)' }}>
-                    Ставок пока нет. Загляните в линию и выберите исход!
-                  </div>
-                ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ background: '#171b26', borderBottom: '1px solid var(--border)', textAlign: 'left' }}>
-                        <th style={{ padding: '10px 14px' }}>Событие</th>
-                        <th style={{ padding: '10px 14px' }}>Ставка</th>
-                        <th style={{ padding: '10px 14px' }}>Коэф.</th>
-                        <th style={{ padding: '10px 14px' }}>Статус</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {S.bets.map((b: any) => {
-                        const ev = allEvents.find(e => e.id === b.ev)
-                        const statusColor = b.state === 'won' ? 'var(--green)' : b.state === 'lost' ? '#ef4444' : 'var(--org)'
-                        const statusText = b.state === 'won' ? 'ВЫИГРЫШ' : b.state === 'lost' ? 'ПРОИГРЫШ' : b.state === 'refund' ? 'ВОЗВРАТ' : 'В ИГРЕ'
-
-                        return (
-                          <tr key={b.id} style={{ borderBottom: '1px solid #1c2230' }}>
-                            <td style={{ padding: '10px 14px' }}>
-                              <div style={{ fontWeight: 700 }}>{ev?.title || b.ev}</div>
-                              <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev?.out[b.i]?.[0] || 'Исход'}</div>
-                            </td>
-                            <td style={{ padding: '10px 14px', fontWeight: 700 }}>{fmt(b.stake)}</td>
-                            <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{b.odds.toFixed(2)}</td>
-                            <td style={{ padding: '10px 14px' }}>
-                              <span style={{ color: statusColor, fontWeight: 800, fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#191f2c' }}>
-                                {statusText}
-                              </span>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
+            <WalletView
+              daily={daily}
+              claimDaily={claimDaily}
+              balance={S.bal}
+              S={S}
+              allEvents={allEvents}
+              currentUser={currentUser}
+              addVirtualMoney={addVirtualMoney}
+              claimCashback={claimCashback}
+              onResetAll={handleResetAll}
+            />
           )}
 
           {/* E. PROMOS VIEW */}
           {view === 'promos' && (
-            <div>
-              <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
-                Акции и специальные предложения
-              </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
-                {PROMOS.map((p, idx) => (
-                  <div key={idx} className="wl-banner-card" style={{ minHeight: 180 }}>
-                    <span className="wl-banner-tag">АКЦИЯ #{idx + 1}</span>
-                    <div className="wl-banner-title" style={{ fontSize: 18 }}>
-                      {p[0]}
-                    </div>
-                    <div className="wl-banner-desc" style={{ maxWidth: '100%' }}>
-                      {p[1]}
-                    </div>
-                    <button
-                      className="wl-btn-orange"
-                      style={{ marginTop: 14, width: 'fit-content' }}
-                      onClick={() => notify(`Условия акции «${p[0]}» выполнены!`)}
-                    >
-                      Активировать
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <PromosView notify={notify} />
           )}
 
           {/* F. RESULTS VIEW */}
           {view === 'results' && (
-            <div>
-              <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
-                Результаты и архив событий
-              </h2>
-              <div className="wl-table-container">
-                {(() => {
-                  const finishedEvents = allEvents.filter(ev => S.st[ev.id]?.s === 'done' || S.st[ev.id]?.s === 'cancelled')
-                  if (finishedEvents.length === 0) {
-                    return (
-                      <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-muted)' }}>
-                        Завершённых событий пока нет. Итоги матчей появятся здесь после их расчёта администратором.
-                      </div>
-                    )
-                  }
-                  return finishedEvents.map(ev => {
-                    const state = S.st[ev.id]
-                    const isCancelled = state?.s === 'cancelled'
-                    return (
-                      <div key={ev.id} style={{ padding: 14, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev.league}</div>
-                          <div style={{ fontWeight: 700, fontSize: 15 }}>{ev.title}</div>
-                          <div style={{ fontSize: 12, color: 'var(--tx-secondary)' }}>{ev.desc}</div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontFamily: 'var(--font-d)', fontWeight: 800, fontSize: 18, color: 'var(--org)' }}>
-                            {ev.score || (isCancelled ? 'Отменён' : 'Завершено')}
-                          </div>
-                          <div style={{ fontSize: 11, color: isCancelled ? '#ef4444' : 'var(--green)' }}>
-                            {isCancelled ? 'Матч отменён (возврат ставок)' : state?.w !== undefined ? `Победил исход: ${ev.out[state.w]?.[0]}` : 'Итог зафиксирован'}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })
-                })()}
-              </div>
-            </div>
+            <ResultsView allEvents={allEvents} S={S} />
           )}
 
           {/* G. ABOUT VIEW */}
           {view === 'about' && (
-            <div style={{ maxWidth: 860, margin: '0 auto' }}>
-              <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
-                О компании SWINLINE
-              </h2>
-
-              {/* CEO Showcase Card */}
-              <div
-                className="wl-banner-card highlight"
-                style={{
-                  display: 'flex',
-                  gap: 22,
-                  alignItems: 'center',
-                  marginBottom: 20,
-                  padding: '20px 24px',
-                  borderRadius: 14,
-                  background: 'linear-gradient(135deg, #151a26, #1c2333)',
-                  border: '1px solid rgba(255, 85, 0, 0.35)',
-                  boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)'
-                }}
-              >
-                <img
-                  src={ceoPhoto}
-                  alt="Генеральный директор SWINLINE"
-                  style={{
-                    width: 120,
-                    height: 150,
-                    objectFit: 'cover',
-                    borderRadius: 12,
-                    border: '2px solid var(--org)',
-                    boxShadow: '0 4px 20px var(--org-glow)',
-                    flexShrink: 0
-                  }}
-                />
-                <div>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255, 85, 0, 0.15)', color: 'var(--org)', border: '1px solid rgba(255, 85, 0, 0.3)', padding: '4px 12px', borderRadius: 999, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', marginBottom: 8 }}>
-                    <ShieldCheck size={14} /> Руководство компании
-                  </div>
-                  <h3 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginBottom: 6, fontFamily: 'var(--font-d)' }}>
-                    Генеральный директор SWINLINE
-                  </h3>
-                  <div style={{ fontSize: 14, color: 'var(--tx-secondary)', lineHeight: 1.6 }}>
-                    Основатель и генеральный директор букмекерской платформы SWINLINE. Лично курирует честность выплат, надёжность алгоритмов линии, организацию турниров и стратегическое развитие платформы нового поколения.
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 24 }}>
-                {Array.from({ length: ABOUT.length / 2 }).map((_, i) => (
-                  <div key={i} className="wl-banner-card">
-                    <span className="wl-banner-tag">{ABOUT[i * 2]}</span>
-                    <div style={{ fontSize: 14, color: 'var(--tx-secondary)', marginTop: 8, lineHeight: 1.6 }}>
-                      {ABOUT[i * 2 + 1]}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="wl-banner-card highlight">
-                <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Правила платформы</h3>
-                <p style={{ fontSize: 13, color: 'var(--tx-secondary)', lineHeight: 1.6 }}>
-                  SWINLINE — интерактивная игровая платформа. Внутренняя расчетная единица: SV₽. Стартовый баланс: {fmt(START)}, минимальная ставка: {MINBET} SV₽. Все игровые расчеты производятся в единицах SV₽.
-                </p>
-              </div>
-            </div>
+            <AboutView />
           )}
         </main>
       </div>
