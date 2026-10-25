@@ -74,6 +74,8 @@ const freshState = () => ({
 import Plinko from './Plinko'
 import MudPuddles from './MudPuddles'
 import RubleChart, { type RubleResult } from './RubleChart'
+import CasinoStrip, { JackpotOverlay } from './CasinoStrip'
+import VipBadge from './VipBadge'
 import DailyRewards from './DailyRewards'
 import { useDaily } from './useDaily'
 function loadJSON<T>(key: string, fallback: T): T {
@@ -294,6 +296,7 @@ export default function App() {
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
   const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble'>('crash')
+  const [jackpotWin, setJackpotWin] = useState<number | null>(null)
   const [selectedSport, setSelectedSport] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
@@ -1024,6 +1027,7 @@ export default function App() {
     const sector = ROULETTE_SECTORS[winningIdx]
     const win = Number(data.win)
     const bal = Number(data.bal)
+    const jp = Number(data.jackpot || 0)
 
     setS(prev => {
       const next = structuredClone(prev)
@@ -1031,9 +1035,11 @@ export default function App() {
       if (win > 0) {
         next.log.unshift({ t: Date.now(), x: `Выигрыш в «Корыто Фортуны» (${sector.label} • ${sector.title})`, d: win })
       }
+      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
       next.bal = bal
       return next
     })
+    if (jp > 0) setJackpotWin(jp)
 
     // Calculate rotation to land winningIdx at 270 deg (top pointer)
     const sectorCenter = (winningIdx + 0.5) * WHEEL_SEC_DEG
@@ -1068,18 +1074,37 @@ export default function App() {
     notify(`🎁 +${fmt(res.reward)} (серия ${res.day} дн.)`)
   }
 
+  // Кэшбэк: раз в сутки, процент вчерашних проигрышей по VIP-уровню
+  const claimCashback = async () => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return }
+    const { data, error } = await supabase.rpc('claim_cashback')
+    if (error || !data) { notify(`❌ ${error?.message || 'Кэшбэк недоступен'}`); return }
+    const win = Number(data.win)
+    setS(prev => {
+      const next = structuredClone(prev)
+      next.log.unshift({ t: Date.now(), x: `Кэшбэк ${data.pct}% • VIP «${data.levelName}»`, d: win })
+      next.bal = Number(data.bal)
+      return next
+    })
+    notify(`💰 Кэшбэк забран: +${win} SV₽ (${data.pct}% от вчерашних проигрышей)`)
+  }
+
   // Грязевые лужи: раунд, раскладка луж и выплаты — на сервере
   const puddlesStart = async (stake: number, mines: number): Promise<string | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
     if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
     const { data, error } = await supabase.rpc('puddles_start', { p_stake: stake, p_mines: mines })
     if (error || !data) { notify(`❌ ${error?.message || 'Не удалось начать раунд'}`); return null }
+    const jp = Number(data.jackpot || 0)
     setS(prev => {
       const next = structuredClone(prev)
       next.log.unshift({ t: Date.now(), x: 'Ставка в «Грязевые лужи»', d: -stake })
+      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
       next.bal = Number(data.bal)
       return next
     })
+    if (jp > 0) setJackpotWin(jp)
     return String(data.round_id)
   }
 
@@ -1128,14 +1153,17 @@ export default function App() {
     if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
     const { data, error } = await supabase.rpc('plinko_drop', { p_stake: stake, p_risk: risk })
     if (error || !data) { notify(`❌ ${error?.message || 'Не удалось бросить'}`); return null }
+    const jp = Number(data.jackpot || 0)
     setS(prev => {
       const next = structuredClone(prev)
       next.log.unshift({ t: Date.now(), x: 'Ставка в «Пяточок-Плинко»', d: -stake })
       const win = Number(data.win)
       if (win > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Пяточок-Плинко» (x${data.mul})`, d: win })
+      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
       next.bal = Number(data.bal)
       return next
     })
+    if (jp > 0) setJackpotWin(jp)
     return { slot: Number(data.slot), mul: Number(data.mul), win: Number(data.win) }
   }
 
@@ -1145,14 +1173,17 @@ export default function App() {
     if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
     const { data, error } = await supabase.rpc('ruble_predict', { p_side: side, p_stake: stake })
     if (error || !data) { notify(`❌ ${error?.message || 'Не удалось сделать ставку'}`); return null }
+    const jp = Number(data.jackpot || 0)
     setS(prev => {
       const next = structuredClone(prev)
       next.log.unshift({ t: Date.now(), x: `Ставка на «${side === 'up' ? 'вверх' : 'вниз'}» в «Курс рубля»`, d: -stake })
       const payout = Number(data.payout)
       if (payout > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Курс рубля» (x${data.mul})`, d: payout })
+      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
       next.bal = Number(data.bal)
       return next
     })
+    if (jp > 0) setJackpotWin(jp)
     return {
       start: Number(data.start), final: Number(data.final), resolveMs: Number(data.resolve_ms),
       dir: data.dir as RubleResult['dir'], win: Boolean(data.win),
@@ -1635,6 +1666,7 @@ export default function App() {
                     <span style={{ fontSize: 10, color: isAdmin ? '#f59e0b' : 'var(--tx-muted)' }}>
                       {currentUser.title}
                     </span>
+                    <VipBadge userId={currentUser.id} />
                   </div>
                 </div>
 
@@ -2152,6 +2184,8 @@ export default function App() {
           {/* B. GAMES 24/7 (CRASH & ROULETTE) */}
           {view === 'games24' && (
             <div style={{ maxWidth: 1060, margin: '0 auto' }}>
+              <CasinoStrip />
+              <JackpotOverlay amount={jackpotWin} onClose={() => setJackpotWin(null)} />
               {/* Game Mode Switcher */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
                 <button
@@ -2847,6 +2881,9 @@ export default function App() {
                   <button className="wl-btn-orange" style={{ background: '#3b82f6' }} onClick={() => addVirtualMoney(25000)}>
                     + 25 000 SV₽
                   </button>
+                  <button className="wl-btn-orange" style={{ background: '#7c3aed' }} onClick={claimCashback}>
+                    💰 Забрать кэшбэк
+                  </button>
                   <button
                     className="wl-sidebar-quick-btn"
                     style={{ border: '1px solid var(--border)' }}
@@ -3262,6 +3299,7 @@ export default function App() {
                   <UserAvatar avatar={currentUser.avatar} name={currentUser.username} size={60} crown={isAdmin} />
                   <div>
                     <div style={{ fontSize: 18, fontWeight: 800 }}>{currentUser.username}</div>
+                    <VipBadge userId={currentUser.id} />
                     <div style={{ fontSize: 12, color: isAdmin ? '#f59e0b' : 'var(--tx-secondary)', fontWeight: 700 }}>
                       {currentUser.title}
                     </div>

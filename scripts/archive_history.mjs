@@ -8,7 +8,7 @@ const KEY = process.env.SUPABASE_SERVICE_KEY
 const BUCKET = 'history'
 
 const RISK_LABEL = { low: 'Тихое корыто', mid: 'Грязь', high: 'Бешеный хряк' }
-const GAME_EMOJI = { wheel: '🎡', plinko: '🐷', puddles: '🟤', crash: '🚀', ruble: '📉' }
+const GAME_EMOJI = { wheel: '🎡', plinko: '🐷', puddles: '🟤', crash: '🚀', ruble: '📉', jackpot: '🎰', cashback: '💰' }
 const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
 const MONTHS_NOM = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
 
@@ -90,6 +90,12 @@ function formatEntries(batch, users) {
     } else if (a.game === 'plinko') {
       const win = num(r.win) || 0
       text = `${hhmm(a.created_at)} ${GAME_EMOJI.plinko} Плинко — ${u}: ставка ${fmt(r.stake)} (${RISK_LABEL[r.risk] || r.risk}), ячейка ${r.slot}, x${num(r.mul)}, ${win > 0 ? `**+${fmt(win)}**` : 'мимо'}`
+    } else if (a.game === 'jackpot') {
+      const win = num(r.win) || 0
+      text = `${hhmm(a.created_at)} ${GAME_EMOJI.jackpot} ХРЯК-ПОТ — **${u} сорвал весь горшок: +${fmt(win)} SV₽**`
+    } else if (a.game === 'cashback') {
+      const win = num(r.win) || 0
+      text = `${hhmm(a.created_at)} ${GAME_EMOJI.cashback} Кэшбэк — ${u}: вернул ${fmt(r.pct)}% от проигранных ${fmt(r.loss)} SV₽, **+${fmt(win)}** (VIP ур.${r.level})`
     } else if (a.game === 'ruble') {
       const win = num(r.win) || 0
       const start0 = num(r.start) || 100

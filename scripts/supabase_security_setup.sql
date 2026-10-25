@@ -1548,3 +1548,309 @@ DO $cron$ BEGIN
     PERFORM cron.schedule('ruble-tape', '*/10 * * * * *', $job$ SELECT public.ruble_ensure() $job$);
   END IF;
 END $cron$;
+
+-- ====================================================================
+-- 14. НАСТОЯЩЕЕ КАЗИНО (новое): Хряк-пот, VIP-уровни, кэшбэк, лента выигрышей.
+--     casino_take(p_stake) зовётся ставочными RPC (колесо/плинко/лужи/курс):
+--     копит оборот в profiles.total_wagered, кладёт 1% ставки в джекпот и
+--     с шансом 1/3000 ссыпает весь горшок счастливчику. Вызвать casino_take
+--     напрямую нельзя (EXECUTE отозван) — только через игровые RPC.
+--     vip_level/claim_cashback/recent_wins — зеркало src/casinoLogic.ts.
+--     Определения wheel_spin/plinko_drop/puddles_start/ruble_predict ниже
+--     перекрывают версии из секций 10 и 13 (скрипт идемпотентен).
+-- ====================================================================
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS total_wagered numeric NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS public.casino_jackpot (
+  id boolean PRIMARY KEY DEFAULT true CHECK (id),
+  pot numeric NOT NULL DEFAULT 50000,
+  last_winner text,
+  last_win numeric,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.casino_jackpot ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS jackpot_read_all ON public.casino_jackpot;
+CREATE POLICY jackpot_read_all ON public.casino_jackpot FOR SELECT USING (true);
+INSERT INTO public.casino_jackpot (id, pot) VALUES (true, 50000) ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.cashback_claims (
+  user_id uuid PRIMARY KEY,
+  last_claim date NOT NULL
+);
+ALTER TABLE public.cashback_claims ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.vip_level(p_wagered numeric)
+RETURNS integer
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN p_wagered >= 5000000 THEN 4
+    WHEN p_wagered >= 1000000 THEN 3
+    WHEN p_wagered >= 250000 THEN 2
+    WHEN p_wagered >= 50000 THEN 1
+    ELSE 0
+  END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.casino_take(p_stake numeric)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_pot numeric;
+  v_hit numeric := 0;
+  v_name text;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN jsonb_build_object('jackpot', 0);
+  END IF;
+  UPDATE public.profiles SET total_wagered = total_wagered + p_stake WHERE id = auth.uid();
+  UPDATE public.casino_jackpot
+    SET pot = pot + round(p_stake * 0.01, 2), updated_at = now()
+    WHERE id RETURNING pot INTO v_pot;
+  IF random() < 1.0 / 3000 THEN
+    SELECT username INTO v_name FROM public.profiles WHERE id = auth.uid();
+    v_hit := v_pot;
+    UPDATE public.casino_jackpot
+      SET pot = 50000, last_winner = v_name, last_win = v_hit, updated_at = now()
+      WHERE id;
+    UPDATE public.profiles SET bal = bal + v_hit, updated_at = now()
+      WHERE id = auth.uid();
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'jackpot', jsonb_build_object('win', v_hit));
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  SELECT pot INTO v_pot FROM public.casino_jackpot WHERE id;
+  RETURN jsonb_build_object('jackpot', v_hit, 'bal', v_bal, 'pot', v_pot);
+END $$;
+
+REVOKE EXECUTE ON FUNCTION public.casino_take(numeric) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.claim_cashback()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_claim record;
+  v_loss numeric;
+  v_level integer;
+  v_pct numeric;
+  v_pay numeric;
+  v_bal numeric;
+  v_wagered numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_claim FROM public.cashback_claims WHERE user_id = auth.uid();
+  IF v_claim.user_id IS NOT NULL AND v_claim.last_claim >= current_date THEN
+    RAISE EXCEPTION 'Кэшбэк уже забран сегодня — приходи завтра';
+  END IF;
+  -- вчерашний чистый проигрыш по ставочным играм (крэш считается отдельно)
+  SELECT coalesce(sum((result->>'stake')::numeric), 0)
+       - coalesce(sum(coalesce(result->>'win', '0')::numeric), 0)
+    INTO v_loss
+  FROM public.game_attempts
+  WHERE user_id = auth.uid()
+    AND created_at >= current_date - interval '1 day'
+    AND created_at < current_date
+    AND game IN ('wheel', 'plinko', 'puddles', 'ruble');
+  IF coalesce(v_loss, 0) < 10 THEN
+    RAISE EXCEPTION 'Вчера ты не проиграл достаточно — кэшбэка нет (и это хорошо)';
+  END IF;
+  SELECT total_wagered INTO v_wagered FROM public.profiles WHERE id = auth.uid();
+  v_level := public.vip_level(v_wagered);
+  v_pct := 3 + v_level;
+  v_pay := round(v_loss * v_pct / 100.0, 2);
+  UPDATE public.profiles SET bal = bal + v_pay, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.cashback_claims (user_id, last_claim) VALUES (auth.uid(), current_date)
+    ON CONFLICT (user_id) DO UPDATE SET last_claim = current_date;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'cashback', jsonb_build_object(
+      'win', v_pay, 'loss', v_loss, 'level', v_level, 'pct', v_pct));
+  RETURN jsonb_build_object('win', v_pay, 'loss', v_loss, 'level', v_level,
+    'levelName', (ARRAY['Бессовестный','Хряк','Свин-магнат','Барон','Свиновладыка'])[v_level + 1],
+    'pct', v_pct, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.recent_wins()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  RETURN (
+    SELECT coalesce(jsonb_agg(t ORDER BY t.at DESC), '[]'::jsonb)
+    FROM (
+      SELECT p.username, a.game, (a.result->>'win')::numeric AS win, a.created_at AS at
+      FROM (
+        SELECT user_id, game, result, created_at
+        FROM public.game_attempts
+        ORDER BY id DESC LIMIT 300
+      ) a JOIN public.profiles p ON p.id = a.user_id
+      WHERE coalesce((a.result->>'win')::numeric, 0) > 0
+      LIMIT 15
+    ) t
+  );
+END $$;
+
+GRANT EXECUTE ON FUNCTION public.claim_cashback() TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.recent_wins() TO authenticated, anon;
+GRANT SELECT ON public.casino_jackpot TO anon, authenticated;
+
+-- Ставочные RPC с казино-интеграцией (перекрывают определения из секций 10/13).
+CREATE OR REPLACE FUNCTION public.wheel_spin()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_idx integer;
+  v_mul numeric;
+  v_muls numeric[] := ARRAY[0,0.5,0,1.2,0,0.5,0,1.2,0,0.5,0,1.0,0,0.5,0,10];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < 100 THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  v_idx := floor(random() * array_length(v_muls, 1))::int;
+  v_mul := v_muls[v_idx + 1];
+  UPDATE public.profiles
+    SET bal = bal - 100 + round(100 * v_mul, 2), updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'wheel', jsonb_build_object('stake', 100, 'sector', v_idx, 'mul', v_mul, 'win', round(100 * v_mul, 2)));
+  v_casino := public.casino_take(100);
+  v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  RETURN jsonb_build_object('sector', v_idx, 'mul', v_mul, 'win', round(100 * v_mul, 2), 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.plinko_drop(p_stake numeric, p_risk text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_slot integer := 0;
+  v_i integer;
+  v_mul numeric;
+  v_low  numeric[] := ARRAY[6.6,3.3,1.9,1.3,1.1,1,0.5,1,1.1,1.3,1.9,3.3,6.6];
+  v_mid  numeric[] := ARRAY[21,6.5,2.8,1.4,1,0.8,0.5,0.8,1,1.4,2.8,6.5,21];
+  v_high numeric[] := ARRAY[65,15,4.2,1.9,0.9,0.6,0.3,0.6,0.9,1.9,4.2,15,65];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF p_risk NOT IN ('low', 'mid', 'high') THEN RAISE EXCEPTION 'Неизвестный уровень риска'; END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  FOR v_i IN 1..12 LOOP
+    IF random() < 0.5 THEN v_slot := v_slot + 1; END IF;
+  END LOOP;
+  v_mul := CASE p_risk
+    WHEN 'low' THEN v_low[v_slot + 1]
+    WHEN 'mid' THEN v_mid[v_slot + 1]
+    ELSE v_high[v_slot + 1]
+  END;
+  UPDATE public.profiles
+    SET bal = bal - p_stake + round(p_stake * v_mul, 2), updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'plinko', jsonb_build_object('stake', p_stake, 'risk', p_risk, 'slot', v_slot, 'mul', v_mul, 'win', round(p_stake * v_mul, 2)));
+  v_casino := public.casino_take(p_stake);
+  v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  RETURN jsonb_build_object('slot', v_slot, 'mul', v_mul, 'win', round(p_stake * v_mul, 2), 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_start(p_stake numeric, p_mines integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_id uuid;
+  v_cells integer[] := ARRAY[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24];
+  v_i integer; v_j integer; v_tmp integer;
+  v_mines integer[];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  IF p_mines < 1 OR p_mines > 24 THEN RAISE EXCEPTION 'Луж должно быть от 1 до 24'; END IF;
+  IF EXISTS (SELECT 1 FROM public.puddles_rounds WHERE user_id = auth.uid() AND status = 'play') THEN
+    RAISE EXCEPTION 'Сначала заверши текущий раунд';
+  END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+  FOR v_i IN REVERSE 24..1 LOOP
+    v_j := floor(random() * (v_i + 1))::int;
+    v_tmp := v_cells[v_i + 1]; v_cells[v_i + 1] := v_cells[v_j + 1]; v_cells[v_j + 1] := v_tmp;
+  END LOOP;
+  v_mines := v_cells[1:p_mines];
+  UPDATE public.profiles SET bal = bal - p_stake, updated_at = now() WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.puddles_rounds (user_id, stake, mines_count) VALUES (auth.uid(), p_stake, p_mines) RETURNING id INTO v_id;
+  INSERT INTO public.puddles_secrets (round_id, mines) VALUES (v_id, v_mines);
+  v_casino := public.casino_take(p_stake);
+  v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  RETURN jsonb_build_object('round_id', v_id, 'bal', v_bal, 'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.ruble_predict(p_side text, p_stake numeric)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_bal numeric;
+  v_tick timestamptz;
+  v_at numeric;
+  v_future numeric;
+  v_dir text;
+  v_win boolean;
+  v_mul numeric;
+  v_payout numeric;
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_side NOT IN ('up', 'down') THEN RAISE EXCEPTION 'Ставка только «вверх» или «вниз»'; END IF;
+  IF p_stake < 10 THEN RAISE EXCEPTION 'Минимальная ставка — 10 SV₽'; END IF;
+  SELECT bal INTO v_bal FROM public.profiles WHERE id = auth.uid();
+  IF v_bal IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+  IF v_bal < p_stake THEN RAISE EXCEPTION 'Недостаточно SV₽! Нажмите «+ Начислить SV₽».'; END IF;
+
+  PERFORM public.ruble_ensure(now() + interval '45 seconds');
+  v_tick := date_trunc('second', now());
+  SELECT price INTO v_at FROM public.ruble_prices WHERE tick_at = v_tick;
+  IF v_at IS NULL THEN
+    SELECT price INTO v_at FROM public.ruble_prices
+      WHERE tick_at < v_tick ORDER BY tick_at DESC LIMIT 1;
+  END IF;
+  SELECT price INTO v_future FROM public.ruble_prices
+    WHERE tick_at = v_tick + interval '30 seconds';
+  IF v_at IS NULL OR v_future IS NULL THEN
+    RAISE EXCEPTION 'Лента ещё не готова — попробуй через секунду';
+  END IF;
+
+  v_dir := CASE WHEN v_future > v_at THEN 'up' WHEN v_future < v_at THEN 'down' ELSE 'flat' END;
+  v_win := (p_side = 'up' AND v_dir = 'up') OR (p_side = 'down' AND v_dir = 'down');
+  v_mul := CASE WHEN v_win THEN 1.95 ELSE 0 END;
+  v_payout := round(p_stake * v_mul, 2);
+
+  UPDATE public.profiles
+    SET bal = bal - p_stake + v_payout, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'ruble', jsonb_build_object(
+      'stake', p_stake, 'side', p_side, 'start', v_at, 'final', v_future,
+      'dir', v_dir, 'mul', v_mul, 'win', v_payout));
+  v_casino := public.casino_take(p_stake);
+  v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+
+  RETURN jsonb_build_object('start', v_at, 'final', v_future,
+    'resolve_ms', (extract(epoch FROM (v_tick + interval '30 seconds')) * 1000)::bigint,
+    'dir', v_dir, 'win', v_win, 'mul', v_mul, 'payout', v_payout, 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+NOTIFY pgrst, 'reload schema';
