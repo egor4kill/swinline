@@ -2249,13 +2249,13 @@ TO authenticated, anon;
 --
 --     Экономика по умолчанию:
 --       АР — закрытый контур: только занос алмазной руды и вывод рудой,
---       обмена с SV₽ нет. Вывод от 5 АР, игра: 18% обвал, глубина до 30.
+--       обмена с SV₽ нет. Вывод от 1 АР, игра: 18% обвал, глубина до 30.
 --       Множитель считается как RTP / 0.82^глубина, поэтому возврат
 --       на любой глубине одинаковый (~97.6%), а не тает с каждым шагом. ====================================================================
 
 CREATE TABLE IF NOT EXISTS public.mc_config (
   id boolean PRIMARY KEY DEFAULT true CHECK (id),
-  min_withdraw integer NOT NULL DEFAULT 5,
+  min_withdraw integer NOT NULL DEFAULT 1,
   dig_bust numeric NOT NULL DEFAULT 0.18,
   dig_rtp numeric NOT NULL DEFAULT 0.9758,
   dig_max_depth integer NOT NULL DEFAULT 30,
@@ -2505,7 +2505,7 @@ BEGIN
   SELECT * INTO v_link FROM public.mc_links WHERE user_id = auth.uid();
   IF NOT FOUND THEN RAISE EXCEPTION 'Сначала привяжи Minecraft: /sw link КОД'; END IF;
   IF p_amount IS NULL OR p_amount < v_conf.min_withdraw THEN
-    RAISE EXCEPTION 'Минимум для вывода — % руды', v_conf.min_withdraw;
+    RAISE EXCEPTION 'Минимум для вывода — % АР', v_conf.min_withdraw;
   END IF;
 
   UPDATE public.mc_accounts
@@ -4126,7 +4126,7 @@ BEGIN
   SELECT * INTO v_link FROM public.mc_links WHERE user_id = auth.uid();
   IF NOT FOUND THEN RAISE EXCEPTION 'Сначала привяжи Minecraft: /sw link КОД'; END IF;
   IF p_amount IS NULL OR p_amount < v_conf.min_withdraw THEN
-    RAISE EXCEPTION 'Минимум для вывода — % руды', v_conf.min_withdraw;
+    RAISE EXCEPTION 'Минимум для вывода — % АР', v_conf.min_withdraw;
   END IF;
 
   UPDATE public.mc_accounts

@@ -124,7 +124,7 @@ Minecraft (Paper 26.3)                   Supabase                         Сай
 | обмен с SV₽ | запрещён | АР — закрытый контур |
 | ставка в игре/спорте | от 1 АР | SV₽ — от 10 |
 | выплаты в АР | до 2 знаков | x1.95 от 1 АР = 1.95 АР |
-| `min_withdraw` | 5 | минимум АР на вывод |
+| `min_withdraw` | 1 | минимум АР на вывод (только целые АР) |
 | `dig_bust` | 0.18 | шанс обвала на каждом шаге |
 | `dig_rtp` | 0.9758 | целевой возврат игры |
 | `dig_max_depth` | 30 | максимум шагов |
@@ -135,7 +135,7 @@ Minecraft (Paper 26.3)                   Supabase                         Сай
 
 ```sql
 UPDATE public.mc_config
-SET min_withdraw = 5,
+SET min_withdraw = 1,
     dig_bust = 0.18, dig_rtp = 0.9758, dig_max_depth = 30
 WHERE id;
 ```

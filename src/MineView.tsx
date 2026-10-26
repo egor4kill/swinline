@@ -18,7 +18,7 @@ import type { UserAccount } from './data'
 
 const MC_SERVER = ((import.meta.env.VITE_MC_SERVER as string | undefined) || '').trim()
 const UNIT = 'АР'
-const FALLBACK_MIN_WITHDRAW = 5
+const FALLBACK_MIN_WITHDRAW = 1
 const FALLBACK_MAX_DEPTH = 30
 const FALLBACK_BUST = 0.18
 const FALLBACK_RTP = 0.9758
@@ -142,7 +142,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
   const [confirmUnlink, setConfirmUnlink] = useState(false)
 
   const [stake, setStake] = useState('1')
-  const [withdrawAmount, setWithdrawAmount] = useState('5')
+  const [withdrawAmount, setWithdrawAmount] = useState('1')
 
   const userId = currentUser?.id || null
   const notifyRef = useRef(notify)
@@ -556,8 +556,8 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
           <section className="mc-card">
             <div className="mc-card-head"><ArrowUpFromLine size={16} /> <h3>Вывод в Minecraft</h3></div>
             <p className="mc-muted">
-              АР спишутся здесь и появятся в игре: 1 АР = 1 алмазная руда.
-              Выдача — при входе или по команде <code>/sw withdraw</code>.
+              Вывод — только целыми АР: 1 АР = 1 алмазная руда, полруды в Minecraft
+              не выдать. Выдача — при входе или по команде <code>/sw withdraw</code>.
             </p>
             <div className="mc-form-row">
               <input
