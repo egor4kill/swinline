@@ -193,17 +193,17 @@ export default function CrashArena({
           <div className="wl-crash-status">
             {crashPhase === 'betting' && (
               <span style={{ color: myCrashBet ? 'var(--green)' : 'var(--org)', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                {myCrashBet ? '✅ ВАША СТАВКА ПРИНЯТА НА РАУНД' : '⏳ ПРИЁМ СТАВОК НА РАУНД 🚀'}
+                {myCrashBet ? '✅ ВАША СТАВКА ПРИНЯТА' : '⏳ ПРИЁМ СТАВОК 🚀'}
               </span>
             )}
             {crashPhase === 'flying' && (
               <span style={{ color: 'var(--org)', background: 'rgba(255,85,0,0.15)', border: '1px solid rgba(255,85,0,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                🚀 ХРЯК В ПОЛЁТЕ! ВСЕ ОНЛАЙН В ОДНОЙ РАКЕТЕ!
+                🚀 ХРЯК В ПОЛЁТЕ!
               </span>
             )}
             {crashPhase === 'crashed' && (
               <span style={{ color: '#ef4444', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', padding: '5px 16px', borderRadius: 999, fontWeight: 700 }}>
-                💥 КРЭШ НА {crashMultiplier.toFixed(2)}x! СВИН УПАЛ В ЛУЖУ
+                💥 КРЭШ НА {crashMultiplier.toFixed(2)}x!
               </span>
             )}
           </div>

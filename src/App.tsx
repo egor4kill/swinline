@@ -29,6 +29,7 @@ import {
   Award,
   Wallet,
   Zap,
+  Pickaxe,
   Check,
   TrendingUp,
   AlertTriangle,
@@ -240,7 +241,7 @@ export default function App() {
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
-  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack'>('crash')
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'mine'>('crash')
   const [playCurrency, setPlayCurrency] = useState<'sv' | 'ar'>('sv')
   const [arBalance, setArBalance] = useState(0)
   const [jackpotWin, setJackpotWin] = useState<number | null>(null)
@@ -1717,35 +1718,39 @@ export default function App() {
             <div style={{ maxWidth: 1060, margin: '0 auto' }}>
               <CasinoStrip />
               <JackpotOverlay amount={jackpotWin} onClose={() => setJackpotWin(null)} />
-              <div className="wl-currency-switch">
-                <span className="wl-currency-label">Играть на:</span>
-                <button
-                  className={`wl-round-btn ${playCurrency === 'sv' ? 'active' : ''}`}
-                  onClick={() => setPlayCurrency('sv')}
-                >
-                  SV₽ · {S.bal.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
-                </button>
-                <button
-                  className={`wl-round-btn ${playCurrency === 'ar' ? 'active' : ''}`}
-                  onClick={() => {
-                    if (!currentUser) {
-                      setAuthModalOpen(true)
-                      notify('Войди через Twitch, чтобы играть на АР')
-                      return
-                    }
-                    setPlayCurrency('ar')
-                    refreshAr()
-                  }}
-                  disabled={!currentUser}
-                  title={currentUser ? 'Играть на алмазной валюте' : 'Войди через Twitch, чтобы играть на АР'}
-                >
-                  АР · {arBalance.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
-                </button>
-              </div>
-              {playCurrency === 'ar' && (
-                <div className="wl-currency-note">
-                  1 АР = 1 алмазная руда. Занос и вывод — в разделе «Шахта».
-                </div>
+              {gamesTab !== 'mine' && (
+                <>
+                  <div className="wl-currency-switch">
+                    <span className="wl-currency-label">Играть на:</span>
+                    <button
+                      className={`wl-round-btn ${playCurrency === 'sv' ? 'active' : ''}`}
+                      onClick={() => setPlayCurrency('sv')}
+                    >
+                      SV₽ · {S.bal.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
+                    </button>
+                    <button
+                      className={`wl-round-btn ${playCurrency === 'ar' ? 'active' : ''}`}
+                      onClick={() => {
+                        if (!currentUser) {
+                          setAuthModalOpen(true)
+                          notify('Войди через Twitch, чтобы играть на АР')
+                          return
+                        }
+                        setPlayCurrency('ar')
+                        refreshAr()
+                      }}
+                      disabled={!currentUser}
+                      title={currentUser ? 'Играть на алмазной валюте' : 'Войди через Twitch, чтобы играть на АР'}
+                    >
+                      АР · {arBalance.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
+                    </button>
+                  </div>
+                  {playCurrency === 'ar' && (
+                    <div className="wl-currency-note">
+                      1 АР = 1 алмазная руда. Занос и вывод — в разделе «Minecraft».
+                    </div>
+                  )}
+                </>
               )}
               {/* Game Mode Switcher */}
               <div className="wl-games-tabs">
@@ -1785,7 +1790,14 @@ export default function App() {
                   className={`wl-round-btn ${gamesTab === 'blackjack' ? 'active' : ''}`}
                   onClick={() => setGamesTab('blackjack')}
                 >
-                  <span>🃏 Хрюк-блэкджек</span>
+                  <span>🃏 Хрякджек</span>
+                </button>
+                <button
+                  className={`wl-round-btn ${gamesTab === 'mine' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('mine')}
+                >
+                  <Pickaxe size={16} />
+                  <span>Шахта</span>
                 </button>
               </div>
 
@@ -1816,6 +1828,15 @@ export default function App() {
               {gamesTab === 'puddles' && <MudPuddles bal={playCurrency === 'ar' ? arBalance : S.bal} unit={unitOf(playCurrency)} onStart={puddlesStart} onPick={puddlesPick} onCash={puddlesCash} onRestore={puddlesRestore} />}
               {gamesTab === 'ruble' && <RubleChart bal={playCurrency === 'ar' ? arBalance : S.bal} unit={unitOf(playCurrency)} onPredict={rublePredict} />}
               {gamesTab === 'blackjack' && <Blackjack bal={playCurrency === 'ar' ? arBalance : S.bal} currency={playCurrency} unit={unitOf(playCurrency)} onBal={bjBal} notify={notify} onNeedAuth={() => setAuthModalOpen(true)} />}
+              {gamesTab === 'mine' && (
+                <MineView
+                  mode="game"
+                  currentUser={currentUser}
+                  notify={notify}
+                  onNeedAuth={() => setAuthModalOpen(true)}
+                  onOpenLink={() => setView('minecraft')}
+                />
+              )}
 
               {gamesTab === 'roulette' && (
                 <RouletteWheel
@@ -1864,12 +1885,14 @@ export default function App() {
             <PromosView notify={notify} />
           )}
 
-          {/* H. MINE VIEW — алмазная руда из Minecraft */}
-          {view === 'mine' && (
+          {/* H. MINECRAFT — привязка аккаунта и вывод АР */}
+          {view === 'minecraft' && (
             <MineView
+              mode="link"
               currentUser={currentUser}
               notify={notify}
               onNeedAuth={() => setAuthModalOpen(true)}
+              onPlay={() => { setView('games24'); setGamesTab('mine') }}
             />
           )}
 

@@ -111,10 +111,10 @@ export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAu
     setBusy(false)
     if (error || !data) return err(error, 'Не удалось раздать')
     const realCur = (data.currency === 'ar' ? 'ar' : cur) as 'sv' | 'ar'
-    onBal(Number(data.bal), { x: 'Ставка в «Хрюк-блэкджеке»', d: -s }, realCur)
+    onBal(Number(data.bal), { x: 'Ставка в «Хрякджеке»', d: -s }, realCur)
     const resolved = data.status !== 'play'
     if (resolved && Number(data.payout) > 0) {
-      const label = data.status === 'blackjack' ? 'БЛЭКДЖЕК! Выигрыш в «Хрюк-блэкджеке» (x2.5)' : 'Выигрыш в «Хрюк-блэкджеке»'
+      const label = data.status === 'blackjack' ? 'БЛЭКДЖЕК! Выигрыш в «Хрякджеке» (x2.5)' : 'Выигрыш в «Хрякджеке»'
       onBal(Number(data.bal), { x: label, d: Number(data.payout) }, realCur)
     }
     setRound({
@@ -137,7 +137,7 @@ export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAu
     if (error || !data) return err(error, 'Ход не принят')
     const moneyNow = (n: number) => money(n, cur)
     if (kind === 'double') {
-      onBal(Number(data.bal), { x: `Дабл в «Хрюк-блэкджеке» (+${moneyNow(round.stake)})`, d: -round.stake }, cur)
+      onBal(Number(data.bal), { x: `Дабл в «Хрякджеке» (+${moneyNow(round.stake)})`, d: -round.stake }, cur)
     }
     setRound(prev => prev ? {
       ...prev,
@@ -150,7 +150,7 @@ export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAu
     if (data.status && data.status !== 'play') {
       const payout = Number(data.payout)
       if (payout > 0) {
-        const label = data.status === 'push' ? 'Ничья в «Хрюк-блэкджеке» — ставка возвращена' : 'Выигрыш в «Хрюк-блэкджеке»'
+        const label = data.status === 'push' ? 'Ничья в «Хрякджеке» — ставка возвращена' : 'Выигрыш в «Хрякджеке»'
         onBal(Number(data.bal), { x: label, d: payout }, cur)
       }
       setMsg(data.status === 'lost' && Number(data.player_value) > 21 ? 'ПЕРЕБОР' : (STATUS_TEXT[data.status] || data.status))
@@ -167,7 +167,7 @@ export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAu
   return (
     <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
       <span className="wl-banner-tag">ИГРЫ 24/7 • КАРТЫ</span>
-      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 'clamp(22px, 6vw, 28px)', margin: '12px 0 6px' }}>ХРЮК-БЛЭКДЖЕК 🐷🃏</h2>
+      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 'clamp(22px, 6vw, 28px)', margin: '12px 0 6px' }}>ХРЯКДЖЕК 🐷🃏</h2>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 14, margin: '0 auto 14px', maxWidth: 560 }}>
         Набери 21 или больше крупье, но не перебери. Блэкджек платит x2.5, ничья возвращает ставку.
         Колода и крупье — на сервере, карта дилера втемную.

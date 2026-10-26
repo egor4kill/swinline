@@ -58,10 +58,15 @@ type Result =
   | { kind: 'cash'; payout: number; depth: number; mult: number }
   | null
 
+type MineMode = 'game' | 'link'
+
 type Props = {
   currentUser: UserAccount | null
   notify: (message: string) => void
   onNeedAuth: () => void
+  mode?: MineMode
+  onOpenLink?: () => void
+  onPlay?: () => void
 }
 
 const arFmt = (value: number) => value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
@@ -95,15 +100,16 @@ function normalizeStatus(raw: any): MineStatus {
   }
 }
 
-function OnlyForAuth({ onNeedAuth }: { onNeedAuth: () => void }) {
+function OnlyForAuth({ onNeedAuth, mode }: { onNeedAuth: () => void; mode: MineMode }) {
   return (
     <div className="mc-view mc-view-narrow">
       <section className="mc-card mc-gate">
         <div className="mc-gate-icon"><Pickaxe size={30} /></div>
-        <h1>Шахта ждёт</h1>
+        <h1>{mode === 'game' ? 'Шахта ждёт' : 'Minecraft'}</h1>
         <p>
-          Войди через Twitch, чтобы привязать Minecraft-аккаунт, заносить алмазную руду
-          и получать АР — валюту шахты. 1 руда = 1 АР.
+          {mode === 'game'
+            ? 'Войди через Twitch, чтобы играть в Шахту и забирать АР на любой глубине.'
+            : 'Войди через Twitch, чтобы привязать Minecraft-аккаунт, заносить руду и выводить АР.'}
         </p>
         <button className="wl-btn-orange mc-gate-btn" onClick={onNeedAuth}>
           Войти через Twitch
@@ -113,22 +119,24 @@ function OnlyForAuth({ onNeedAuth }: { onNeedAuth: () => void }) {
   )
 }
 
-function NotReady() {
+function NotReady({ mode }: { mode: MineMode }) {
   return (
     <div className="mc-view mc-view-narrow">
       <section className="mc-card mc-gate">
         <div className="mc-gate-icon"><AlertTriangle size={28} /></div>
-        <h1>Шахта скоро откроется</h1>
+        <h1>{mode === 'game' ? 'Шахта скоро откроется' : 'Привязка скоро откроется'}</h1>
         <p>
-          Мы уже прокладываем ствол. Как только серверная часть будет подключена,
-          здесь появится привязка Minecraft, занос руды (1 руда = 1 АР) и спуск в алмазную жилу.
+          {mode === 'game'
+            ? 'Мы уже прокладываем ствол. Скоро здесь появится спуск в алмазную жилу и игра на АР.'
+            : 'Как только серверная часть будет подключена, здесь появится привязка Minecraft-аккаунта и вывод АР.'}
         </p>
       </section>
     </div>
   )
 }
 
-export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
+export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game', onOpenLink, onPlay }: Props) {
+  const isGame = mode === 'game'
   const [status, setStatus] = useState<MineStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [notReady, setNotReady] = useState(false)
@@ -328,9 +336,9 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
     }
   }, [status])
 
-  if (!currentUser) return <OnlyForAuth onNeedAuth={onNeedAuth} />
-  if (authRequired) return <OnlyForAuth onNeedAuth={onNeedAuth} />
-  if (notReady) return <NotReady />
+  if (!currentUser) return <OnlyForAuth onNeedAuth={onNeedAuth} mode={mode} />
+  if (authRequired) return <OnlyForAuth onNeedAuth={onNeedAuth} mode={mode} />
+  if (notReady) return <NotReady mode={mode} />
 
   if (!status) {
     return (
@@ -343,31 +351,37 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
     )
   }
 
-  if (!status.authed) return <OnlyForAuth onNeedAuth={onNeedAuth} />
+  if (!status.authed) return <OnlyForAuth onNeedAuth={onNeedAuth} mode={mode} />
 
   const round = status.round
   const potential = round ? Math.floor(round.stake * round.mult) : 0
   const depthPercent = round ? Math.min(100, (round.depth / Math.max(1, status.maxDepth)) * 100) : 0
 
   return (
-    <div className="mc-view">
+    <div className={`mc-view ${isGame ? 'mc-view-game' : 'mc-view-link'}`}>
       <header className="mc-head">
         <div className="mc-head-copy">
           <div className="mc-title-row">
-            <span className="mc-title-glyph"><Pickaxe size={22} /></span>
-            <h1>Шахта «Алмазная жила»</h1>
+            <span className="mc-title-glyph">{isGame ? <Pickaxe size={22} /> : <Link2 size={22} />}</span>
+            <h1>{isGame ? 'Шахта' : 'Minecraft'}</h1>
           </div>
           <p className="mc-sub">
-            Алмазная руда из Minecraft становится <b>АР</b> — отдельной валютой шахты.
-            1 руда = 1 АР. Заноси в игре, спускайся за множителем и выводи обратно.
+            {isGame
+              ? <>Спускайся в жилу и забирай <b>АР</b> на любой глубине: каждый шаг повышает множитель, но порода может осыпаться.</>
+              : <>Привязка Minecraft-аккаунта, занос и вывод <b>АР</b>. 1 алмазная руда = 1 АР.</>}
           </p>
+          {!isGame && onPlay && (
+            <button type="button" className="wl-btn-orange mc-play-btn" onClick={onPlay}>
+              <Pickaxe size={16} /> Играть в «Шахту»
+            </button>
+          )}
         </div>
         <div className="mc-ore-hero">
-          <span className="mc-ore-label">Баланс шахты</span>
+          <span className="mc-ore-label">{isGame ? 'Баланс АР' : 'Баланс шахты'}</span>
           <div className="mc-ore-value">
             <Gem size={20} /> {arFmt(status.ore)} <span className="mc-unit">АР</span>
           </div>
-          <span className="mc-ore-equivalent">1 АР = 1 руда · только из Minecraft</span>
+          <span className="mc-ore-equivalent">{isGame ? 'Ставки и выигрыш — в АР' : '1 АР = 1 алмазная руда'}</span>
         </div>
       </header>
 
@@ -377,7 +391,8 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
         </div>
       )}
 
-      <div className="mc-grid">
+      <div className={`mc-grid ${isGame ? 'mc-grid-solo' : 'mc-grid-link'}`}>
+        {isGame && (
         <section className="mc-card mc-game">
           <div className="mc-game-head">
             <div>
@@ -438,6 +453,12 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
                 Шанс обвала на каждом шаге — {share?.bustPercent}%. Ставка списывается сразу.
                 Глубже {status.maxDepth} шагов крепь не пускает.
               </p>
+              {isGame && status.ore < 1 && onOpenLink && (
+                <p className="mc-fine mc-game-link">
+                  АР на нуле.{' '}
+                  <button type="button" className="mc-link-btn" onClick={onOpenLink}>Пополнить</button>
+                </p>
+              )}
             </>
           ) : (
             <>
@@ -496,7 +517,9 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
             </>
           )}
         </section>
+        )}
 
+        {!isGame && (
         <aside className="mc-side">
           <section className="mc-card">
             <div className="mc-card-head"><Link2 size={16} /> <h3>Привязка Minecraft</h3></div>
@@ -589,6 +612,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
             )}
           </section>
         </aside>
+        )}
       </div>
     </div>
   )

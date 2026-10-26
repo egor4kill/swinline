@@ -11,7 +11,6 @@ import {
   LogOut,
   MessageSquare,
   MonitorPlay,
-  Pickaxe,
   ReceiptText,
   ShieldCheck,
   Trophy,
@@ -195,10 +194,10 @@ export default function MobileNav({
                 <small>{currentUser ? fmt(balance) : 'Баланс и история'}</small>
                 <ChevronRight size={17} />
               </button>
-              <button type="button" className="wl-more-item" onClick={() => go('mine')}>
-                <Pickaxe size={19} />
-                <span>Шахта</span>
-                <small><Gem size={12} /> АР из Minecraft</small>
+              <button type="button" className="wl-more-item" onClick={() => go('minecraft')}>
+                <Gem size={19} />
+                <span>Minecraft</span>
+                <small>привязка и вывод</small>
                 <ChevronRight size={17} />
               </button>
               <button type="button" className="wl-more-item" onClick={() => go('promos')}>

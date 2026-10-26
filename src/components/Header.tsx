@@ -74,11 +74,10 @@ export default function Header({
               Игры 24/7
             </button>
             <button
-              className={`wl-nav-link ${view === 'mine' ? 'active' : ''}`}
-              onClick={() => setView('mine')}
+              className={`wl-nav-link ${view === 'minecraft' ? 'active' : ''}`}
+              onClick={() => setView('minecraft')}
             >
-              <span className="mc-nav-dot" />
-              Шахта
+              Minecraft
             </button>
             <button
               className={`wl-nav-link ${view === 'wallet' ? 'active' : ''}`}
@@ -132,7 +131,7 @@ export default function Header({
                 title="Личный кабинет"
               >
                 <UserAvatar avatar={currentUser.avatar} name={currentUser.username} size={30} crown={isAdmin} />
-                <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+                <div className="wl-user-meta" style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
                   <span style={{ fontSize: 13, fontWeight: 700 }}>{currentUser.username}</span>
                   <span style={{ fontSize: 10, color: isAdmin ? '#f59e0b' : 'var(--tx-muted)' }}>
                     {currentUser.title}

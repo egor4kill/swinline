@@ -1181,7 +1181,7 @@ button:focus-visible, input:focus-visible {
   }
   .wl-header-inner > div:first-child {
     display: flex !important;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
     gap: 8px;
   }
@@ -1195,6 +1195,7 @@ button:focus-visible, input:focus-visible {
     padding: 0 10px 0 8px;
     border-width: 2px;
     box-shadow: 0 0 12px var(--org-glow);
+    flex-shrink: 0;
   }
   .wl-logo-text {
     font-size: 15px;
@@ -1217,9 +1218,10 @@ button:focus-visible, input:focus-visible {
     padding: 0;
     justify-content: center;
     border-radius: 50%;
+    overflow: hidden;
   }
-  .wl-user-chip > div {
-    display: none;
+  .wl-user-chip .wl-user-meta {
+    display: none !important;
   }
   .wl-balance-chip {
     min-height: 44px;
@@ -2107,8 +2109,11 @@ button:focus-visible, input:focus-visible {
     padding: 0 10px;
   }
   .wl-balance-chip {
-    max-width: 100px;
+    max-width: 112px;
     padding: 0 9px;
+  }
+  .wl-balance-amount {
+    font-size: 13.5px;
   }
 }
 
@@ -2928,9 +2933,32 @@ button:focus-visible, input:focus-visible {
   align-items: start;
 }
 
+/* Шахта как игра — одна колонка; привязка Minecraft — отдельная страница */
+.mc-grid-solo,
+.mc-grid-link {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mc-grid-link .mc-side {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
 .mc-side {
   display: grid;
   gap: 16px;
+}
+
+.mc-play-btn {
+  margin-top: 12px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.mc-game-link {
+  margin-top: 10px;
 }
 
 .mc-card {
@@ -3617,6 +3645,7 @@ button:focus-visible, input:focus-visible {
     padding: 0;
     justify-content: center;
     border-radius: 50%;
+    overflow: hidden;
   }
   .wl-modal-overlay {
     align-items: flex-end;
@@ -3677,6 +3706,22 @@ button:focus-visible, input:focus-visible {
   .wl-crash-history-pill {
     font-size: 11px;
     padding: 3px 8px;
+  }
+  .wl-crash-status {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    justify-content: center;
+    text-align: center;
+    font-size: 12px;
+    padding: 0 4px;
+  }
+  .wl-crash-status > span {
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.35;
+    text-align: center;
+    flex-shrink: 1;
   }
   .wl-wheel-container {
     width: min(300px, calc(100vw - 64px));
