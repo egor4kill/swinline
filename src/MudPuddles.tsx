@@ -12,11 +12,12 @@ type PickResult = {
 type CashResult = { mul: number; win: number; mines: number[] }
 type Props = {
   bal: number
+  unit: string
   // Раунд, раскладка луж и выплаты — на сервере; клиент только показывает
   onStart: (stake: number, mines: number) => Promise<string | null>
   onPick: (roundId: string, cell: number) => Promise<PickResult | null>
   onCash: (roundId: string) => Promise<CashResult | null>
-  onRestore: () => Promise<{ roundId: string; stake: number; mines: number; opened: number[] } | null>
+  onRestore: () => Promise<{ roundId: string; stake: number; mines: number; opened: number[]; currency: 'sv' | 'ar' } | null>
 }
 type Phase = 'idle' | 'play' | 'lost' | 'cashed'
 const MIN_BET = 10
@@ -42,9 +43,11 @@ const Puddle = () => (
   </svg>
 )
 
-export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: Props) {
+export default function MudPuddles({ bal, unit, onStart, onPick, onCash, onRestore }: Props) {
   const [stake, setStake] = useState('100')
   const [mines, setMines] = useState(3)
+  const [roundUnit, setRoundUnit] = useState(unit)
+  const money = (n: number, u: string = roundUnit) => fmt(n) + ' ' + u
   const [phase, setPhase] = useState<Phase>('idle')
   const [open, setOpen] = useState<number[]>([])
   const [boom, setBoom] = useState<number | null>(null)
@@ -68,6 +71,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
       openRef.current = r.opened || []
       setStake(String(r.stake))
       setMines(r.mines)
+      setRoundUnit(r.currency === 'ar' ? 'АР' : 'SV₽')
       setOpen(r.opened || [])
       setBoom(null); setField(null); setPhase('play'); setMsg('')
     })
@@ -77,7 +81,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
   const start = async () => {
     if (busy) return
     const s = Math.floor(parseFloat(stake))
-    if (!(s >= MIN_BET)) return setMsg(`Минимальная ставка: ${MIN_BET} SV₽`)
+    if (!(s >= MIN_BET)) return setMsg(`Минимальная ставка: ${MIN_BET} ${unit}`)
     setBusy(true)
     const id = await onStart(s, mines)
     setBusy(false)
@@ -86,6 +90,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
     stakeRef.current = s
     minesRef.current = mines
     openRef.current = []
+    setRoundUnit(unit)
     setOpen([]); setBoom(null); setField(null); setPhase('play'); setMsg('')
   }
 
@@ -98,7 +103,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
     if (!res) return
     setField(res.mines || null)
     setPhase('cashed')
-    setMsg(`Забрал ${fmt(res.win)} SV₽ (x${res.mul})`)
+    setMsg(`Забрал ${money(res.win)} (x${res.mul})`)
   }
 
   const pick = async (i: number) => {
@@ -120,7 +125,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
     if (res.auto_cashed) {
       setField(res.mines || null)
       setPhase('cashed')
-      setMsg(`Открыл всё безопасное — автоматом забрано ${fmt(res.win || 0)} SV₽ (x${res.mul})`)
+      setMsg(`Открыл всё безопасное — автоматом забрано ${money(res.win || 0)} (x${res.mul})`)
     }
   }
 
@@ -161,7 +166,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
       <div style={{ margin: '14px 0 8px', minHeight: 64, display: 'flex', flexDirection: 'column', justifyContent: 'center' }} aria-live="polite">
         {playing ? (
           <>
-            <div style={{ fontFamily: 'var(--font-d)', fontSize: 26, color: 'var(--org)' }}>x{cur} {k > 0 && <span style={{ fontSize: 15, color: 'var(--tx-secondary)' }}>= {fmt(r2(st * cur))} SV₽</span>}</div>
+            <div style={{ fontFamily: 'var(--font-d)', fontSize: 26, color: 'var(--org)' }}>x{cur} {k > 0 && <span style={{ fontSize: 15, color: 'var(--tx-secondary)' }}>= {money(r2(st * cur))}</span>}</div>
             <div style={{ fontSize: 13, color: 'var(--tx-secondary)' }}>{k === 0 ? 'Нажми на любую клетку поля' : next ? `Следующая клетка: x${next}` : 'Это последняя безопасная клетка'}</div>
           </>
         ) : <div style={{ fontWeight: 700 }}>{msg || 'Выбери число луж и ставку, потом нажми «Начать»'}</div>}
@@ -173,7 +178,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button className="wl-round-btn" onClick={randomPick} disabled={busy}>Случайная клетка</button>
           <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: k < 1 || busy ? 0.5 : 1 }} disabled={k < 1 || busy} onClick={cash}>
-            Забрать {k > 0 ? fmt(r2(st * cur)) + ' SV₽' : ''}
+            Забрать {k > 0 ? money(r2(st * cur)) : ''}
           </button>
         </div>
       ) : (
@@ -183,7 +188,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
             {[1, 3, 5, 10].map(v => <button key={v} className={`wl-round-btn ${mines === v ? 'active' : ''}`} aria-pressed={mines === v} onClick={() => setMines(v)}>{v}</button>)}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
-            <input aria-label="Ставка, SV₽" inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
+            <input aria-label={`Ставка, ${unit}`} inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
               style={{ width: 110, padding: 12, borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
             {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
             <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
@@ -192,7 +197,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
         </>
       )}
       </div>
-      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Баланс: {fmt(r2(bal))} SV₽. Раскладку луж и выплату решает сервер.</p>
+      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Баланс: {money(r2(bal), unit)}. Раскладку луж и выплату решает сервер.</p>
     </div>
   )
 }

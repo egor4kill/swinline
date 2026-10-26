@@ -2248,8 +2248,8 @@ TO authenticated, anon;
 --     Конвертация АР ↔ SV₽ — явная операция.
 --
 --     Экономика по умолчанию:
---       1 руда → 250 SV₽, 1 руда ← 300 SV₽ (спред 20%),
---       вывод от 5 руды, игра: 18% обвал, глубина до 30.
+--       1 АР → 250 SV₽ (покупка АР за SV₽ запрещена — только занос руды),
+--       вывод от 5 АР, игра: 18% обвал, глубина до 30.
 --       Множитель считается как RTP / 0.82^глубина, поэтому возврат
 --       на любой глубине одинаковый (~97.6%), а не тает с каждым шагом. ====================================================================
 
@@ -2563,40 +2563,6 @@ BEGIN
   PERFORM public.mc_prune_ledger(auth.uid());
 
   RETURN jsonb_build_object('ok', true, 'ore', v_ore, 'bal', v_bal, 'sv', v_sv);
-END $$;
-
-CREATE OR REPLACE FUNCTION public.mc_buy_ore(p_amount integer)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_conf public.mc_config%rowtype;
-  v_cost numeric;
-  v_bal numeric;
-  v_ore integer;
-BEGIN
-  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
-  PERFORM public.assert_not_blocked();
-  SELECT * INTO v_conf FROM public.mc_config WHERE id;
-  IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Укажи количество руды'; END IF;
-
-  v_cost := p_amount * v_conf.sv_to_ore;
-  UPDATE public.profiles
-    SET bal = bal - v_cost, updated_at = now()
-    WHERE id = auth.uid() AND bal >= v_cost
-    RETURNING bal INTO v_bal;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно SV₽'; END IF;
-
-  INSERT INTO public.mc_accounts (user_id, ore) VALUES (auth.uid(), p_amount)
-    ON CONFLICT (user_id) DO UPDATE
-      SET ore = mc_accounts.ore + p_amount, updated_at = now()
-    RETURNING ore INTO v_ore;
-
-  INSERT INTO public.mc_ledger (user_id, kind, amount, ore_after, sv_delta, meta)
-    VALUES (auth.uid(), 'buy', p_amount, v_ore, -v_cost,
-            jsonb_build_object('rate', v_conf.sv_to_ore));
-  PERFORM public.mc_prune_ledger(auth.uid());
-
-  RETURN jsonb_build_object('ok', true, 'ore', v_ore, 'bal', v_bal, 'cost', v_cost);
 END $$;
 
 CREATE OR REPLACE FUNCTION public.mc_dig_start(p_stake integer)
@@ -2958,7 +2924,6 @@ REVOKE ALL ON FUNCTION
   public.mc_unlink(),
   public.mc_withdraw_ore(integer),
   public.mc_convert(integer),
-  public.mc_buy_ore(integer),
   public.mc_dig_start(integer),
   public.mc_dig_step(uuid),
   public.mc_dig_cashout(uuid)
@@ -2969,7 +2934,6 @@ GRANT EXECUTE ON FUNCTION
   public.mc_unlink(),
   public.mc_withdraw_ore(integer),
   public.mc_convert(integer),
-  public.mc_buy_ore(integer),
   public.mc_dig_start(integer),
   public.mc_dig_step(uuid),
   public.mc_dig_cashout(uuid)
@@ -2979,5 +2943,825 @@ TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mc_status() TO anon;
 
 GRANT SELECT ON public.mc_config TO authenticated, anon;
+
+NOTIFY pgrst, 'reload schema';
+
+-- ====================================================================
+-- 17. ВТОРАЯ ВАЛЮТА ИГР: АР (1 алмазная руда = 1 АР)
+--
+--     АР появляется ТОЛЬКО из заноса алмазной руды (mc_plugin_deposit).
+--     Покупка АР за SV₽ удалена. Все игры казино принимают
+--     p_currency='sv'|'ar': ставка и выплата идут в выбранной валюте.
+--
+--     Для АР ставки — целые единицы, выплаты округляются вниз до целого
+--     (1 АР = 1 руда). Крэш-ставка, раунд луж и раздача блэкджека хранят
+--     валюту у себя, поэтому доигрываются в той валюте, в которой начаты.
+--     Джекпот, кэшбэк и лента выигрышей остаются только в SV₽.
+-- ====================================================================
+
+ALTER TABLE public.puddles_rounds ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'sv';
+ALTER TABLE public.bj_rounds ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'sv';
+ALTER TABLE public.crash_bets ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'sv';
+
+CREATE OR REPLACE FUNCTION public.game_currency(p_currency text)
+RETURNS text
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE WHEN p_currency = 'ar' THEN 'ar' ELSE 'sv' END
+$$;
+
+CREATE OR REPLACE FUNCTION public.game_balance(p_currency text)
+RETURNS numeric
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v numeric;
+BEGIN
+  IF p_currency = 'ar' THEN
+    INSERT INTO public.mc_accounts (user_id) VALUES (auth.uid())
+      ON CONFLICT (user_id) DO NOTHING;
+    SELECT ore INTO v FROM public.mc_accounts WHERE user_id = auth.uid();
+  ELSE
+    SELECT bal INTO v FROM public.profiles WHERE id = auth.uid();
+  END IF;
+  RETURN coalesce(v, 0);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.game_debit(p_amount numeric, p_currency text)
+RETURNS numeric
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v numeric;
+BEGIN
+  IF p_amount IS NULL OR p_amount < 10 THEN
+    RAISE EXCEPTION 'Минимальная ставка — 10 %',
+      CASE WHEN p_currency = 'ar' THEN 'АР' ELSE 'SV₽' END;
+  END IF;
+  IF p_currency = 'ar' THEN
+    IF p_amount <> floor(p_amount) THEN
+      RAISE EXCEPTION 'Ставка в АР — целое число';
+    END IF;
+    UPDATE public.mc_accounts
+      SET ore = ore - p_amount::int, updated_at = now()
+      WHERE user_id = auth.uid() AND ore >= p_amount::int
+      RETURNING ore INTO v;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно АР'; END IF;
+    RETURN v;
+  END IF;
+  UPDATE public.profiles
+    SET bal = bal - p_amount, updated_at = now()
+    WHERE id = auth.uid() AND bal >= p_amount
+    RETURNING bal INTO v;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно SV₽'; END IF;
+  RETURN v;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.game_credit(p_amount numeric, p_currency text)
+RETURNS numeric
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v numeric;
+  v_amount numeric;
+BEGIN
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RETURN public.game_balance(p_currency);
+  END IF;
+  IF p_currency = 'ar' THEN
+    v_amount := floor(p_amount);
+    IF v_amount <= 0 THEN RETURN public.game_balance('ar'); END IF;
+    INSERT INTO public.mc_accounts (user_id) VALUES (auth.uid())
+      ON CONFLICT (user_id) DO NOTHING;
+    UPDATE public.mc_accounts
+      SET ore = ore + v_amount::int, updated_at = now()
+      WHERE user_id = auth.uid()
+      RETURNING ore INTO v;
+    RETURN v;
+  END IF;
+  UPDATE public.profiles
+    SET bal = bal + p_amount, updated_at = now()
+    WHERE id = auth.uid()
+    RETURNING bal INTO v;
+  RETURN v;
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.1 Колесо: фиксированная ставка 100 SV₽ или 10 АР
+-- --------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.wheel_spin();
+
+CREATE OR REPLACE FUNCTION public.wheel_spin(p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_stake numeric;
+  v_bal numeric;
+  v_idx integer;
+  v_mul numeric;
+  v_win numeric;
+  v_muls numeric[] := ARRAY[0,0.5,0,1.2,0,0.5,0,1.2,0,0.5,0,1.0,0,0.5,0,10];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+
+  v_stake := CASE WHEN v_cur = 'ar' THEN 10 ELSE 100 END;
+  v_bal := public.game_debit(v_stake, v_cur);
+
+  v_idx := floor(random() * array_length(v_muls, 1))::int;
+  v_mul := v_muls[v_idx + 1];
+  v_win := CASE WHEN v_cur = 'ar' THEN floor(v_stake * v_mul) ELSE round(v_stake * v_mul, 2) END;
+  v_bal := public.game_credit(v_win, v_cur);
+
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'wheel', jsonb_build_object(
+      'stake', v_stake, 'currency', v_cur, 'sector', v_idx, 'mul', v_mul, 'win', v_win));
+
+  IF v_cur = 'sv' THEN
+    v_casino := public.casino_take(v_stake);
+    v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'sector', v_idx, 'mul', v_mul, 'win', v_win,
+    'stake', v_stake, 'currency', v_cur, 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.2 Плинко
+-- --------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.plinko_drop(numeric, text);
+
+CREATE OR REPLACE FUNCTION public.plinko_drop(p_stake numeric, p_risk text, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_bal numeric;
+  v_slot integer := 0;
+  v_i integer;
+  v_mul numeric;
+  v_win numeric;
+  v_low  numeric[] := ARRAY[6.6,3.3,1.9,1.3,1.1,1,0.5,1,1.1,1.3,1.9,3.3,6.6];
+  v_mid  numeric[] := ARRAY[21,6.5,2.8,1.4,1,0.8,0.5,0.8,1,1.4,2.8,6.5,21];
+  v_high numeric[] := ARRAY[65,15,4.2,1.9,0.9,0.6,0.3,0.6,0.9,1.9,4.2,15,65];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  IF p_risk NOT IN ('low', 'mid', 'high') THEN RAISE EXCEPTION 'Неизвестный уровень риска'; END IF;
+
+  v_bal := public.game_debit(p_stake, v_cur);
+
+  FOR v_i IN 1..12 LOOP
+    IF random() < 0.5 THEN v_slot := v_slot + 1; END IF;
+  END LOOP;
+  v_mul := CASE p_risk
+    WHEN 'low' THEN v_low[v_slot + 1]
+    WHEN 'mid' THEN v_mid[v_slot + 1]
+    ELSE v_high[v_slot + 1]
+  END;
+  v_win := CASE WHEN v_cur = 'ar' THEN floor(p_stake * v_mul) ELSE round(p_stake * v_mul, 2) END;
+  v_bal := public.game_credit(v_win, v_cur);
+
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'plinko', jsonb_build_object(
+      'stake', p_stake, 'currency', v_cur, 'risk', p_risk, 'slot', v_slot, 'mul', v_mul, 'win', v_win));
+
+  IF v_cur = 'sv' THEN
+    v_casino := public.casino_take(p_stake);
+    v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'slot', v_slot, 'mul', v_mul, 'win', v_win,
+    'stake', p_stake, 'currency', v_cur, 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.3 Грязевые лужи: валюта хранится в раунде
+-- --------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.puddles_start(numeric, integer);
+
+CREATE OR REPLACE FUNCTION public.puddles_start(p_stake numeric, p_mines integer, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_bal numeric;
+  v_id uuid;
+  v_cells integer[] := ARRAY[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24];
+  v_i integer; v_j integer; v_tmp integer;
+  v_mines integer[];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  IF p_mines < 1 OR p_mines > 24 THEN RAISE EXCEPTION 'Луж должно быть от 1 до 24'; END IF;
+  IF EXISTS (SELECT 1 FROM public.puddles_rounds WHERE user_id = auth.uid() AND status = 'play') THEN
+    RAISE EXCEPTION 'Сначала заверши текущий раунд';
+  END IF;
+
+  v_bal := public.game_debit(p_stake, v_cur);
+
+  FOR v_i IN REVERSE 24..1 LOOP
+    v_j := floor(random() * (v_i + 1))::int;
+    v_tmp := v_cells[v_i + 1]; v_cells[v_i + 1] := v_cells[v_j + 1]; v_cells[v_j + 1] := v_tmp;
+  END LOOP;
+  v_mines := v_cells[1:p_mines];
+
+  INSERT INTO public.puddles_rounds (user_id, stake, mines_count, currency)
+    VALUES (auth.uid(), p_stake, p_mines, v_cur) RETURNING id INTO v_id;
+  INSERT INTO public.puddles_secrets (round_id, mines) VALUES (v_id, v_mines);
+
+  IF v_cur = 'sv' THEN
+    v_casino := public.casino_take(p_stake);
+    v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'round_id', v_id, 'bal', v_bal, 'currency', v_cur,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_pick(p_round uuid, p_cell integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.puddles_rounds%rowtype;
+  v_mines integer[];
+  v_opened integer[];
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_round FROM public.puddles_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раунд уже завершён'; END IF;
+  IF p_cell < 0 OR p_cell > 24 THEN RAISE EXCEPTION 'Клетка за пределами поля'; END IF;
+  IF p_cell = ANY (v_round.opened) THEN RAISE EXCEPTION 'Клетка уже открыта'; END IF;
+  SELECT mines INTO v_mines FROM public.puddles_secrets WHERE round_id = p_round;
+
+  IF p_cell = ANY (v_mines) THEN
+    UPDATE public.puddles_rounds SET status = 'lost' WHERE id = p_round;
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'puddles', jsonb_build_object(
+        'stake', v_round.stake, 'currency', v_round.currency, 'mines', v_round.mines_count,
+        'opened', array_length(v_round.opened, 1), 'outcome', 'lost'));
+    RETURN jsonb_build_object('hit', true, 'mines', v_mines, 'opened', v_round.opened,
+      'currency', v_round.currency);
+  END IF;
+
+  UPDATE public.puddles_rounds SET opened = opened || p_cell WHERE id = p_round RETURNING opened INTO v_opened;
+
+  IF array_length(v_opened, 1) >= 25 - v_round.mines_count THEN
+    v_mul := public.puddles_multiplier(v_round.mines_count, array_length(v_opened, 1));
+    v_win := CASE WHEN v_round.currency = 'ar'
+      THEN floor(v_round.stake * v_mul)
+      ELSE round(v_round.stake * v_mul, 2) END;
+    UPDATE public.puddles_rounds SET status = 'cashed' WHERE id = p_round;
+    v_bal := public.game_credit(v_win, v_round.currency);
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'puddles', jsonb_build_object(
+        'stake', v_round.stake, 'currency', v_round.currency, 'mines', v_round.mines_count,
+        'opened', array_length(v_opened, 1), 'outcome', 'cashed', 'mul', v_mul, 'win', v_win));
+    RETURN jsonb_build_object('hit', false, 'opened', v_opened, 'auto_cashed', true,
+      'mul', v_mul, 'win', v_win, 'bal', v_bal, 'mines', v_mines,
+      'currency', v_round.currency);
+  END IF;
+
+  RETURN jsonb_build_object('hit', false, 'opened', v_opened, 'currency', v_round.currency);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_cash(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.puddles_rounds%rowtype;
+  v_mines integer[];
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_round FROM public.puddles_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раунд уже завершён'; END IF;
+  IF array_length(v_round.opened, 1) < 1 THEN RAISE EXCEPTION 'Сначала открой хотя бы одну клетку'; END IF;
+  SELECT mines INTO v_mines FROM public.puddles_secrets WHERE round_id = p_round;
+  v_mul := public.puddles_multiplier(v_round.mines_count, array_length(v_round.opened, 1));
+  v_win := CASE WHEN v_round.currency = 'ar'
+    THEN floor(v_round.stake * v_mul)
+    ELSE round(v_round.stake * v_mul, 2) END;
+  UPDATE public.puddles_rounds SET status = 'cashed' WHERE id = p_round;
+  v_bal := public.game_credit(v_win, v_round.currency);
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'puddles', jsonb_build_object(
+      'stake', v_round.stake, 'currency', v_round.currency, 'mines', v_round.mines_count,
+      'opened', array_length(v_round.opened, 1), 'outcome', 'cashed', 'mul', v_mul, 'win', v_win));
+  RETURN jsonb_build_object('mul', v_mul, 'win', v_win, 'bal', v_bal, 'mines', v_mines,
+    'currency', v_round.currency);
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.4 Курс рубля
+-- --------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.ruble_predict(text, numeric);
+
+CREATE OR REPLACE FUNCTION public.ruble_predict(p_side text, p_stake numeric, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_bal numeric;
+  v_tick timestamptz;
+  v_at numeric;
+  v_future numeric;
+  v_dir text;
+  v_win boolean;
+  v_mul numeric;
+  v_payout numeric;
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  IF p_side NOT IN ('up', 'down') THEN RAISE EXCEPTION 'Ставка только «вверх» или «вниз»'; END IF;
+
+  v_bal := public.game_debit(p_stake, v_cur);
+
+  PERFORM public.ruble_ensure(now() + interval '45 seconds');
+  v_tick := date_trunc('second', now());
+  SELECT price INTO v_at FROM public.ruble_prices WHERE tick_at = v_tick;
+  IF v_at IS NULL THEN
+    SELECT price INTO v_at FROM public.ruble_prices
+      WHERE tick_at < v_tick ORDER BY tick_at DESC LIMIT 1;
+  END IF;
+  SELECT price INTO v_future FROM public.ruble_prices
+    WHERE tick_at = v_tick + interval '30 seconds';
+  IF v_at IS NULL OR v_future IS NULL THEN
+    RAISE EXCEPTION 'Лента ещё не готова — попробуй через секунду';
+  END IF;
+
+  v_dir := CASE WHEN v_future > v_at THEN 'up' WHEN v_future < v_at THEN 'down' ELSE 'flat' END;
+  v_win := (p_side = 'up' AND v_dir = 'up') OR (p_side = 'down' AND v_dir = 'down');
+  v_mul := CASE WHEN v_win THEN 1.95 ELSE 0 END;
+  v_payout := CASE WHEN v_cur = 'ar'
+    THEN floor(p_stake * v_mul)
+    ELSE round(p_stake * v_mul, 2) END;
+  v_bal := public.game_credit(v_payout, v_cur);
+
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'ruble', jsonb_build_object(
+      'stake', p_stake, 'currency', v_cur, 'side', p_side, 'start', v_at, 'final', v_future,
+      'dir', v_dir, 'mul', v_mul, 'win', v_payout));
+
+  IF v_cur = 'sv' THEN
+    v_casino := public.casino_take(p_stake);
+    v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'start', v_at, 'final', v_future,
+    'resolve_ms', (extract(epoch FROM (v_tick + interval '30 seconds')) * 1000)::bigint,
+    'dir', v_dir, 'win', v_win, 'mul', v_mul, 'payout', v_payout,
+    'stake', p_stake, 'currency', v_cur, 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.5 Крэш: валюта хранится в ставке
+-- --------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.crash_place_bet(bigint, numeric, numeric);
+
+CREATE OR REPLACE FUNCTION public.crash_place_bet(
+  p_round bigint, p_stake numeric, p_auto numeric DEFAULT NULL, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.crash_rounds%rowtype;
+  v_cur text := coalesce(p_currency, 'sv');
+  v_bal numeric;
+  v_username text;
+  v_avatar text;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  SELECT * INTO v_round FROM public.crash_rounds WHERE id = p_round;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF now() < v_round.start_at OR now() >= v_round.start_at + make_interval(secs => v_round.betting_seconds) THEN
+    RAISE EXCEPTION 'Приём ставок на этот раунд закрыт';
+  END IF;
+  IF p_auto IS NOT NULL AND p_auto < 1.05 THEN RAISE EXCEPTION 'Авто-вывод — не меньше x1.05'; END IF;
+
+  SELECT username, avatar INTO v_username, v_avatar FROM public.profiles WHERE id = auth.uid();
+  IF v_username IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+
+  v_bal := public.game_debit(p_stake, v_cur);
+
+  INSERT INTO public.crash_bets (round_id, user_id, username, avatar, stake, auto_cashout, currency)
+    VALUES (p_round, auth.uid(), v_username, v_avatar, p_stake, p_auto, v_cur);
+  RETURN jsonb_build_object('bal', v_bal, 'currency', v_cur, 'stake', p_stake);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.crash_cancel_bet(p_round bigint)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.crash_rounds%rowtype;
+  v_bet public.crash_bets%rowtype;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_bet FROM public.crash_bets WHERE round_id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Ставки на этот раунд нет'; END IF;
+  IF v_bet.cashed_out_mul IS NOT NULL THEN RAISE EXCEPTION 'Вывод уже сделан'; END IF;
+  SELECT * INTO v_round FROM public.crash_rounds WHERE id = p_round;
+  IF now() >= v_round.start_at + make_interval(secs => v_round.betting_seconds) THEN
+    RAISE EXCEPTION 'Раунд уже стартовал — отменить нельзя';
+  END IF;
+  DELETE FROM public.crash_bets WHERE id = v_bet.id;
+  v_bal := public.game_credit(v_bet.stake, v_bet.currency);
+  RETURN jsonb_build_object('bal', v_bal, 'currency', v_bet.currency, 'refund', v_bet.stake);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.crash_cashout(p_round bigint)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.crash_rounds%rowtype;
+  v_secret numeric;
+  v_bet public.crash_bets%rowtype;
+  v_elapsed double precision;
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_bet FROM public.crash_bets WHERE round_id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Ставки на этот раунд нет'; END IF;
+  IF v_bet.cashed_out_mul IS NOT NULL THEN RAISE EXCEPTION 'Вывод уже сделан'; END IF;
+  SELECT * INTO v_round FROM public.crash_rounds WHERE id = p_round;
+  SELECT point INTO v_secret FROM public.crash_secrets WHERE round_id = p_round;
+  v_elapsed := extract(epoch FROM (now() - (v_round.start_at + make_interval(secs => v_round.betting_seconds))));
+  IF v_elapsed < 0 THEN RAISE EXCEPTION 'Раунд ещё не стартовал'; END IF;
+  IF public.crash_mult(v_elapsed) >= v_secret THEN
+    UPDATE public.crash_rounds SET crashed = true, crash_point = v_secret WHERE id = p_round AND NOT crashed;
+    PERFORM public.crash_settle_round(p_round);
+    RAISE EXCEPTION 'Ракета уже упала — вывод невозможен';
+  END IF;
+  v_mul := round(least(public.crash_mult(v_elapsed), v_secret)::numeric, 2);
+  v_win := CASE WHEN v_bet.currency = 'ar'
+    THEN floor(v_bet.stake * v_mul)
+    ELSE round(v_bet.stake * v_mul, 2) END;
+  UPDATE public.crash_bets SET cashed_out_mul = v_mul, win_amount = v_win WHERE id = v_bet.id;
+  v_bal := public.game_credit(v_win, v_bet.currency);
+  RETURN jsonb_build_object('mul', v_mul, 'win', v_win, 'bal', v_bal,
+    'currency', v_bet.currency);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.crash_settle_round(p_round bigint)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_point numeric;
+  v_count integer := 0;
+BEGIN
+  SELECT point INTO v_point FROM public.crash_secrets WHERE round_id = p_round;
+  IF v_point IS NULL THEN RETURN 0; END IF;
+
+  WITH cashed AS (
+    UPDATE public.crash_bets
+    SET cashed_out_mul = auto_cashout,
+        win_amount = CASE WHEN currency = 'ar'
+          THEN floor(stake * auto_cashout)
+          ELSE round(stake * auto_cashout, 2) END
+    WHERE round_id = p_round AND cashed_out_mul IS NULL
+      AND auto_cashout IS NOT NULL AND auto_cashout <= v_point
+    RETURNING user_id, currency, win_amount
+  ), sv AS (
+    UPDATE public.profiles p SET bal = p.bal + c.total, updated_at = now()
+    FROM (SELECT user_id, sum(win_amount) AS total FROM cashed
+          WHERE currency = 'sv' GROUP BY user_id) c
+    WHERE p.id = c.user_id
+    RETURNING 1
+  ), ar AS (
+    INSERT INTO public.mc_accounts (user_id, ore)
+    SELECT user_id, sum(win_amount)::int FROM cashed
+      WHERE currency = 'ar' GROUP BY user_id
+    ON CONFLICT (user_id) DO UPDATE
+      SET ore = mc_accounts.ore + EXCLUDED.ore, updated_at = now()
+    RETURNING 1
+  )
+  SELECT count(*) INTO v_count FROM cashed;
+
+  RETURN v_count;
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.6 Блэкджек: валюта хранится в раздаче
+-- --------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.bj_deal(numeric);
+
+CREATE OR REPLACE FUNCTION public.bj_deal(p_stake numeric, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_bal numeric;
+  v_taken integer[] := '{}';
+  v_player integer[];
+  v_dealer integer[];
+  v_card integer;
+  v_round uuid;
+  v_player_bj boolean;
+  v_dealer_bj boolean;
+  v_payout numeric := 0;
+  v_status text := 'play';
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  IF EXISTS (SELECT 1 FROM public.bj_rounds WHERE user_id = auth.uid() AND status = 'play') THEN
+    RAISE EXCEPTION 'Сначала доиграй текущую раздачу';
+  END IF;
+
+  v_bal := public.game_debit(p_stake, v_cur);
+  IF v_cur = 'sv' THEN PERFORM public.casino_take(p_stake); END IF;
+
+  FOR i IN 1..4 LOOP
+    v_card := public.bj_draw(v_taken);
+    v_taken := v_taken || v_card;
+    IF i IN (1, 3) THEN v_player := v_player || v_card; ELSE v_dealer := v_dealer || v_card; END IF;
+  END LOOP;
+  v_player_bj := public.bj_is_blackjack(v_player);
+  v_dealer_bj := public.bj_is_blackjack(v_dealer);
+
+  IF v_player_bj AND v_dealer_bj THEN
+    v_status := 'push'; v_payout := p_stake;
+  ELSIF v_player_bj THEN
+    v_status := 'blackjack'; v_payout := round(p_stake * 2.5, 2);
+  ELSIF v_dealer_bj THEN
+    v_status := 'lost'; v_payout := 0;
+  END IF;
+
+  INSERT INTO public.bj_rounds (user_id, stake, player_cards, dealer_visible, status, payout, currency)
+    VALUES (auth.uid(), p_stake, v_player, v_dealer[1], v_status, v_payout, v_cur)
+    RETURNING id INTO v_round;
+  INSERT INTO public.bj_secrets (round_id, dealer_cards) VALUES (v_round, v_dealer);
+
+  IF v_payout > 0 THEN
+    v_bal := public.game_credit(v_payout, v_cur);
+  ELSE
+    v_bal := public.game_balance(v_cur);
+  END IF;
+
+  IF v_status <> 'play' THEN
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+        'stake', p_stake, 'currency', v_cur, 'doubled', false,
+        'player', public.bj_hand_value(v_player),
+        'dealer', public.bj_hand_value(v_dealer), 'outcome', v_status, 'win', v_payout));
+  END IF;
+
+  RETURN jsonb_build_object(
+    'round_id', v_round, 'player_cards', to_jsonb(v_player),
+    'dealer_visible', v_dealer[1], 'player_value', public.bj_hand_value(v_player),
+    'status', v_status, 'payout', v_payout, 'bal', v_bal, 'currency', v_cur, 'stake', p_stake);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_hit(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_dealer integer[];
+  v_taken integer[];
+  v_card integer;
+  v_value integer;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  SELECT dealer_cards INTO v_dealer FROM public.bj_secrets WHERE round_id = p_round;
+  v_taken := v_round.player_cards || v_dealer;
+  v_card := public.bj_draw(v_taken);
+  UPDATE public.bj_rounds SET player_cards = player_cards || v_card
+    WHERE id = p_round RETURNING player_cards INTO v_round.player_cards;
+  v_value := public.bj_hand_value(v_round.player_cards);
+  IF v_value > 21 THEN
+    UPDATE public.bj_rounds SET status = 'lost', payout = 0 WHERE id = p_round;
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+        'stake', v_round.stake * (CASE WHEN v_round.doubled THEN 2 ELSE 1 END),
+        'currency', v_round.currency, 'doubled', v_round.doubled, 'player', v_value,
+        'dealer', public.bj_hand_value(v_dealer), 'outcome', 'lost', 'win', 0));
+  END IF;
+  v_bal := public.game_balance(v_round.currency);
+  RETURN jsonb_build_object('player_cards', to_jsonb(v_round.player_cards),
+    'player_value', v_value, 'bust', v_value > 21,
+    'bal', v_bal, 'currency', v_round.currency);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_double(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_bal numeric;
+  v_extra numeric;
+  v_dealer integer[];
+  v_card integer;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  IF coalesce(array_length(v_round.player_cards, 1), 0) <> 2 THEN
+    RAISE EXCEPTION 'Дабл только на первых двух картах';
+  END IF;
+  IF v_round.doubled THEN RAISE EXCEPTION 'Дабл уже сделан'; END IF;
+
+  v_extra := v_round.stake;
+  v_bal := public.game_debit(v_extra, v_round.currency);
+  UPDATE public.bj_rounds SET doubled = true WHERE id = p_round;
+  IF v_round.currency = 'sv' THEN
+    UPDATE public.profiles SET total_wagered = total_wagered + v_extra, updated_at = now()
+      WHERE id = auth.uid();
+    PERFORM public.casino_take(v_extra);
+  END IF;
+
+  SELECT dealer_cards INTO v_dealer FROM public.bj_secrets WHERE round_id = p_round;
+  v_card := public.bj_draw(v_round.player_cards || v_dealer);
+  UPDATE public.bj_rounds SET player_cards = player_cards || v_card WHERE id = p_round;
+  RETURN public.bj_stand(p_round);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.bj_stand(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.bj_rounds%rowtype;
+  v_dealer integer[];
+  v_taken integer[];
+  v_pval integer;
+  v_dval integer;
+  v_stake_total numeric;
+  v_payout numeric;
+  v_status text;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_round FROM public.bj_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раздача уже завершена'; END IF;
+  SELECT dealer_cards INTO v_dealer FROM public.bj_secrets WHERE round_id = p_round;
+  v_taken := v_round.player_cards || v_dealer;
+  WHILE public.bj_hand_value(v_dealer) < 17 LOOP
+    v_dealer := v_dealer || public.bj_draw(v_taken);
+    v_taken := v_taken || v_dealer[array_upper(v_dealer, 1)];
+  END LOOP;
+  UPDATE public.bj_secrets SET dealer_cards = v_dealer WHERE round_id = p_round;
+
+  v_pval := public.bj_hand_value(v_round.player_cards);
+  v_dval := public.bj_hand_value(v_dealer);
+  v_stake_total := v_round.stake * (CASE WHEN v_round.doubled THEN 2 ELSE 1 END);
+
+  IF v_pval > 21 THEN
+    v_status := 'lost'; v_payout := 0;
+  ELSIF v_dval > 21 OR v_pval > v_dval THEN
+    v_status := 'won'; v_payout := round(v_stake_total * 2, 2);
+  ELSIF v_pval = v_dval THEN
+    v_status := 'push'; v_payout := v_stake_total;
+  ELSE
+    v_status := 'lost'; v_payout := 0;
+  END IF;
+
+  UPDATE public.bj_rounds SET status = v_status, payout = v_payout WHERE id = p_round;
+  IF v_payout > 0 THEN
+    v_bal := public.game_credit(v_payout, v_round.currency);
+  ELSE
+    v_bal := public.game_balance(v_round.currency);
+  END IF;
+
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'blackjack', jsonb_build_object(
+      'stake', v_stake_total, 'currency', v_round.currency, 'doubled', v_round.doubled,
+      'player', v_pval, 'dealer', v_dval, 'outcome', v_status, 'win', v_payout));
+
+  RETURN jsonb_build_object(
+    'player_cards', to_jsonb(v_round.player_cards),
+    'dealer_cards', to_jsonb(v_dealer), 'player_value', v_pval, 'dealer_value', v_dval,
+    'status', v_status, 'payout', v_payout, 'bal', v_bal, 'currency', v_round.currency);
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.7 АР больше нельзя купить за SV₽
+-- --------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.mc_buy_ore(integer);
+
+-- Кэшбэк и лента выигрышей — только SV₽ (АР не участвует).
+CREATE OR REPLACE FUNCTION public.claim_cashback()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_claim record;
+  v_loss numeric;
+  v_level integer;
+  v_pct numeric;
+  v_pay numeric;
+  v_bal numeric;
+  v_wagered numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_claim FROM public.cashback_claims WHERE user_id = auth.uid();
+  IF v_claim.user_id IS NOT NULL AND v_claim.last_claim >= current_date THEN
+    RAISE EXCEPTION 'Кэшбэк уже забран сегодня — приходи завтра';
+  END IF;
+  SELECT coalesce(sum((result->>'stake')::numeric), 0)
+       - coalesce(sum(coalesce(result->>'win', '0')::numeric), 0)
+    INTO v_loss
+  FROM public.game_attempts
+  WHERE user_id = auth.uid()
+    AND created_at >= current_date - interval '1 day'
+    AND created_at < current_date
+    AND game IN ('wheel', 'plinko', 'puddles', 'ruble')
+    AND coalesce(result->>'currency', 'sv') = 'sv';
+  IF coalesce(v_loss, 0) < 10 THEN
+    RAISE EXCEPTION 'Вчера ты не проиграл достаточно — кэшбэка нет (и это хорошо)';
+  END IF;
+  SELECT total_wagered INTO v_wagered FROM public.profiles WHERE id = auth.uid();
+  v_level := public.vip_level(v_wagered);
+  v_pct := 3 + v_level;
+  v_pay := round(v_loss * v_pct / 100.0, 2);
+  UPDATE public.profiles SET bal = bal + v_pay, updated_at = now()
+    WHERE id = auth.uid() RETURNING bal INTO v_bal;
+  INSERT INTO public.cashback_claims (user_id, last_claim) VALUES (auth.uid(), current_date)
+    ON CONFLICT (user_id) DO UPDATE SET last_claim = current_date;
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'cashback', jsonb_build_object(
+      'win', v_pay, 'loss', v_loss, 'level', v_level, 'pct', v_pct));
+  RETURN jsonb_build_object('win', v_pay, 'loss', v_loss, 'level', v_level,
+    'levelName', (ARRAY['Бессовестный','Хряк','Свин-магнат','Барон','Свиновладыка'])[v_level + 1],
+    'pct', v_pct, 'bal', v_bal);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.recent_wins()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  RETURN (
+    SELECT coalesce(jsonb_agg(t ORDER BY t.at DESC), '[]'::jsonb)
+    FROM (
+      SELECT p.username, a.game, (a.result->>'win')::numeric AS win, a.created_at AS at
+      FROM (
+        SELECT user_id, game, result, created_at
+        FROM public.game_attempts
+        ORDER BY id DESC LIMIT 300
+      ) a JOIN public.profiles p ON p.id = a.user_id
+      WHERE coalesce((a.result->>'win')::numeric, 0) > 0
+        AND coalesce(a.result->>'currency', 'sv') = 'sv'
+      LIMIT 15
+    ) t
+  );
+END $$;
+
+-- --------------------------------------------------------------------
+-- 17.8 Права
+-- --------------------------------------------------------------------
+
+REVOKE ALL ON FUNCTION
+  public.game_currency(text),
+  public.game_balance(text),
+  public.game_debit(numeric, text),
+  public.game_credit(numeric, text)
+FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION
+  public.wheel_spin(text),
+  public.plinko_drop(numeric, text, text),
+  public.puddles_start(numeric, integer, text),
+  public.ruble_predict(text, numeric, text),
+  public.bj_deal(numeric, text),
+  public.crash_place_bet(bigint, numeric, numeric, text)
+TO authenticated, anon;
 
 NOTIFY pgrst, 'reload schema';

@@ -10,6 +10,8 @@ type RouletteWheelProps = {
   wonSectorIdx: number | null
   rouletteResult: string | null
   spinRoulette: () => void
+  unit: string
+  stake: number
 }
 
 export default function RouletteWheel({
@@ -17,7 +19,9 @@ export default function RouletteWheel({
   wheelRotation,
   wonSectorIdx,
   rouletteResult,
-  spinRoulette
+  spinRoulette,
+  unit,
+  stake
 }: RouletteWheelProps) {
   return (
     <div className="wl-banner-card highlight" style={{ padding: '28px 24px 34px', textAlign: 'center' }}>
@@ -26,7 +30,7 @@ export default function RouletteWheel({
         КОРЫТО ФОРТУНЫ 🐷
       </h2>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 14, marginBottom: 18, maxWidth: 520, margin: '0 auto 18px' }}>
-        Испытайте удачу! Ставка 100 SV₽. Крутите корыто и забирайте моментальные множители от x0 до x10!
+        Испытайте удачу! Ставка {stake} {unit}. Крутите корыто и забирайте моментальные множители от x0 до x10!
       </p>
 
       {/* Physics-Based SVG Fortune Wheel */}
@@ -161,7 +165,7 @@ export default function RouletteWheel({
           disabled={spinning}
           onClick={spinRoulette}
         >
-          {spinning ? 'Корыто крутится...' : 'Крутить за 100 SV₽ 🎰'}
+          {spinning ? 'Корыто крутится...' : `Крутить за ${stake} ${unit} 🎰`}
         </button>
       </div>
     </div>

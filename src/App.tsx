@@ -64,6 +64,10 @@ const KEY_EVENTS = 'svinline.v3.custom_events'
 const KEY_ACCOUNTS = 'svinline.v3.accounts'
 const KEY_CURRENT_USER = 'svinline.v3.current_user_id'
 
+const unitOf = (currency: 'sv' | 'ar') => (currency === 'ar' ? 'АР' : 'SV₽')
+const fmtCur = (value: number, currency: 'sv' | 'ar') =>
+  value.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ' + unitOf(currency)
+
 const freshState = () => ({
   bal: START,
   bets: [] as any[],
@@ -236,6 +240,8 @@ export default function App() {
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
   const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack'>('crash')
+  const [playCurrency, setPlayCurrency] = useState<'sv' | 'ar'>('sv')
+  const [arBalance, setArBalance] = useState(0)
   const [jackpotWin, setJackpotWin] = useState<number | null>(null)
   const [selectedSport, setSelectedSport] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -286,6 +292,7 @@ export default function App() {
   const [crashAutoCashout, setCrashAutoCashout] = useState('')
   const [myCrashBet, setMyCrashBet] = useState<{
     stake: number
+    currency: 'sv' | 'ar'
     autoCashout?: number
     cashedOutMul?: number
     winAmount?: number
@@ -795,6 +802,15 @@ export default function App() {
   }
 
   // ===== Общий движок Хряк-Крэша: раунды и ставки живут в базе =====
+  const refreshAr = useCallback(async () => {
+    if (!currentUser) { setArBalance(0); return }
+    const { data, error } = await supabase.rpc('mc_status')
+    if (!error && data) setArBalance(Number(data.ore || 0))
+  }, [currentUser?.id])
+
+  useEffect(() => { refreshAr() }, [refreshAr])
+  useEffect(() => { if (playCurrency === 'ar') refreshAr() }, [playCurrency, refreshAr])
+
   const fetchCrashBets = useCallback(async (roundId: number) => {
     const { data } = await supabase.from('crash_bets').select('*').eq('round_id', roundId).order('created_at', { ascending: true })
     if (!data) return
@@ -802,6 +818,7 @@ export default function App() {
     const mine = data.find((b: any) => b.user_id === currentUserRef.current?.id)
     setMyCrashBet(mine ? {
       stake: Number(mine.stake),
+      currency: (mine.currency === 'ar' ? 'ar' : 'sv') as 'sv' | 'ar',
       autoCashout: mine.auto_cashout != null ? Number(mine.auto_cashout) : undefined,
       cashedOutMul: mine.cashed_out_mul != null ? Number(mine.cashed_out_mul) : undefined,
       winAmount: mine.win_amount != null ? Number(mine.win_amount) : undefined
@@ -892,47 +909,60 @@ export default function App() {
       return
     }
 
-    const v = parseFloat(crashStake)
+    const cur = playCurrency
+    const raw = parseFloat(crashStake)
+    const v = cur === 'ar' ? Math.floor(raw) : raw
     if (!isFinite(v) || isNaN(v) || v < 10) {
-      notify('Минимальная ставка — 10 SV₽')
+      notify(`Минимальная ставка — 10 ${unitOf(cur)}`)
       return
     }
     const autoMul = parseFloat(crashAutoCashout)
     const validAuto = isFinite(autoMul) && autoMul >= 1.05 ? r2(autoMul) : null
 
-    const { data, error } = await supabase.rpc('crash_place_bet', { p_round: r.id, p_stake: v, p_auto: validAuto })
-    if (error) {
-      notify(`❌ ${error.message}`)
+    const { data, error } = await supabase.rpc('crash_place_bet', {
+      p_round: r.id, p_stake: v, p_auto: validAuto, p_currency: cur
+    })
+    if (error || !data) {
+      notify(`❌ ${error?.message || 'Не удалось сделать ставку'}`)
       return
     }
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: `Ставка в общем раунде Хряк-Крэш #${r.id}`, d: -v })
-      if (data && data.bal !== undefined) next.bal = Number(data.bal)
-      return next
-    })
+    if (cur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: `Ставка в общем раунде Хряк-Крэш #${r.id}`, d: -v })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
     fetchCrashBets(r.id)
-    notify(`Ставка ${fmt(v)} на общий раунд #${r.id} принята! 🚀`)
+    notify(`Ставка ${fmtCur(v, cur)} на общий раунд #${r.id} принята! 🚀`)
   }
 
   const cancelCrashBet = async () => {
     const r = crashRoundRef.current
     if (!r || !myCrashBet || myCrashBet.cashedOutMul) return
+    const cur = myCrashBet.currency
     const refund = myCrashBet.stake
     const { data, error } = await supabase.rpc('crash_cancel_bet', { p_round: r.id })
-    if (error) {
-      notify(`❌ ${error.message}`)
+    if (error || !data) {
+      notify(`❌ ${error?.message || 'Не удалось отменить ставку'}`)
       return
     }
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: `Отмена ставки в Хряк-Крэш #${r.id}`, d: refund })
-      if (data && data.bal !== undefined) next.bal = Number(data.bal)
-      return next
-    })
+    if (cur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: `Отмена ставки в Хряк-Крэш #${r.id}`, d: refund })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
     setMyCrashBet(null)
     fetchCrashBets(r.id)
-    notify(`Ставка ${fmt(refund)} возвращена на баланс!`)
+    notify(`Ставка ${fmtCur(refund, cur)} возвращена на баланс!`)
   }
 
   const cashoutCrash = async () => {
@@ -940,22 +970,27 @@ export default function App() {
     if (!r || !myCrashBet || myCrashBet.cashedOutMul) return
 
     const { data, error } = await supabase.rpc('crash_cashout', { p_round: r.id })
-    if (error) {
-      notify(`❌ ${error.message}`)
+    if (error || !data) {
+      notify(`❌ ${error?.message || 'Не удалось забрать'}`)
       fetchCrashBets(r.id)
       return
     }
+    const cur = (data.currency === 'ar' ? 'ar' : myCrashBet.currency) as 'sv' | 'ar'
     const mul = Number(data.mul)
     const winAmount = Number(data.win)
-    setMyCrashBet(prev => prev ? { ...prev, cashedOutMul: mul, winAmount } : null)
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: `Выигрыш в общем раунде Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
-      next.bal = Number(data.bal)
-      return next
-    })
+    setMyCrashBet(prev => prev ? { ...prev, currency: cur, cashedOutMul: mul, winAmount } : null)
+    if (cur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: `Выигрыш в общем раунде Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
     fetchCrashBets(r.id)
-    notify(`Забрано ${fmt(winAmount)} по коэффициенту ${mul.toFixed(2)}x! 🎉`)
+    notify(`Забрано ${fmtCur(winAmount, cur)} по коэффициенту ${mul.toFixed(2)}x! 🎉`)
   }
 
   // Roulette Spin Logic - Physics-based Fortune Wheel (результат решает сервер)
@@ -971,7 +1006,8 @@ export default function App() {
     }
     if (spinning) return
 
-    const { data, error } = await supabase.rpc('wheel_spin')
+    const cur = playCurrency
+    const { data, error } = await supabase.rpc('wheel_spin', { p_currency: cur })
     if (error || !data) {
       notify(`❌ ${error?.message || 'Не удалось крутить'}`)
       return
@@ -986,17 +1022,22 @@ export default function App() {
     const win = Number(data.win)
     const bal = Number(data.bal)
     const jp = Number(data.jackpot || 0)
+    const stake = Number(data.stake || (cur === 'ar' ? 10 : 100))
 
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: 'Ставка в «Корыто Фортуны»', d: -100 })
-      if (win > 0) {
-        next.log.unshift({ t: Date.now(), x: `Выигрыш в «Корыто Фортуны» (${sector.label} • ${sector.title})`, d: win })
-      }
-      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
-      next.bal = bal
-      return next
-    })
+    if (cur === 'ar') {
+      setArBalance(bal)
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: 'Ставка в «Корыто Фортуны»', d: -stake })
+        if (win > 0) {
+          next.log.unshift({ t: Date.now(), x: `Выигрыш в «Корыто Фортуны» (${sector.label} • ${sector.title})`, d: win })
+        }
+        if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
+        next.bal = bal
+        return next
+      })
+    }
     if (jp > 0) setJackpotWin(jp)
 
     // Calculate rotation to land winningIdx at 270 deg (top pointer)
@@ -1012,7 +1053,7 @@ export default function App() {
     setTimeout(() => {
       setSpinning(false)
       setWonSectorIdx(winningIdx)
-      setRouletteResult(sector.mul === 0 ? `Увы! Выпало ${sector.label} (${sector.title}) 🐽` : `🎉 Ура! Выпало ${sector.label} — ${sector.title} (+${fmt(win)})!`)
+      setRouletteResult(sector.mul === 0 ? `Увы! Выпало ${sector.label} (${sector.title}) 🐽` : `🎉 Ура! Выпало ${sector.label} — ${sector.title} (+${fmtCur(win, cur)})!`)
     }, 4200)
   }
 
@@ -1052,16 +1093,23 @@ export default function App() {
   const puddlesStart = async (stake: number, mines: number): Promise<string | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
     if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
-    const { data, error } = await supabase.rpc('puddles_start', { p_stake: stake, p_mines: mines })
+    const cur = playCurrency
+    const s = cur === 'ar' ? Math.floor(stake) : stake
+    const { data, error } = await supabase.rpc('puddles_start', { p_stake: s, p_mines: mines, p_currency: cur })
     if (error || !data) { notify(`❌ ${error?.message || 'Не удалось начать раунд'}`); return null }
     const jp = Number(data.jackpot || 0)
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: 'Ставка в «Грязевые лужи»', d: -stake })
-      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
-      next.bal = Number(data.bal)
-      return next
-    })
+    const realCur = (data.currency === 'ar' ? 'ar' : cur) as 'sv' | 'ar'
+    if (realCur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: 'Ставка в «Грязевые лужи»', d: -s })
+        if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
     if (jp > 0) setJackpotWin(jp)
     return String(data.round_id)
   }
@@ -1070,6 +1118,28 @@ export default function App() {
     const { data, error } = await supabase.rpc('puddles_pick', { p_round: roundId, p_cell: cell })
     if (error || !data) { notify(`❌ ${error?.message || 'Ошибка хода'}`); return null }
     if (data.auto_cashed) {
+      const cur = (data.currency === 'ar' ? 'ar' : playCurrency) as 'sv' | 'ar'
+      if (cur === 'ar') {
+        setArBalance(Number(data.bal))
+      } else {
+        setS(prev => {
+          const next = structuredClone(prev)
+          next.log.unshift({ t: Date.now(), x: `Выигрыш в «Грязевые лужи» (x${data.mul})`, d: Number(data.win) })
+          next.bal = Number(data.bal)
+          return next
+        })
+      }
+    }
+    return data
+  }
+
+  const puddlesCash = async (roundId: string) => {
+    const { data, error } = await supabase.rpc('puddles_cash', { p_round: roundId })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось забрать'}`); return null }
+    const cur = (data.currency === 'ar' ? 'ar' : playCurrency) as 'sv' | 'ar'
+    if (cur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
       setS(prev => {
         const next = structuredClone(prev)
         next.log.unshift({ t: Date.now(), x: `Выигрыш в «Грязевые лужи» (x${data.mul})`, d: Number(data.win) })
@@ -1080,20 +1150,8 @@ export default function App() {
     return data
   }
 
-  const puddlesCash = async (roundId: string) => {
-    const { data, error } = await supabase.rpc('puddles_cash', { p_round: roundId })
-    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось забрать'}`); return null }
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: `Выигрыш в «Грязевые лужи» (x${data.mul})`, d: Number(data.win) })
-      next.bal = Number(data.bal)
-      return next
-    })
-    return data
-  }
-
   // Восстановление незакрытого раунда после перезагрузки страницы
-  const puddlesRestore = async (): Promise<{ roundId: string; stake: number; mines: number; opened: number[] } | null> => {
+  const puddlesRestore = async (): Promise<{ roundId: string; stake: number; mines: number; opened: number[]; currency: 'sv' | 'ar' } | null> => {
     const { data } = await supabase
       .from('puddles_rounds')
       .select('*')
@@ -1102,31 +1160,47 @@ export default function App() {
       .limit(1)
       .maybeSingle()
     if (!data) return null
-    return { roundId: String(data.id), stake: Number(data.stake), mines: Number(data.mines_count), opened: (data.opened || []) as number[] }
+    return {
+      roundId: String(data.id),
+      stake: Number(data.stake),
+      mines: Number(data.mines_count),
+      opened: (data.opened || []) as number[],
+      currency: (data.currency === 'ar' ? 'ar' : 'sv') as 'sv' | 'ar'
+    }
   }
 
   // Пяточок-Плинко: бросок и выплата решаются на сервере, клиент только показывает полёт
   const plinkoBet = async (stake: number, risk: string): Promise<{ slot: number; mul: number; win: number } | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
     if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
-    const { data, error } = await supabase.rpc('plinko_drop', { p_stake: stake, p_risk: risk })
+    const cur = playCurrency
+    const s = cur === 'ar' ? Math.floor(stake) : stake
+    const { data, error } = await supabase.rpc('plinko_drop', { p_stake: s, p_risk: risk, p_currency: cur })
     if (error || !data) { notify(`❌ ${error?.message || 'Не удалось бросить'}`); return null }
     const jp = Number(data.jackpot || 0)
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: 'Ставка в «Пяточок-Плинко»', d: -stake })
-      const win = Number(data.win)
-      if (win > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Пяточок-Плинко» (x${data.mul})`, d: win })
-      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
-      next.bal = Number(data.bal)
-      return next
-    })
+    if (cur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: 'Ставка в «Пяточок-Плинко»', d: -s })
+        const win = Number(data.win)
+        if (win > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Пяточок-Плинко» (x${data.mul})`, d: win })
+        if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
     if (jp > 0) setJackpotWin(jp)
     return { slot: Number(data.slot), mul: Number(data.mul), win: Number(data.win) }
   }
 
   // Хрюк-блэкджек: синхронизация баланса/лога после серверных ходов крупье
-  const bjBal = (bal: number, log: { x: string; d: number } | null) => {
+  const bjBal = (bal: number, log: { x: string; d: number } | null, currency: 'sv' | 'ar' = 'sv') => {
+    if (currency === 'ar') {
+      setArBalance(bal)
+      return
+    }
     setS(prev => {
       const next = structuredClone(prev)
       if (log) next.log.unshift({ t: Date.now(), x: log.x, d: log.d })
@@ -1139,18 +1213,24 @@ export default function App() {
   const rublePredict = async (side: 'up' | 'down', stake: number): Promise<RubleResult | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
     if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
-    const { data, error } = await supabase.rpc('ruble_predict', { p_side: side, p_stake: stake })
+    const cur = playCurrency
+    const s = cur === 'ar' ? Math.floor(stake) : stake
+    const { data, error } = await supabase.rpc('ruble_predict', { p_side: side, p_stake: s, p_currency: cur })
     if (error || !data) { notify(`❌ ${error?.message || 'Не удалось сделать ставку'}`); return null }
     const jp = Number(data.jackpot || 0)
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: `Ставка на «${side === 'up' ? 'вверх' : 'вниз'}» в «Курс рубля»`, d: -stake })
-      const payout = Number(data.payout)
-      if (payout > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Курс рубля» (x${data.mul})`, d: payout })
-      if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
-      next.bal = Number(data.bal)
-      return next
-    })
+    if (cur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: `Ставка на «${side === 'up' ? 'вверх' : 'вниз'}» в «Курс рубля»`, d: -s })
+        const payout = Number(data.payout)
+        if (payout > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Курс рубля» (x${data.mul})`, d: payout })
+        if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
     if (jp > 0) setJackpotWin(jp)
     return {
       start: Number(data.start), final: Number(data.final), resolveMs: Number(data.resolve_ms),
@@ -1615,6 +1695,36 @@ export default function App() {
             <div style={{ maxWidth: 1060, margin: '0 auto' }}>
               <CasinoStrip />
               <JackpotOverlay amount={jackpotWin} onClose={() => setJackpotWin(null)} />
+              <div className="wl-currency-switch">
+                <span className="wl-currency-label">Играть на:</span>
+                <button
+                  className={`wl-round-btn ${playCurrency === 'sv' ? 'active' : ''}`}
+                  onClick={() => setPlayCurrency('sv')}
+                >
+                  SV₽ · {S.bal.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
+                </button>
+                <button
+                  className={`wl-round-btn ${playCurrency === 'ar' ? 'active' : ''}`}
+                  onClick={() => {
+                    if (!currentUser) {
+                      setAuthModalOpen(true)
+                      notify('Войди через Twitch, чтобы играть на АР')
+                      return
+                    }
+                    setPlayCurrency('ar')
+                    refreshAr()
+                  }}
+                  disabled={!currentUser}
+                  title={currentUser ? 'Играть на алмазной валюте' : 'Войди через Twitch, чтобы играть на АР'}
+                >
+                  АР · {arBalance.toLocaleString('ru-RU')}
+                </button>
+              </div>
+              {playCurrency === 'ar' && (
+                <div className="wl-currency-note">
+                  1 АР = 1 алмазная руда. Занос и вывод — в разделе «Шахта».
+                </div>
+              )}
               {/* Game Mode Switcher */}
               <div className="wl-games-tabs">
                 <button
@@ -1675,14 +1785,15 @@ export default function App() {
                   cancelCrashBet={cancelCrashBet}
                   cashoutCrash={cashoutCrash}
                   currentUser={currentUser}
+                  unit={unitOf(playCurrency)}
                 />
               )}
 
               {/* ROULETTE (КОРЫТО ФОРТУНЫ) */}
-              {gamesTab === 'plinko' && <Plinko bal={S.bal} onBet={plinkoBet} />}
-              {gamesTab === 'puddles' && <MudPuddles bal={S.bal} onStart={puddlesStart} onPick={puddlesPick} onCash={puddlesCash} onRestore={puddlesRestore} />}
-              {gamesTab === 'ruble' && <RubleChart bal={S.bal} onPredict={rublePredict} />}
-              {gamesTab === 'blackjack' && <Blackjack bal={S.bal} onBal={bjBal} notify={notify} onNeedAuth={() => setAuthModalOpen(true)} />}
+              {gamesTab === 'plinko' && <Plinko bal={playCurrency === 'ar' ? arBalance : S.bal} unit={unitOf(playCurrency)} onBet={plinkoBet} />}
+              {gamesTab === 'puddles' && <MudPuddles bal={playCurrency === 'ar' ? arBalance : S.bal} unit={unitOf(playCurrency)} onStart={puddlesStart} onPick={puddlesPick} onCash={puddlesCash} onRestore={puddlesRestore} />}
+              {gamesTab === 'ruble' && <RubleChart bal={playCurrency === 'ar' ? arBalance : S.bal} unit={unitOf(playCurrency)} onPredict={rublePredict} />}
+              {gamesTab === 'blackjack' && <Blackjack bal={playCurrency === 'ar' ? arBalance : S.bal} currency={playCurrency} unit={unitOf(playCurrency)} onBal={bjBal} notify={notify} onNeedAuth={() => setAuthModalOpen(true)} />}
 
               {gamesTab === 'roulette' && (
                 <RouletteWheel
@@ -1691,6 +1802,8 @@ export default function App() {
                   wonSectorIdx={wonSectorIdx}
                   rouletteResult={rouletteResult}
                   spinRoulette={spinRoulette}
+                  unit={unitOf(playCurrency)}
+                  stake={playCurrency === 'ar' ? 10 : 100}
                 />
               )}
             </div>
@@ -1733,7 +1846,6 @@ export default function App() {
           {view === 'mine' && (
             <MineView
               currentUser={currentUser}
-              balance={S.bal}
               notify={notify}
               onNeedAuth={() => setAuthModalOpen(true)}
               onBal={bjBal}

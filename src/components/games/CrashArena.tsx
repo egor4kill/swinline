@@ -12,6 +12,7 @@ type CrashArenaProps = {
   crashHistory: number[]
   myCrashBet: {
     stake: number
+    currency: 'sv' | 'ar'
     autoCashout?: number
     cashedOutMul?: number
     winAmount?: number
@@ -25,6 +26,7 @@ type CrashArenaProps = {
   cancelCrashBet: () => void
   cashoutCrash: () => void
   currentUser: UserAccount | null
+  unit: string
 }
 
 export default function CrashArena({
@@ -42,8 +44,13 @@ export default function CrashArena({
   placeCrashBet,
   cancelCrashBet,
   cashoutCrash,
-  currentUser
+  currentUser,
+  unit
 }: CrashArenaProps) {
+  const money = (n: number, c: 'sv' | 'ar' = 'sv') =>
+    n.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ' + (c === 'ar' ? 'АР' : 'SV₽')
+  const svBank = liveCrashBets.filter(b => b.currency !== 'ar').reduce((acc, b) => acc + Number(b.stake || 0), 0)
+  const arBank = liveCrashBets.filter(b => b.currency === 'ar').reduce((acc, b) => acc + Number(b.stake || 0), 0)
   const progress = Math.min(1, Math.max(0, (crashMultiplier - 1.0) / 8.0))
   const curX = 40 + progress * 480
   const curY = 230 - Math.pow(progress, 0.8) * 180
@@ -205,7 +212,7 @@ export default function CrashArena({
         {/* Multiplayer Control Bar */}
         <div style={{ background: '#161a24', padding: 16, borderRadius: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 150 }}>
-            <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА SV₽:</label>
+            <label style={{ fontSize: 11, color: 'var(--tx-muted)', fontWeight: 700 }}>СТАВКА {unit}:</label>
             <input
               type="text"
               className="wl-stake-input"
@@ -216,7 +223,7 @@ export default function CrashArena({
           </div>
 
           <div style={{ display: 'flex', gap: 6 }}>
-            {['100', '200', '500', '1000'].map(val => (
+            {(unit === 'АР' ? ['10', '25', '50', '100'] : ['100', '200', '500', '1000']).map(val => (
               <button
                 key={val}
                 className="wl-quick-btn"
@@ -257,7 +264,7 @@ export default function CrashArena({
                   style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, background: '#3b1d22', color: '#ff7878', border: '1px solid #ef4444' }}
                   onClick={cancelCrashBet}
                 >
-                  ОТМЕНИТЬ ({fmt(myCrashBet.stake)}) ✖
+                  ОТМЕНИТЬ ({money(myCrashBet.stake, myCrashBet.currency)}) ✖
                 </button>
               )
             )}
@@ -269,7 +276,7 @@ export default function CrashArena({
                   style={{ width: '100%', height: 48, fontSize: 15, fontWeight: 800, borderRadius: 10 }}
                   onClick={cashoutCrash}
                 >
-                  ЗАБРАТЬ {fmt(r2(myCrashBet.stake * crashMultiplier))} 💰
+                  ЗАБРАТЬ {money(r2(myCrashBet.stake * crashMultiplier), myCrashBet.currency)} 💰
                 </button>
               ) : myCrashBet && myCrashBet.cashedOutMul ? (
                 <button
@@ -277,7 +284,7 @@ export default function CrashArena({
                   className="wl-btn-green"
                   style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.9, cursor: 'default' }}
                 >
-                  ЗАБРАНО {fmt(myCrashBet.winAmount)} (x{myCrashBet.cashedOutMul.toFixed(2)}) ✅
+                  ЗАБРАНО {money(myCrashBet.winAmount, myCrashBet.currency)} (x{myCrashBet.cashedOutMul.toFixed(2)}) ✅
                 </button>
               ) : (
                 <button
@@ -297,7 +304,7 @@ export default function CrashArena({
                   className="wl-btn-green"
                   style={{ width: '100%', height: 48, fontSize: 14, fontWeight: 800, borderRadius: 10, opacity: 0.9, cursor: 'default' }}
                 >
-                  ВЫИГРЫШ {fmt(myCrashBet.winAmount)} 🏆
+                  ВЫИГРЫШ {money(myCrashBet.winAmount, myCrashBet.currency)} 🏆
                 </button>
               ) : myCrashBet && !myCrashBet.cashedOutMul ? (
                 <button
@@ -328,7 +335,7 @@ export default function CrashArena({
             <span>ОНЛАЙН СТАВКИ ({liveCrashBets.length})</span>
           </div>
           <div style={{ fontSize: 12, color: 'var(--tx-muted)', fontWeight: 700 }}>
-            Банк: {fmt(liveCrashBets.reduce((acc, b) => acc + Number(b.stake || 0), 0))}
+            Банк: {money(svBank, 'sv')}{arBank > 0 ? ` + ${money(arBank, 'ar')}` : ''}
           </div>
         </div>
 
@@ -365,13 +372,13 @@ export default function CrashArena({
 
                   <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
                     <div style={{ fontWeight: 700, fontSize: 12 }}>
-                      {fmt(Number(b.stake))}
+                      {money(Number(b.stake), b.currency === 'ar' ? 'ar' : 'sv')}
                     </div>
                     <div style={{ fontSize: 11, fontWeight: 800 }}>
                       {isWon ? (
-                        <span style={{ color: 'var(--green)' }}>+{fmt(winAmount || 0)} (x{cashedMul!.toFixed(2)})</span>
+                        <span style={{ color: 'var(--green)' }}>+{money(winAmount || 0, b.currency === 'ar' ? 'ar' : 'sv')} (x{cashedMul!.toFixed(2)})</span>
                       ) : isCrashed ? (
-                        <span style={{ color: '#ef4444' }}>0 SV₽ 💥</span>
+                        <span style={{ color: '#ef4444' }}>0 {b.currency === 'ar' ? 'АР' : 'SV₽'} 💥</span>
                       ) : (
                         <span style={{ color: 'var(--org)' }}>🚀 В игре</span>
                       )}

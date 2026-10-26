@@ -13,6 +13,7 @@ export type RubleResult = {
 }
 type Props = {
   bal: number
+  unit: string
   // Сервер сверяет ставку с общей лентой (цена через 30 секунд) и платит; клиент только рисует
   onPredict: (side: Side, stake: number) => Promise<RubleResult | null>
 }
@@ -44,7 +45,8 @@ const NEWS_FLAT = ['Курс остался на месте. Инвесторы 
 
 type TickPoint = { t: number; p: number }
 
-export default function RubleChart({ bal, onPredict }: Props) {
+export default function RubleChart({ bal, unit, onPredict }: Props) {
+  const money = (n: number) => fmt(n) + ' ' + unit
   const [stake, setStake] = useState('100')
   const [busy, setBusy] = useState(false)
   const [news, setNews] = useState('Один курс для всех. Лента идёт всегда, даже когда ты спишь')
@@ -162,7 +164,7 @@ export default function RubleChart({ bal, onPredict }: Props) {
 
   const launch = async (side: Side) => {
     const s = Math.floor(parseFloat(stake))
-    if (!(s >= MIN_BET)) return alert(`Минимальная ставка: ${MIN_BET} SV₽`)
+    if (!(s >= MIN_BET)) return alert(`Минимальная ставка: ${MIN_BET} ${unit}`)
     if (busy) return
     setBusy(true)
     resultRef.current = null
@@ -239,7 +241,7 @@ export default function RubleChart({ bal, onPredict }: Props) {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input aria-label="Ставка, SV₽" inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
+        <input aria-label={`Ставка, ${unit}`} inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
           style={{ width: 110, padding: '12px', borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
         {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
         <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
@@ -254,7 +256,7 @@ export default function RubleChart({ bal, onPredict }: Props) {
       </div>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>
         Выплата = ставка × {PAYOUT}. Исход решает общая лента на сервере: цена сейчас против цены через {TICK_SECONDS} секунд.
-        *Гарантий нет. Сейчас на балансе {fmt(r2(bal))} SV₽.
+        *Гарантий нет. Сейчас на балансе {money(r2(bal))}.
       </p>
     </div>
   )

@@ -4,6 +4,7 @@ import { ROWS, TABLES, RISKS, r2, type Risk } from './plinkoLogic'
 type DropResult = { slot: number; mul: number; win: number }
 type Props = {
   bal: number
+  unit: string
   // Сервер принимает ставку, решает ячейку и платит; возвращает результат броска
   onBet: (stake: number, risk: Risk) => Promise<DropResult | null>
 }
@@ -50,7 +51,8 @@ function PigBall({ x, y }: { x: number; y: number }) {
   )
 }
 
-export default function Plinko({ bal, onBet }: Props) {
+export default function Plinko({ bal, unit, onBet }: Props) {
+  const money = (n: number) => fmt(n) + ' ' + unit
   const [stake, setStake] = useState('100')
   const [risk, setRisk] = useState<Risk>('mid')
   const [, setTick] = useState(0)
@@ -96,7 +98,7 @@ export default function Plinko({ bal, onBet }: Props) {
 
   const launch = async () => {
     const s = Math.floor(parseFloat(stake))
-    if (!(s >= MIN_BET)) return alert(`Минимальная ставка: ${MIN_BET} SV₽`)
+    if (!(s >= MIN_BET)) return alert(`Минимальная ставка: ${MIN_BET} ${unit}`)
     if (balls.current.length >= MAX_BALLS || busy) return
     setBusy(true)
     let res: DropResult | null = null
@@ -139,13 +141,13 @@ export default function Plinko({ bal, onBet }: Props) {
         {RISKS.map(r => <button key={r.id} className={`wl-round-btn ${risk === r.id ? 'active' : ''}`} aria-pressed={risk === r.id} onClick={() => setRisk(r.id)}>{r.label}</button>)}
       </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input aria-label="Ставка, SV₽" inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
+        <input aria-label={`Ставка, ${unit}`} inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
           style={{ width: 110, padding: '12px', borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
         {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
         <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
         <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: busy ? 0.6 : 1 }} onClick={launch}>{busy ? 'Бросок…' : 'Бросить Пяточка'}</button>
       </div>
-      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Выплата = ставка × икс ячейки (решает сервер). Сейчас на балансе {fmt(r2(bal))} SV₽.</p>
+      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Выплата = ставка × икс ячейки (решает сервер). Сейчас на балансе {money(r2(bal))}.</p>
     </div>
   )
 }

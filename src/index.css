@@ -2995,3 +2995,37 @@ button:focus-visible, input:focus-visible {
     animation: none;
   }
 }
+
+/* Переключатель валюты в «Играх 24/7» */
+.wl-currency-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.wl-currency-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tx-muted);
+  margin-right: 2px;
+}
+
+.wl-currency-switch .wl-round-btn {
+  font-family: var(--font-d);
+  font-size: 13px;
+}
+
+.wl-currency-switch .wl-round-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wl-currency-note {
+  font-size: 11px;
+  color: var(--tx-muted);
+  margin: -4px 0 12px;
+}

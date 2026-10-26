@@ -6,6 +6,7 @@ import { r2 } from './logic'
 type Round = {
   id: string
   stake: number
+  currency: 'sv' | 'ar'
   doubled: boolean
   playerCards: number[]
   dealerVisible: number
@@ -17,8 +18,10 @@ type Round = {
 
 type Props = {
   bal: number
+  currency: 'sv' | 'ar'
+  unit: string
   // Синхронизация баланса и лога: сервер сам считает ставки и выплаты
-  onBal: (bal: number, log: { x: string; d: number } | null) => void
+  onBal: (bal: number, log: { x: string; d: number } | null, currency: 'sv' | 'ar') => void
   notify: (m: string) => void
   onNeedAuth: () => void
 }
@@ -60,7 +63,7 @@ function Card({ card, hidden }: { card?: number; hidden?: boolean }) {
   )
 }
 
-export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
+export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAuth }: Props) {
   const [stake, setStake] = useState('100')
   const [round, setRound] = useState<Round | null>(null)
   const [busy, setBusy] = useState(false)
@@ -69,12 +72,14 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
 
   // Раздача живёт в БД: после перезагрузки страницы доигрываем текущую
   useEffect(() => {
-    supabase.from('bj_rounds').select('id,stake,doubled,player_cards,dealer_visible,status,payout')
+    supabase.from('bj_rounds').select('id,stake,currency,doubled,player_cards,dealer_visible,status,payout')
       .eq('status', 'play').order('created_at', { ascending: false }).limit(1).maybeSingle()
       .then(({ data }) => {
         if (data) {
           setRound({
-            id: data.id, stake: Number(data.stake), doubled: Boolean(data.doubled),
+            id: data.id, stake: Number(data.stake),
+            currency: (data.currency === 'ar' ? 'ar' : 'sv') as 'sv' | 'ar',
+            doubled: Boolean(data.doubled),
             playerCards: (data.player_cards || []).map(Number),
             dealerVisible: Number(data.dealer_visible),
             playerValue: handValue((data.player_cards || []).map(Number)),
@@ -84,6 +89,9 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
         setRestored(true)
       })
   }, [])
+
+  const roundUnit = round ? (round.currency === 'ar' ? 'АР' : 'SV₽') : unit
+  const money = (n: number, u: string = roundUnit) => fmt(n) + ' ' + u
 
   const err = (e: { message?: string } | null, fallback: string) => {
     const m = e?.message || fallback
@@ -95,19 +103,21 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
   const deal = async () => {
     if (busy) return
     const s = Math.floor(parseFloat(stake))
-    if (!(s >= MIN_BET)) { setMsg(`Минимальная ставка: ${MIN_BET} SV₽`); return }
+    if (!(s >= MIN_BET)) { setMsg(`Минимальная ставка: ${MIN_BET} ${unit}`); return }
     setBusy(true)
-    const { data, error } = await supabase.rpc('bj_deal', { p_stake: s })
+    const cur = currency
+    const { data, error } = await supabase.rpc('bj_deal', { p_stake: s, p_currency: cur })
     setBusy(false)
     if (error || !data) return err(error, 'Не удалось раздать')
-    onBal(Number(data.bal), { x: 'Ставка в «Хрюк-блэкджеке»', d: -s })
+    const realCur = (data.currency === 'ar' ? 'ar' : cur) as 'sv' | 'ar'
+    onBal(Number(data.bal), { x: 'Ставка в «Хрюк-блэкджеке»', d: -s }, realCur)
     const resolved = data.status !== 'play'
     if (resolved && Number(data.payout) > 0) {
       const label = data.status === 'blackjack' ? 'БЛЭКДЖЕК! Выигрыш в «Хрюк-блэкджеке» (x2.5)' : 'Выигрыш в «Хрюк-блэкджеке»'
-      onBal(Number(data.bal), { x: label, d: Number(data.payout) })
+      onBal(Number(data.bal), { x: label, d: Number(data.payout) }, realCur)
     }
     setRound({
-      id: data.round_id, stake: s, doubled: false,
+      id: data.round_id, stake: s, currency: realCur, doubled: false,
       playerCards: (data.player_cards || []).map(Number),
       dealerVisible: Number(data.dealer_visible),
       playerValue: Number(data.player_value),
@@ -119,12 +129,14 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
   const act = async (kind: 'hit' | 'stand' | 'double') => {
     if (busy || !round || round.status !== 'play') return
     setBusy(true)
+    const cur = round.currency
     const rpc = kind === 'hit' ? 'bj_hit' : kind === 'stand' ? 'bj_stand' : 'bj_double'
     const { data, error } = await supabase.rpc(rpc, { p_round: round.id })
     setBusy(false)
     if (error || !data) return err(error, 'Ход не принят')
+    const moneyNow = (n: number) => money(n, cur)
     if (kind === 'double') {
-      onBal(Number(data.bal), { x: `Дабл в «Хрюк-блэкджеке» (+${fmt(round.stake)} SV₽)`, d: -round.stake })
+      onBal(Number(data.bal), { x: `Дабл в «Хрюк-блэкджеке» (+${moneyNow(round.stake)})`, d: -round.stake }, cur)
     }
     setRound(prev => prev ? {
       ...prev,
@@ -138,12 +150,12 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
       const payout = Number(data.payout)
       if (payout > 0) {
         const label = data.status === 'push' ? 'Ничья в «Хрюк-блэкджеке» — ставка возвращена' : 'Выигрыш в «Хрюк-блэкджеке»'
-        onBal(Number(data.bal), { x: label, d: payout })
+        onBal(Number(data.bal), { x: label, d: payout }, cur)
       }
       setMsg(data.status === 'lost' && Number(data.player_value) > 21 ? 'ПЕРЕБОР' : (STATUS_TEXT[data.status] || data.status))
-      notify(data.status === 'push' ? 'Ничья — ставка возвращена' : data.status === 'won' ? `Выигрыш ${fmt(payout)} SV₽!` : '')
+      notify(data.status === 'push' ? 'Ничья — ставка возвращена' : data.status === 'won' ? `Выигрыш ${moneyNow(payout)}!` : '')
     } else {
-      onBal(Number(data.bal), null)
+      onBal(Number(data.bal), null, cur)
     }
   }
 
@@ -201,7 +213,7 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
           {resolved && round && (
             <span style={{ color: round.status === 'won' || round.status === 'blackjack' ? 'var(--green)' : round.status === 'push' ? '#94a3b8' : '#ff4d4d' }}>
               {STATUS_TEXT[round.status]}
-              {round.payout > 0 ? ` • +${fmt(round.payout)} SV₽` : round.status === 'lost' ? ' • −' + fmt(r2(round.stake * (round.doubled ? 2 : 1))) : ''}
+              {round.payout > 0 ? ` • +${money(round.payout)}` : round.status === 'lost' ? ' • −' + money(r2(round.stake * (round.doubled ? 2 : 1))) : ''}
             </span>
           )}
           {playing && msg && <span style={{ color: '#e8b53a' }}>{msg}</span>}
@@ -220,14 +232,14 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
             </button>
             {round && round.playerCards.length === 2 && !round.doubled && (
               <button className="wl-btn-orange" disabled={busy} style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, background: '#7c3aed' }} onClick={() => act('double')}>
-                ⏫ Дабл (+{fmt(round.stake)})
+                ⏫ Дабл (+{money(round.stake)})
               </button>
             )}
           </div>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-              <input aria-label="Ставка, SV₽" inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
+              <input aria-label={`Ставка, ${unit}`} inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
                 style={{ width: 110, padding: 12, borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
               {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
               <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
@@ -243,7 +255,7 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
 
       <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>
         Выплата x2 за победу, x2.5 за блэкджек (туз + картинка), ничья возвращает ставку.
-        Крупье добирает до 17. Дабл — только на первых двух картах. Сейчас на балансе {fmt(r2(bal))} SV₽.
+        Крупье добирает до 17. Дабл — только на первых двух картах. Сейчас на балансе {money(r2(bal), unit)}.
       </p>
     </div>
   )

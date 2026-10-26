@@ -66,7 +66,6 @@ type Result =
 
 type Props = {
   currentUser: UserAccount | null
-  balance: number
   notify: (message: string) => void
   onNeedAuth: () => void
   onBal: (bal: number, log: { x: string; d: number } | null) => void
@@ -138,7 +137,7 @@ function NotReady() {
   )
 }
 
-export default function MineView({ currentUser, balance, notify, onNeedAuth, onBal }: Props) {
+export default function MineView({ currentUser, notify, onNeedAuth, onBal }: Props) {
   const [status, setStatus] = useState<MineStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [notReady, setNotReady] = useState(false)
@@ -154,7 +153,6 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
   const [stake, setStake] = useState('1')
   const [withdrawAmount, setWithdrawAmount] = useState('5')
   const [convertAmount, setConvertAmount] = useState('')
-  const [buyAmount, setBuyAmount] = useState('')
 
   const userId = currentUser?.id || null
   const notifyRef = useRef(notify)
@@ -352,29 +350,6 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
     onBal(Number(data.bal), { x: `Обмен ${amount} АР на SV₽`, d: Number(data.sv) })
     setConvertAmount('')
     notify(`⛏ ${integer(amount)} АР → ${fmt(Number(data.sv))}`)
-  }
-
-  const buy = async () => {
-    if (busy || !status) return
-    const amount = Math.floor(Number(buyAmount))
-    if (!Number.isFinite(amount) || amount < 1) {
-      setMessage('Укажи целое количество АР.')
-      return
-    }
-    const cost = amount * status.rateFromSv
-    if (cost > balance) {
-      setMessage(`Не хватает SV₽: нужно ${fmt(cost)}.`)
-      return
-    }
-    setBusy('buy')
-    setMessage('')
-    const { data, error } = await supabase.rpc('mc_buy_ore', { p_amount: amount })
-    setBusy(null)
-    if (error || !data) return fail(error, 'Не удалось купить АР')
-    setStatus(prev => prev ? { ...prev, ore: Number(data.ore) } : prev)
-    onBal(Number(data.bal), { x: `Покупка ${amount} АР`, d: -Number(data.cost) })
-    setBuyAmount('')
-    notify(`⛏ Куплено ${integer(amount)} АР за ${fmt(Number(data.cost))}`)
   }
 
   const share = useMemo(() => {
@@ -613,10 +588,9 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
           </section>
 
           <section className="mc-card">
-            <div className="mc-card-head"><ArrowRightLeft size={16} /> <h3>АР и SV₽</h3></div>
+            <div className="mc-card-head"><ArrowRightLeft size={16} /> <h3>Обмен АР → SV₽</h3></div>
             <div className="mc-rate-line">
               <span>1 АР → <b>{integer(status.rateToSv)} SV₽</b></span>
-              <span>1 АР ← <b>{integer(status.rateFromSv)} SV₽</b></span>
             </div>
             <div className="mc-form-row">
               <input
@@ -630,20 +604,9 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
                 В SV₽
               </button>
             </div>
-            <div className="mc-form-row">
-              <input
-                className="mc-input"
-                inputMode="numeric"
-                placeholder="Сколько АР купить"
-                value={buyAmount}
-                onChange={e => setBuyAmount(e.target.value.replace(/[^\d]/g, ''))}
-              />
-              <button className="mc-btn mc-btn-ghost" onClick={buy} disabled={busy === 'buy'}>
-                За SV₽
-              </button>
-            </div>
             <p className="mc-fine">
-              Обмен АР на SV₽ — без комиссии. Покупка АР — по курсу {integer(status.rateFromSv)} SV₽.
+              Обмен АР на SV₽ — без комиссии. АР появляются только из алмазной руды в Minecraft,
+              купить их за SV₽ нельзя.
             </p>
           </section>
 
