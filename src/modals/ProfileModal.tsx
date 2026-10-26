@@ -77,7 +77,7 @@ export default function ProfileModal(props: Props) {
           <User size={20} color="var(--org)" />
           <span style={{ fontWeight: 800, fontSize: 17 }}>Личный кабинет</span>
         </div>
-        <button onClick={() => setProfileModalOpen(false)} style={{ color: 'var(--tx-muted)' }}>
+        <button className="wl-modal-x" onClick={() => setProfileModalOpen(false)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
           <X size={18} />
         </button>
       </div>

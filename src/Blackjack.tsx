@@ -154,7 +154,7 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
   return (
     <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
       <span className="wl-banner-tag">ИГРЫ 24/7 • КАРТЫ</span>
-      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>ХРЮК-БЛЭКДЖЕК 🐷🃏</h2>
+      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 'clamp(22px, 6vw, 28px)', margin: '12px 0 6px' }}>ХРЮК-БЛЭКДЖЕК 🐷🃏</h2>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 14, margin: '0 auto 14px', maxWidth: 560 }}>
         Набери 21 или больше крупье, но не перебери. Блэкджек платит x2.5, ничья возвращает ставку.
         Колода и крупье — на сервере, карта дилера втемную.
@@ -162,7 +162,7 @@ export default function Blackjack({ bal, onBal, notify, onNeedAuth }: Props) {
 
       {/* Стол */}
       <div style={{
-        maxWidth: 640, margin: '0 auto', background: '#1b1c1e', borderRadius: 12, padding: '18px 16px',
+        maxWidth: 640, width: '100%', margin: '0 auto', background: '#1b1c1e', borderRadius: 12, padding: '18px 16px',
         display: 'flex', flexDirection: 'column', gap: 14, minHeight: 240,
       }}>
         {/* Рука дилера */}

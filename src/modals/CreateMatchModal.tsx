@@ -76,7 +76,7 @@ export default function CreateMatchModal(props: Props) {
           <PlusCircle size={20} color="var(--org)" />
           <span style={{ fontWeight: 800, fontSize: 17, color: 'var(--org)' }}>Создать новое событие в линию</span>
         </div>
-        <button onClick={() => setCreateMatchModalOpen(false)} style={{ color: 'var(--tx-muted)' }}><X size={18} /></button>
+        <button className="wl-modal-x" onClick={() => setCreateMatchModalOpen(false)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
       </div>
 
       <div className="wl-modal-body">

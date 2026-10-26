@@ -39,12 +39,12 @@ export default function Header({
       <div className="wl-header-inner">
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           {/* Logo stadium-pill */}
-          <div className="wl-logo-pill" onClick={() => { setView('line'); setSelectedSport(null) }}>
+          <button type="button" className="wl-logo-pill" aria-label="На главную" onClick={() => { setView('line'); setSelectedSport(null) }}>
             <PigLogo />
             <div className="wl-logo-text">
               SWIN<span>LINE</span>
             </div>
-          </div>
+          </button>
 
           {/* Navigation links */}
           <nav className="wl-nav">
@@ -117,8 +117,10 @@ export default function Header({
               )}
 
               {/* User Profile Chip */}
-              <div
+              <button
+                type="button"
                 className="wl-user-chip"
+                aria-label="Личный кабинет"
                 onClick={onOpenProfile}
                 title="Личный кабинет"
               >
@@ -130,7 +132,7 @@ export default function Header({
                   </span>
                   <VipBadge userId={currentUser.id} />
                 </div>
-              </div>
+              </button>
 
               {/* Balance chip */}
               <div className="wl-balance-chip" title="Текущий баланс">
@@ -138,7 +140,7 @@ export default function Header({
               </div>
 
               <button
-                className={`wl-btn-green ${daily.status.canClaim ? 'pulse' : ''}`}
+                className={`wl-btn-green wl-btn-daily ${daily.status.canClaim ? 'pulse' : ''}`}
                 onClick={() => setView('wallet')}
                 title="Ежедневная награда"
               >
@@ -146,7 +148,7 @@ export default function Header({
               </button>
 
               <button
-                className="wl-btn-orange"
+                className="wl-btn-orange wl-btn-topup"
                 onClick={onAddMoney}
                 title="Начислить бесплатные SV₽"
               >
@@ -154,7 +156,7 @@ export default function Header({
               </button>
 
               <button
-                className="wl-sidebar-quick-btn"
+                className="wl-sidebar-quick-btn wl-btn-logout"
                 style={{ border: '1px solid var(--border)', padding: '6px 10px', fontSize: 12 }}
                 onClick={onLogout}
                 title="Выйти из аккаунта"
@@ -164,7 +166,8 @@ export default function Header({
             </>
           ) : (
             <button
-              className="wl-btn-orange"
+              className="wl-btn-orange wl-login-btn"
+              aria-label="Войти через Twitch"
               style={{
                 background: 'linear-gradient(135deg, #9146ff, #772ce8)',
                 border: 'none',

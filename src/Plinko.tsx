@@ -118,7 +118,7 @@ export default function Plinko({ bal, onBet }: Props) {
   return (
     <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center' }}>
       <span className="wl-banner-tag">ИГРЫ 24/7 • ПЛИНКО</span>
-      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>ПЯТОЧОК-ПЛИНКО 🐷</h2>
+      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 'clamp(22px, 6vw, 28px)', margin: '12px 0 6px' }}>ПЯТОЧОК-ПЛИНКО 🐷</h2>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 14, margin: '0 auto 12px', maxWidth: 520 }}>
         Бросай Пяточка на вершину пирамиды. Он прыгает по колышкам и падает в ячейку с иксом. До {MAX_BALLS} шариков одновременно.
       </p>

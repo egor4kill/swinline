@@ -48,6 +48,13 @@ button {
   transition: all 0.15s ease;
 }
 
+a,
+button,
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(255, 85, 0, 0.15);
+}
+
 button:focus-visible, input:focus-visible {
   outline: 2px solid var(--org);
   outline-offset: 1px;
@@ -123,11 +130,11 @@ button:focus-visible, input:focus-visible {
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 100%;
+  height: 58px;
 }
 
 .wl-nav-link {
-  height: 100%;
+  height: 58px;
   padding: 0 13px;
   display: flex;
   align-items: center;
@@ -973,6 +980,7 @@ button:focus-visible, input:focus-visible {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior: contain;
   animation: slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1085,7 +1093,34 @@ button:focus-visible, input:focus-visible {
   line-height: 1.6;
 }
 
+/* Game Mode Switcher */
+.wl-games-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
 /* Responsive adjustments */
+@media (max-width: 1100px) and (min-width: 768px) {
+  /* Tablet: keep one header row, let the nav scroll instead of pushing actions off-screen */
+  .wl-header-inner > div:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .wl-nav {
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .wl-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .wl-nav-link {
+    padding: 0 10px;
+  }
+}
+
 @media (max-width: 1024px) and (min-width: 768px) {
   .wl-layout {
     grid-template-columns: 210px minmax(0, 1fr);
@@ -1096,26 +1131,504 @@ button:focus-visible, input:focus-visible {
   }
 }
 
+/* Телефоны: шапка в две строки, сайдбар превращается в полосу фильтров */
 @media (max-width: 767px) {
+  /* Шапка */
+  .wl-header {
+    height: auto;
+    padding-top: env(safe-area-inset-top);
+  }
+  .wl-header-inner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "logo actions"
+      "nav nav";
+    gap: 0 10px;
+    height: auto;
+    padding: 8px 12px 0;
+  }
+  .wl-header-inner > div:first-child {
+    display: contents !important;
+  }
+  .wl-logo-pill {
+    grid-area: logo;
+    align-self: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 3px 10px 3px 8px;
+    border-width: 2px;
+  }
+  .wl-logo-text {
+    font-size: 16px;
+  }
+  .wl-nav {
+    grid-area: nav;
+    width: 100%;
+    min-width: 0;
+    height: 46px;
+    gap: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wl-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .wl-nav-link {
+    height: 46px;
+    padding: 0 11px;
+    font-size: 13px;
+  }
+  .wl-header-right {
+    grid-area: actions;
+    justify-self: end;
+    align-self: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .wl-admin-badge span,
+  .wl-user-chip > div,
+  .wl-btn-daily,
+  .wl-btn-topup,
+  .wl-btn-logout {
+    display: none;
+  }
+  .wl-user-chip {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 2px;
+  }
+  .wl-admin-badge {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 4px;
+  }
+  .wl-login-btn {
+    white-space: nowrap;
+  }
+  .wl-balance-chip {
+    padding: 5px 10px;
+    font-size: 13px;
+    max-width: 120px;
+  }
+  .wl-balance-amount {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Тап-таргеты: не меньше 44×44 */
+  .wl-btn-orange,
+  .wl-btn-green,
+  .wl-sidebar-quick-btn,
+  .wl-sport-item,
+  .wl-tourney-pill,
+  .wl-round-btn,
+  .wl-quick-btn {
+    min-height: 44px;
+  }
+  .wl-search-input,
+  .wl-stake-input,
+  .wl-modal-card input:not([type="checkbox"]):not([type="radio"]),
+  .wl-modal-card select,
+  .wl-modal-card textarea {
+    min-height: 44px;
+  }
+  .wl-modal-card input[type="checkbox"],
+  .wl-modal-card input[type="radio"] {
+    width: 20px;
+    height: 20px;
+  }
+  .wl-round-btn {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .wl-match-teams > button {
+    width: 44px;
+    height: 44px;
+    margin: -12px -10px -12px -12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .wl-slip-tab {
+    min-height: 44px;
+  }
+  .wl-slip-header > button,
+  .wl-slip-remove,
+  .wl-modal-x {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .wl-slip-header > button {
+    margin: -8px -8px -8px 0;
+  }
+  .wl-slip-remove {
+    margin: -10px -10px 0 0;
+  }
+  .wl-modal-x {
+    margin: -10px -10px -10px 0;
+  }
+  .wl-stream-bottom-bar button {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .wl-esports-arena form .wl-search-input {
+    height: 44px !important;
+    font-size: 16px !important;
+  }
+  .wl-esports-arena form .wl-btn-orange {
+    height: 44px !important;
+  }
+
+  /* Казино-полоса: пот и лента на всю ширину */
+  .wl-casino-strip {
+    flex-direction: column;
+  }
+  .wl-casino-strip > .wl-banner-card {
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  /* Каркас: сайдбар — горизонтальная полоса над контентом */
   .wl-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: calc(100vh - 100px);
   }
   .wl-sidebar {
+    display: block;
+    position: static;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    padding: 10px 12px 8px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .wl-search-box {
+    margin-bottom: 8px;
+  }
+  .wl-search-input {
+    padding: 10px 12px 10px 34px;
+    font-size: 16px;
+    border-radius: 12px;
+  }
+  .wl-sidebar-quick {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+  .wl-sidebar-quick-btn {
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .wl-sports-list {
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wl-sports-list::-webkit-scrollbar {
     display: none;
   }
-  .wl-match-row {
-    grid-template-columns: 1fr;
-    gap: 12px;
+  .wl-sports-list > div {
+    display: none;
   }
+  .wl-sport-item {
+    flex-shrink: 0;
+    gap: 8px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .wl-sport-left {
+    gap: 6px;
+  }
+
+  /* Контент */
+  .wl-center {
+    padding: 12px 12px calc(100px + env(safe-area-inset-bottom));
+  }
+  .wl-banners-slider {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .wl-banner-card {
+    min-height: 0;
+    padding: 16px;
+    border-radius: 12px;
+  }
+  .wl-banner-title {
+    font-size: 18px;
+    letter-spacing: -0.3px;
+  }
+  .wl-banner-desc {
+    max-width: 100%;
+    font-size: 12.5px;
+  }
+  .wl-banner-mascot {
+    display: none;
+  }
+  .wl-tournaments-bar {
+    margin-bottom: 10px;
+  }
+  .wl-round-filters {
+    margin-bottom: 14px;
+  }
+
+  /* Линия: крупные тапы, матрица коэффициентов 4 в ряд */
   .wl-columns-header {
     display: none;
+  }
+  .wl-league-header {
+    padding: 9px 12px;
+  }
+  .wl-match-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+  .wl-match-teams {
+    font-size: 13.5px;
+    flex-wrap: wrap;
+  }
+  .wl-odds-matrix {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .wl-odd-box {
+    height: 44px;
+    border-radius: 8px;
+  }
+  .wl-odd-val {
+    font-size: 14px;
+  }
+  .wl-odd-lbl {
+    font-size: 9.5px;
+  }
+  .wl-extra-markets {
+    padding: 12px;
+  }
+  .wl-table-container {
+    border-radius: 12px;
+    overflow-x: auto;
+  }
+  .wl-wallet-table th,
+  .wl-wallet-table td {
+    padding: 8px !important;
+  }
+
+  /* Игры */
+  .wl-games-tabs {
+    overflow-x: auto;
+    margin-bottom: 16px;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wl-games-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .wl-games-tabs .wl-round-btn {
+    flex-shrink: 0;
+  }
+  .wl-crash-layout {
+    gap: 12px;
+  }
+  .wl-crash-arena {
+    min-height: 360px;
+    padding: 14px 12px 16px;
+    border-radius: 14px;
+  }
+  .wl-crash-display {
+    height: 200px;
+  }
+  .wl-crash-sidebar {
+    padding: 14px;
+    border-radius: 14px;
+  }
+  .wl-wheel-container {
+    width: min(320px, calc(100vw - 72px));
+    height: auto;
+    aspect-ratio: 1;
+  }
+  .wl-ceo-card {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 16px !important;
+  }
+  .wl-ceo-card > img {
+    align-self: center;
+  }
+  .wl-esports-head {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 8px;
+  }
+
+  /* Плавающий купон, шторка ставки и модалки */
+  .wl-floating-coupon-bar {
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+  .wl-coupon-trigger-btn {
+    height: 46px;
+    padding: 0 14px;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+  .wl-floating-chat-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
   }
   .wl-betslip-drawer {
     right: 0;
     left: 0;
     bottom: 0;
     width: 100%;
+    max-height: 82vh;
     border-radius: 16px 16px 0 0;
+  }
+  .wl-slip-body {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .wl-modal-overlay {
+    padding: 10px;
+  }
+  .wl-modal-card {
+    max-height: 92vh;
+    border-radius: 14px;
+  }
+  .wl-modal-header {
+    padding: 12px 14px;
+  }
+  .wl-modal-body {
+    padding: 14px;
+    overflow-x: auto;
+  }
+  .wl-admin-table {
+    min-width: 560px;
+  }
+  .wl-toast {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 480px) {
+  .wl-banner-title {
+    font-size: 17px;
+  }
+  .wl-match-teams {
+    font-size: 13px;
+  }
+  .wl-odds-matrix {
+    gap: 5px;
+  }
+  .wl-odd-lbl {
+    font-size: 9px;
+  }
+  .wl-crash-history-pill {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+  .wl-footer {
+    padding: 20px 14px;
+  }
+}
+
+@media (max-width: 359px) {
+  .wl-login-btn span {
+    display: none;
+  }
+  .wl-login-btn {
+    padding: 9px 12px;
+  }
+}
+
+/* Планшеты и телефоны в ландшафте: размеры под палец, без смены раскладки */
+@media (pointer: coarse) {
+  .wl-logo-pill {
+    min-height: 44px;
+  }
+  .wl-user-chip,
+  .wl-admin-badge {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  .wl-btn-orange,
+  .wl-btn-green,
+  .wl-sidebar-quick-btn,
+  .wl-sport-item,
+  .wl-tourney-pill,
+  .wl-round-btn,
+  .wl-quick-btn {
+    min-height: 44px;
+  }
+  .wl-round-btn {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .wl-search-input,
+  .wl-stake-input,
+  .wl-modal-card input:not([type="checkbox"]):not([type="radio"]),
+  .wl-modal-card select,
+  .wl-modal-card textarea {
+    min-height: 44px;
+  }
+  .wl-match-teams > button {
+    width: 44px;
+    height: 44px;
+    margin: -12px -10px -12px -12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .wl-stream-bottom-bar button {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .wl-slip-tab {
+    min-height: 44px;
+  }
+  .wl-slip-header > button,
+  .wl-slip-remove,
+  .wl-modal-x {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
 }
 
@@ -1146,6 +1659,7 @@ button:focus-visible, input:focus-visible {
   max-width: 640px;
   max-height: 90vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
 }
 

@@ -206,7 +206,7 @@ export default function RubleChart({ bal, onPredict }: Props) {
   return (
     <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center' }}>
       <span className="wl-banner-tag">ИГРЫ 24/7 • БИНАРНЫЕ ОПЦИОНЫ • ОДИН КУРС ДЛЯ ВСЕХ</span>
-      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>КУРС РУБЛЯ 📉📈</h2>
+      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 'clamp(22px, 6vw, 28px)', margin: '12px 0 6px' }}>КУРС РУБЛЯ 📉📈</h2>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 14, margin: '0 auto 12px', maxWidth: 560 }}>
         Общая биржевая лента: тик каждую секунду, идёт всегда и у всех одинаковая. Ставь «вверх»
         или «вниз» — если через {TICK_SECONDS} секунд курс пойдёт в твою сторону, забираешь x{PAYOUT}. ЦБ гарантирует*

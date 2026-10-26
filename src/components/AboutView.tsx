@@ -12,7 +12,7 @@ export default function AboutView() {
 
       {/* CEO Showcase Card */}
       <div
-        className="wl-banner-card highlight"
+        className="wl-banner-card highlight wl-ceo-card"
         style={{
           display: 'flex',
           gap: 22,

@@ -75,7 +75,7 @@ export default function AuthModal(props: Props) {
         <span style={{ fontWeight: 800, fontSize: 18, color: '#fff' }}>
           Вход в SWINLINE
         </span>
-        <button onClick={() => setAuthModalOpen(false)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+        <button className="wl-modal-x" onClick={() => setAuthModalOpen(false)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
           <X size={20} />
         </button>
       </div>

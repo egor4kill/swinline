@@ -110,6 +110,7 @@ export default function BetSlip(props: Props) {
                     <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{ev?.league}</div>
                     <button
                       type="button"
+                      className="wl-slip-remove"
                       onClick={() => setSelectedBet(null)}
                       style={{ color: '#ef4444' }}
                     >

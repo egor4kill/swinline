@@ -88,7 +88,7 @@ export default function WalletView({
               : 'Ставок пока нет. Загляните в линию и выберите исход!'}
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table className="wl-wallet-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#171b26', borderBottom: '1px solid var(--border)', textAlign: 'left' }}>
                 <th style={{ padding: '10px 14px' }}>Событие</th>

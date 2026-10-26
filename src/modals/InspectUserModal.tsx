@@ -78,7 +78,7 @@ export default function InspectUserModal(props: Props) {
             Купоны игрока {inspectingUser.username}
           </span>
         </div>
-        <button onClick={() => setInspectingUser(null)} style={{ color: 'var(--tx-muted)' }}>
+        <button className="wl-modal-x" onClick={() => setInspectingUser(null)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
           <X size={18} />
         </button>
       </div>

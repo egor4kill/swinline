@@ -76,7 +76,7 @@ export default function EditScoreModal(props: Props) {
           <Edit3 size={18} color="var(--org)" />
           <span style={{ fontWeight: 800 }}>Редактирование счёта матча</span>
         </div>
-        <button onClick={() => setEditEventModal(null)} style={{ color: 'var(--tx-muted)' }}><X size={18} /></button>
+        <button className="wl-modal-x" onClick={() => setEditEventModal(null)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
       </div>
       <div className="wl-modal-body">
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: '#fff' }}>

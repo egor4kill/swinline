@@ -39,7 +39,7 @@ export default function CasinoStrip() {
   }, [])
 
   return (
-    <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'stretch' }}>
+    <div className="wl-casino-strip" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'stretch' }}>
       <div
         className="wl-banner-card highlight"
         style={{

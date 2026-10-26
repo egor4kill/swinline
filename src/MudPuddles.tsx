@@ -140,7 +140,7 @@ export default function MudPuddles({ bal, onStart, onPick, onCash, onRestore }: 
     <div className="wl-banner-card highlight" style={{ padding: '24px 16px 28px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
       <style>{TILE_CSS}</style>
       <span className="wl-banner-tag">ИГРЫ 24/7 • МИНЫ</span>
-      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 28, margin: '12px 0 6px' }}>ГРЯЗЕВЫЕ ЛУЖИ 🐷</h2>
+      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 'clamp(22px, 6vw, 28px)', margin: '12px 0 6px' }}>ГРЯЗЕВЫЕ ЛУЖИ 🐷</h2>
       <p style={{ color: 'var(--tx-secondary)', fontSize: 14, margin: '0 auto 14px', maxWidth: 520 }}>
         Открывай клетки поля. Под каждой либо чистое место, либо лужа. Чем больше открыл, тем выше икс. Попал в лужу и ставка сгорела, вовремя нажал «Забрать» и деньги твои.
       </p>

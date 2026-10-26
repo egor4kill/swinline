@@ -1615,7 +1615,7 @@ export default function App() {
               <CasinoStrip />
               <JackpotOverlay amount={jackpotWin} onClose={() => setJackpotWin(null)} />
               {/* Game Mode Switcher */}
-              <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <div className="wl-games-tabs">
                 <button
                   className={`wl-round-btn ${gamesTab === 'crash' ? 'active' : ''}`}
                   onClick={() => setGamesTab('crash')}

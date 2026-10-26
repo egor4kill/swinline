@@ -78,7 +78,7 @@ export default function AdminModal(props: Props) {
             ПАНЕЛЬ АДМИНИСТРАТОРА ЛИНИИ SWINLINE
           </span>
         </div>
-        <button onClick={() => setAdminModalOpen(false)} style={{ color: 'var(--tx-muted)' }}>
+        <button className="wl-modal-x" onClick={() => setAdminModalOpen(false)} style={{ color: 'var(--tx-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
           <X size={18} />
         </button>
       </div>
