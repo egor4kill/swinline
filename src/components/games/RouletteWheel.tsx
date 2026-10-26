@@ -66,10 +66,8 @@ export default function RouletteWheel({
 
         {/* Rotating SVG Wheel */}
         <div
+          className="wl-wheel-rotor"
           style={{
-            width: 290,
-            height: 290,
-            borderRadius: '50%',
             transform: `rotate(${wheelRotation}deg)`,
             transition: spinning ? 'transform 4.2s cubic-bezier(0.12, 0.8, 0.2, 1)' : 'none'
           }}

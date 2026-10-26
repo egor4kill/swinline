@@ -1135,95 +1135,98 @@ button:focus-visible, input:focus-visible {
   }
 }
 
-/* Телефоны: шапка в две строки, сайдбар превращается в полосу фильтров */
+/* ============================================================
+   МОБИЛЬНЫЙ КАРКАС (app-like): шапка сверху, таб-бар снизу.
+   Всё ниже — только для телефонов; десктоп не меняется.
+   ============================================================ */
+
+/* Элементы, которых на десктопе быть не должно */
+.wl-mobile-nav,
+.wl-more-backdrop,
+.wl-more-sheet,
+.wl-sheet-backdrop,
+.wl-sheet-handle,
+.wl-odds-more,
+.wl-wallet-cards,
+.wl-search-toggle,
+.wl-sport-mobile-chip {
+  display: none;
+}
+
+.wl-event-block {
+  border-bottom: 1px solid #1a202c;
+}
+
+.wl-balance-chip {
+  cursor: pointer;
+}
+
+/* Телефоны: одна колонка, компактная шапка, нижняя навигация */
 @media (max-width: 767px) {
-  /* Шапка */
+  :root {
+    --wl-header-h: 56px;
+    --wl-nav-h: 60px;
+  }
+
+  /* ---------- Шапка: одна строка, без разъезжающегося меню ---------- */
   .wl-header {
-    height: auto;
+    height: calc(var(--wl-header-h) + env(safe-area-inset-top));
     padding-top: env(safe-area-inset-top);
   }
   .wl-header-inner {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas:
-      "logo actions"
-      "nav nav";
-    gap: 0 10px;
-    height: auto;
-    padding: 8px 12px 0;
+    display: flex;
+    height: var(--wl-header-h);
+    padding: 0 12px;
+    gap: 8px;
   }
   .wl-header-inner > div:first-child {
-    display: contents !important;
-  }
-  .wl-logo-pill {
-    grid-area: logo;
-    align-self: center;
-    gap: 6px;
-    min-height: 44px;
-    padding: 3px 10px 3px 8px;
-    border-width: 2px;
-  }
-  .wl-logo-text {
-    font-size: 16px;
+    display: flex !important;
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 8px;
   }
   .wl-nav {
-    grid-area: nav;
-    width: 100%;
-    min-width: 0;
-    height: 46px;
-    gap: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    display: none !important;
   }
-  .wl-nav::-webkit-scrollbar {
-    display: none;
+  .wl-logo-pill {
+    gap: 6px;
+    min-height: 44px;
+    height: 44px;
+    padding: 0 10px 0 8px;
+    border-width: 2px;
+    box-shadow: 0 0 12px var(--org-glow);
   }
-  .wl-nav-link {
-    height: 46px;
-    padding: 0 11px;
-    font-size: 13px;
+  .wl-logo-text {
+    font-size: 15px;
   }
   .wl-header-right {
-    grid-area: actions;
-    justify-self: end;
-    align-self: center;
+    flex: 1 1 auto;
+    justify-content: flex-end;
     gap: 6px;
     min-width: 0;
   }
-  .wl-admin-badge span,
-  .wl-user-chip > div,
+  .wl-admin-badge,
   .wl-btn-daily,
   .wl-btn-topup,
   .wl-btn-logout {
-    display: none;
+    display: none !important;
   }
   .wl-user-chip {
     min-width: 44px;
     min-height: 44px;
+    padding: 0;
     justify-content: center;
-    padding: 2px;
+    border-radius: 50%;
   }
-  .wl-admin-badge {
-    min-width: 44px;
-    min-height: 44px;
-    justify-content: center;
-    padding: 4px;
-  }
-  .wl-login-btn {
-    white-space: nowrap;
-  }
-  .wl-login-full {
+  .wl-user-chip > div {
     display: none;
   }
-  .wl-login-short {
-    display: inline;
-  }
   .wl-balance-chip {
-    padding: 5px 10px;
+    min-height: 44px;
+    padding: 0 12px;
     font-size: 13px;
-    max-width: 120px;
+    border-radius: 999px;
+    max-width: 118px;
   }
   .wl-balance-amount {
     font-size: 14px;
@@ -1231,166 +1234,111 @@ button:focus-visible, input:focus-visible {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  /* Тап-таргеты: не меньше 44×44 */
-  .wl-btn-orange,
-  .wl-btn-green,
-  .wl-sidebar-quick-btn,
-  .wl-sport-item,
-  .wl-tourney-pill,
-  .wl-round-btn,
-  .wl-quick-btn {
+  .wl-login-btn {
     min-height: 44px;
+    padding: 0 14px !important;
+    font-size: 13px;
+    border-radius: 10px !important;
   }
-  .wl-search-input,
-  .wl-stake-input,
-  .wl-modal-card input:not([type="checkbox"]):not([type="radio"]),
-  .wl-modal-card select,
-  .wl-modal-card textarea {
-    min-height: 44px;
+  .wl-login-full {
+    display: none;
   }
-  .wl-modal-card input[type="checkbox"],
-  .wl-modal-card input[type="radio"] {
-    width: 20px;
-    height: 20px;
-  }
-  .wl-round-btn {
-    min-width: 44px;
-    justify-content: center;
-  }
-  .wl-match-teams > button {
-    width: 44px;
-    height: 44px;
-    margin: -12px -10px -12px -12px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  .wl-slip-tab {
-    min-height: 44px;
-  }
-  .wl-slip-header > button,
-  .wl-slip-remove,
-  .wl-modal-x {
-    width: 44px;
-    height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  .wl-slip-header > button {
-    margin: -8px -8px -8px 0;
-  }
-  .wl-slip-remove {
-    margin: -10px -10px 0 0;
-  }
-  .wl-modal-x {
-    margin: -10px -10px -10px 0;
-  }
-  .wl-stream-bottom-bar button {
-    width: 44px;
-    height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .wl-esports-arena form .wl-search-input {
-    height: 44px !important;
-    font-size: 16px !important;
-  }
-  .wl-esports-arena form .wl-btn-orange {
-    height: 44px !important;
+  .wl-login-short {
+    display: inline;
   }
 
-  /* Казино-полоса: пот и лента на всю ширину */
-  .wl-casino-strip {
-    flex-direction: column;
-  }
-  .wl-casino-strip > .wl-banner-card {
-    width: 100%;
-    min-width: 0 !important;
-    flex: 0 0 auto !important;
-  }
-
-  /* Каркас: компактная панель фильтров над контентом */
+  /* ---------- Каркас ---------- */
   .wl-layout {
     grid-template-columns: minmax(0, 1fr);
-    min-height: calc(100vh - 100px);
+    min-height: calc(100vh - var(--wl-header-h));
   }
+  .wl-center {
+    padding: 10px 12px calc(var(--wl-nav-h) + env(safe-area-inset-bottom) + 16px);
+    overflow: visible;
+  }
+  .wl-footer {
+    padding: 20px 16px calc(var(--wl-nav-h) + env(safe-area-inset-bottom) + 20px);
+  }
+
+  /* ---------- Панель фильтров над линией: одна строка ---------- */
   .wl-sidebar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 44px;
-    grid-template-areas:
-      "search favorites"
-      "sports sports";
+    grid-template-areas: "chips toggle";
     align-items: center;
-    gap: 6px 8px;
+    gap: 8px;
     position: static;
     width: 100%;
     height: auto;
     overflow: visible;
-    padding: 8px 12px 6px;
+    padding: 8px 12px;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    background: var(--bg-sidebar);
   }
-  /* Фильтры видов спорта нужны только в линии и live */
+  .wl-sidebar.wl-mobile-search-open {
+    grid-template-areas: "field toggle";
+  }
   .wl-layout:not(.wl-view-line):not(.wl-view-live) .wl-sidebar {
     display: none;
   }
+  .wl-search-toggle {
+    grid-area: toggle;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    background: #141822;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--tx-secondary);
+  }
+  .wl-search-toggle.active {
+    color: var(--org);
+    border-color: rgba(255, 85, 0, 0.45);
+  }
   .wl-search-box {
-    grid-area: search;
-    margin-bottom: 0;
+    grid-area: field;
+    display: none;
+    margin: 0;
+  }
+  .wl-mobile-search-open .wl-search-box {
+    display: block;
   }
   .wl-search-input {
-    padding: 10px 44px 10px 34px;
+    min-height: 44px;
+    padding: 0 44px 0 36px;
     font-size: 16px;
     border-radius: 12px;
+  }
+  .wl-search-icon {
+    left: 12px;
   }
   .wl-search-clear {
     width: 44px;
     height: 44px;
-    right: 0;
+    right: 0 !important;
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
+  /* На телефоне фильтры живут в одном ряду с категориями */
   .wl-sidebar-quick {
-    display: contents;
-  }
-  .wl-sidebar .wl-sidebar-quick-btn {
-    display: none;
-  }
-  .wl-sidebar .wl-sidebar-quick-btn.wl-quick-favorites {
-    display: inline-flex;
-    grid-area: favorites;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    justify-content: center;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    position: relative;
-  }
-  .wl-quick-favorites > span:not(.wl-badge-count) {
-    display: none;
-  }
-  .wl-quick-favorites .wl-badge-count {
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    padding: 0 5px;
-    line-height: 15px;
+    display: none !important;
   }
   .wl-sports-list {
-    grid-area: sports;
+    grid-area: chips;
     flex-direction: row;
     gap: 6px;
+    min-width: 0;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 0;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+  }
+  .wl-mobile-search-open .wl-sports-list {
+    display: none;
   }
   .wl-sports-list::-webkit-scrollbar {
     display: none;
@@ -1400,22 +1348,32 @@ button:focus-visible, input:focus-visible {
   }
   .wl-sport-item {
     flex-shrink: 0;
-    gap: 8px;
-    padding: 7px 10px;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 13px;
     border: 1px solid var(--border);
     border-radius: 999px;
-    font-size: 12px;
+    font-size: 12.5px;
     white-space: nowrap;
+    background: #141822;
+  }
+  .wl-sport-item.active {
+    background: #231d16;
+    border-color: var(--org);
+  }
+  .wl-sport-item .wl-badge-count {
+    padding: 0 6px;
+    font-size: 10px;
+    line-height: 16px;
   }
   .wl-sport-left {
     gap: 6px;
   }
-
-  /* Контент */
-  .wl-center {
-    padding: 12px 12px calc(100px + env(safe-area-inset-bottom));
+  .wl-sport-mobile-chip {
+    display: inline-flex;
   }
-  /* Баннеры — горизонтальная карусель со снапом, а не три экрана подряд */
+
+  /* ---------- Баннеры и турнирные чипы ---------- */
   .wl-banners-slider {
     display: flex;
     gap: 10px;
@@ -1431,25 +1389,22 @@ button:focus-visible, input:focus-visible {
   .wl-banners-slider::-webkit-scrollbar {
     display: none;
   }
-  .wl-banner-card {
-    min-height: 0;
-    padding: 16px;
-    border-radius: 12px;
-  }
   .wl-banners-slider .wl-banner-card {
-    flex: 0 0 88%;
-    min-height: 172px;
+    flex: 0 0 86%;
+    min-height: 150px;
     padding: 14px;
+    border-radius: 14px;
     scroll-snap-align: start;
     scroll-snap-stop: always;
   }
   .wl-banner-title {
-    font-size: 18px;
+    font-size: 17px;
     letter-spacing: -0.3px;
   }
   .wl-banner-desc {
     max-width: 100%;
     font-size: 12.5px;
+    line-height: 1.45;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -1459,31 +1414,115 @@ button:focus-visible, input:focus-visible {
     display: none;
   }
   .wl-tournaments-bar {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
+    padding-bottom: 2px;
+    gap: 8px;
   }
+  .wl-tournaments-bar > div:first-child {
+    gap: 6px;
+    scrollbar-width: none;
+  }
+  .wl-tournaments-bar > div:first-child::-webkit-scrollbar {
+    display: none;
+  }
+  .wl-tourney-pill {
+    flex-shrink: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 999px;
+  }
+  .wl-tourney-pill > span:last-child {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Дублирующие фильтры в линии на телефоне не нужны —
+     категории есть в чипах выше, Live — в нижнем таб-баре */
   .wl-round-filters {
-    margin-bottom: 14px;
+    display: none;
   }
 
-  /* Линия: крупные тапы, матрица коэффициентов 4 в ряд */
+  /* ---------- Линия: карточки событий, 3 главных исхода ---------- */
   .wl-columns-header {
     display: none;
   }
+  .wl-table-container {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    margin-bottom: 14px;
+  }
   .wl-league-header {
-    padding: 9px 12px;
+    background: transparent;
+    border-bottom: none;
+    padding: 4px 2px 8px;
+  }
+  .wl-league-title {
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--tx-secondary);
+  }
+  .wl-event-block {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    overflow: hidden;
   }
   .wl-match-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
+    display: block;
     padding: 12px;
+    background: transparent;
+    border-bottom: none;
+  }
+  .wl-match-row:hover {
+    background: transparent;
+  }
+  .wl-match-info {
+    margin-bottom: 10px;
   }
   .wl-match-teams {
-    font-size: 13.5px;
+    font-size: 14px;
+    line-height: 1.35;
     flex-wrap: wrap;
+    gap: 8px;
+  }
+  .wl-match-teams > button {
+    width: 44px;
+    height: 44px;
+    margin: -12px -8px -12px -10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .wl-match-meta {
+    font-size: 12px;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 4px;
   }
   .wl-odds-matrix {
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
+  }
+  .wl-odds-matrix.wl-odds-cols-1 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wl-odds-matrix.wl-odds-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wl-odds-matrix.wl-odds-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .wl-odds-matrix:not(.expanded) .wl-odd-box:nth-child(n + 4) {
+    display: none;
   }
   .wl-odd-box {
     height: 44px;
@@ -1495,23 +1534,50 @@ button:focus-visible, input:focus-visible {
   .wl-odd-lbl {
     font-size: 9.5px;
   }
+  .wl-odds-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    min-width: 0;
+    border: 1px dashed var(--border-light);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--tx-secondary);
+    font-family: var(--font-d);
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .wl-odds-more.expanded {
+    color: var(--org);
+    border-color: rgba(255, 85, 0, 0.45);
+  }
+  .wl-match-extra-link {
+    display: none;
+  }
   .wl-extra-markets {
-    padding: 12px;
+    padding: 10px 12px !important;
+    gap: 8px;
   }
-  .wl-table-container {
-    border-radius: 12px;
-    overflow-x: auto;
+  .wl-extra-markets > div > div {
+    flex-wrap: wrap;
   }
-  .wl-wallet-table th,
-  .wl-wallet-table td {
-    padding: 8px !important;
+  .wl-match-admin-bar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  .wl-admin-action-btn {
+    min-height: 44px;
   }
 
-  /* Игры */
+  /* ---------- Игры 24/7 ---------- */
   .wl-games-tabs {
+    gap: 8px;
     overflow-x: auto;
-    margin-bottom: 16px;
-    padding-bottom: 6px;
+    margin: 0 -12px 14px;
+    padding: 0 12px 4px;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
@@ -1520,34 +1586,52 @@ button:focus-visible, input:focus-visible {
   }
   .wl-games-tabs .wl-round-btn {
     flex-shrink: 0;
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 13px;
+  }
+  .wl-currency-switch {
+    margin-bottom: 10px;
+    gap: 6px;
+  }
+  .wl-currency-switch .wl-round-btn {
+    min-height: 44px;
+  }
+  .wl-currency-note {
+    margin-top: 0;
+  }
+  .wl-casino-strip {
+    flex-direction: column;
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+  }
+  .wl-casino-strip > .wl-banner-card {
+    width: 100%;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
   }
   .wl-crash-layout {
-    gap: 12px;
+    gap: 10px;
   }
   .wl-crash-arena {
-    min-height: 360px;
-    padding: 14px 12px 16px;
+    min-height: 320px;
+    padding: 12px;
     border-radius: 14px;
   }
   .wl-crash-display {
-    height: 200px;
+    height: 180px;
   }
   .wl-crash-sidebar {
-    padding: 14px;
+    padding: 12px;
     border-radius: 14px;
   }
   .wl-wheel-container {
-    width: min(320px, calc(100vw - 72px));
-    height: auto;
-    aspect-ratio: 1;
+    width: min(300px, calc(100vw - 64px));
   }
   .wl-ceo-card {
     flex-direction: column;
     align-items: stretch !important;
     gap: 16px !important;
-  }
-  .wl-ceo-card > img {
-    align-self: center;
   }
   .wl-esports-head {
     flex-direction: column;
@@ -1555,58 +1639,440 @@ button:focus-visible, input:focus-visible {
     gap: 8px;
   }
 
-  /* Плавающий купон, шторка ставки и модалки */
-  /* Плавающий купон — полноширинная нижняя панель */
-  .wl-floating-coupon-bar {
-    left: 10px;
-    right: 10px;
-    bottom: calc(10px + env(safe-area-inset-bottom));
-    gap: 8px;
+  /* ---------- Нижняя навигация ---------- */
+  .wl-mobile-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    height: calc(var(--wl-nav-h) + env(safe-area-inset-bottom));
+    padding: 0 4px env(safe-area-inset-bottom);
+    background: rgba(17, 20, 27, 0.97);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid var(--border);
   }
-  .wl-coupon-trigger-btn {
-    flex: 1;
+  .wl-mobile-nav-item {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: var(--wl-nav-h);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
-    height: 48px;
-    padding: 0 14px;
-    border-radius: 10px;
-    font-size: 13px;
+    gap: 3px;
+    color: var(--tx-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
   }
-  .wl-floating-chat-btn {
-    width: 46px;
-    height: 46px;
+  .wl-mobile-nav-item.active {
+    color: var(--org);
+  }
+  .wl-mobile-nav-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 24px;
+  }
+  .wl-mobile-nav-item.active .wl-mobile-nav-icon::before {
+    content: '';
+    position: absolute;
+    top: -9px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 22px;
+    height: 3px;
+    border-radius: 0 0 3px 3px;
+    background: var(--org);
+    box-shadow: 0 0 10px var(--org-glow);
+  }
+  .wl-mobile-nav-label {
+    letter-spacing: 0.1px;
+  }
+  .wl-mobile-nav-dot {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 0 2px #11141b;
+  }
+  .wl-mobile-nav-badge {
+    position: absolute;
+    top: -4px;
+    right: -8px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--org);
+    color: #fff;
+    font-family: var(--font-d);
+    font-size: 10px;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 0 2px #11141b;
+  }
+  /* ---------- Шторка «Ещё» ---------- */
+  .wl-more-backdrop {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 160;
+    align-items: flex-end;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    animation: fade-in 0.15s ease;
+  }
+  .wl-more-sheet {
+    display: block;
+    width: 100%;
+    max-height: 90vh;
+    max-height: 90dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: #141822;
+    border: 1px solid var(--border-light);
+    border-bottom: none;
+    border-radius: 20px 20px 0 0;
+    padding: 0 16px calc(18px + env(safe-area-inset-bottom));
+    animation: slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .wl-more-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 0 8px;
+  }
+  .wl-more-head h2 {
+    font-family: var(--font-d);
+    font-size: 18px;
+    font-weight: 800;
+  }
+  .wl-more-close {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: -8px;
+    color: var(--tx-muted);
+  }
+  .wl-more-profile {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: #1b212d;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    text-align: left;
+  }
+  .wl-more-profile-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .wl-more-profile-text b {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .wl-more-profile-text small {
+    font-size: 11px;
+    color: var(--tx-muted);
+  }
+  .wl-more-profile-balance {
+    margin-left: auto;
+    font-family: var(--font-d);
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--org);
+    white-space: nowrap;
+  }
+  .wl-more-profile > svg {
+    color: var(--tx-muted);
+    flex-shrink: 0;
+  }
+  .wl-more-login {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #9146ff, #772ce8);
+    color: #fff;
+    font-weight: 800;
+    font-size: 14px;
+    box-shadow: 0 2px 12px rgba(145, 70, 255, 0.35);
+  }
+  .wl-more-group {
+    border-top: 1px solid var(--border);
+    padding: 4px 0;
+  }
+  .wl-more-group-title {
+    display: block;
+    padding: 8px 4px 6px;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--tx-muted);
+  }
+  .wl-more-item {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 4px;
     border-radius: 10px;
+    text-align: left;
+    color: var(--tx-primary);
+  }
+  .wl-more-item:active {
+    background: #1b212d;
+  }
+  .wl-more-item > svg:first-child {
+    color: var(--tx-secondary);
+    flex-shrink: 0;
+  }
+  .wl-more-item > span {
+    font-size: 14.5px;
+    font-weight: 600;
+  }
+  .wl-more-item > small {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11.5px;
+    color: var(--tx-muted);
+    white-space: nowrap;
+  }
+  .wl-more-item > svg:last-child {
+    color: #3d4658;
+    flex-shrink: 0;
+  }
+  .wl-more-item.wl-more-admin > svg:first-child {
+    color: #f59e0b;
+  }
+  .wl-more-item.wl-more-logout > span,
+  .wl-more-item.wl-more-logout > svg:first-child {
+    color: #ef4444;
+  }
+  .wl-more-note {
+    margin-top: 12px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--tx-muted);
+  }
+
+  /* ---------- Купон: настоящая нижняя шторка ---------- */
+  .wl-floating-coupon-bar {
+    display: none;
+  }
+  .wl-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    background: rgba(0, 0, 0, 0.62);
+    animation: fade-in 0.15s ease;
+  }
+  .wl-sheet-handle {
+    display: block;
+    flex-shrink: 0;
+    width: 38px;
+    height: 4px;
+    margin: 8px auto 2px;
+    border-radius: 999px;
+    background: #3a4356;
   }
   .wl-betslip-drawer {
-    right: 0;
     left: 0;
+    right: 0;
     bottom: 0;
     width: 100%;
-    max-height: 82vh;
-    border-radius: 16px 16px 0 0;
+    max-height: 88vh;
+    max-height: min(88dvh, 760px);
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    z-index: 120;
+    display: flex;
+    flex-direction: column;
+    animation: slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .wl-slip-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 8px 14px;
+    border-radius: 18px 18px 0 0;
+  }
+  .wl-slip-tab {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 13px;
   }
   .wl-slip-body {
-    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+    flex: 1 1 auto;
+    max-height: none;
+    overflow-y: auto;
+    padding: 14px 14px calc(18px + env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
   }
+  .wl-quick-stakes {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .wl-quick-btn {
+    min-height: 44px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+  .wl-stake-input {
+    min-height: 48px;
+    font-size: 18px;
+  }
+  .wl-slip-body .wl-btn-orange {
+    min-height: 50px;
+    font-size: 16px;
+  }
+  .wl-slip-remove {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: -10px -10px 0 0;
+  }
+
+  /* ---------- Модалки превращаются в шторки ---------- */
   .wl-modal-overlay {
-    padding: 10px;
+    align-items: flex-end;
+    padding: 0;
   }
   .wl-modal-card {
+    width: 100%;
+    max-width: 100%;
     max-height: 92vh;
-    border-radius: 14px;
+    max-height: 92dvh;
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    animation: slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .wl-modal-header {
-    padding: 12px 14px;
+    padding: 12px 16px;
   }
   .wl-modal-body {
-    padding: 14px;
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
     overflow-x: auto;
   }
   .wl-admin-table {
     min-width: 560px;
   }
+
+  /* ---------- Кошелёк: таблица → карточки ---------- */
+  .wl-wallet-table-wrap {
+    display: none;
+  }
+  .wl-wallet-balance-value {
+    font-size: 32px !important;
+  }
+  .wl-wallet-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+  }
+  .wl-wallet-actions .wl-btn-orange,
+  .wl-wallet-actions .wl-sidebar-quick-btn {
+    min-height: 44px;
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .wl-wallet-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .wl-wallet-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+  }
+  .wl-wallet-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .wl-wallet-card-title {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .wl-wallet-card-status {
+    font-size: 10.5px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .wl-wallet-card-pick {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--tx-muted);
+  }
+  .wl-wallet-card-bottom {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #1c2230;
+    font-size: 12.5px;
+    color: var(--tx-secondary);
+  }
+  .wl-wallet-card-bottom b {
+    color: #fff;
+  }
+  .wl-wallet-card-odds {
+    color: var(--org) !important;
+    font-family: var(--font-d);
+  }
+  .wl-wallet-empty {
+    padding: 28px 16px;
+    text-align: center;
+    color: var(--tx-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  /* ---------- Тост над таб-баром ---------- */
   .wl-toast {
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    bottom: calc(var(--wl-nav-h) + env(safe-area-inset-bottom) + 14px);
     max-width: calc(100vw - 24px);
+    font-size: 13px;
   }
 }
 
@@ -1628,7 +2094,21 @@ button:focus-visible, input:focus-visible {
     padding: 3px 8px;
   }
   .wl-footer {
-    padding: 20px 14px;
+    padding: 20px 14px calc(var(--wl-nav-h) + env(safe-area-inset-bottom) + 20px);
+  }
+}
+
+/* Узкие телефоны: лого без маскота и компактный баланс, чтобы шапка осталась в одну строку */
+@media (max-width: 379px) {
+  .wl-logo-pill > svg {
+    display: none;
+  }
+  .wl-logo-pill {
+    padding: 0 10px;
+  }
+  .wl-balance-chip {
+    max-width: 100px;
+    padding: 0 9px;
   }
 }
 
@@ -2013,6 +2493,13 @@ button:focus-visible, input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.wl-wheel-rotor {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 
 .wl-wheel-rim {
@@ -3116,4 +3603,95 @@ button:focus-visible, input:focus-visible {
 .wl-slip-currency .wl-round-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* ============================================================
+   Поздние базовые правила (модалки, игры) объявлены ниже
+   основного мобильного блока — возвращаем мобильные размеры,
+   чтобы они не перебивались базовыми.
+   ============================================================ */
+@media (max-width: 767px) {
+  .wl-user-chip {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .wl-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .wl-modal-card {
+    width: 100%;
+    max-width: 100% !important;
+    max-height: 92vh;
+    max-height: 92dvh;
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    animation: slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .wl-modal-header {
+    padding: 12px 16px;
+  }
+  .wl-modal-body {
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+    overflow-x: auto;
+  }
+  .wl-modal-x {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: -8px -8px -8px 0;
+    flex-shrink: 0;
+  }
+  .wl-admin-table {
+    min-width: 560px;
+  }
+  .wl-match-admin-bar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  .wl-admin-action-btn {
+    min-height: 44px;
+  }
+  .wl-crash-layout {
+    gap: 10px;
+  }
+  .wl-crash-arena {
+    min-height: 320px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+  .wl-crash-display {
+    height: 180px;
+  }
+  .wl-crash-sidebar {
+    padding: 12px;
+    border-radius: 14px;
+  }
+  .wl-crash-history-pill {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+  .wl-wheel-container {
+    width: min(300px, calc(100vw - 64px));
+    height: auto;
+    aspect-ratio: 1;
+    margin: 12px auto 18px;
+  }
+  .wl-currency-switch {
+    margin-bottom: 10px;
+    gap: 6px;
+  }
+  .wl-currency-switch .wl-round-btn {
+    min-height: 44px;
+  }
+  .wl-currency-note {
+    margin-top: 0;
+  }
 }

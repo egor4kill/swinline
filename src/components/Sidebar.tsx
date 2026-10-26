@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import {
   Trophy,
@@ -59,11 +60,32 @@ export default function Sidebar({
   onOpenAdmin,
   allEvents
 }: SidebarProps) {
+  // На телефоне поиск не занимает строку постоянно: чипы категорий + иконка поиска
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (mobileSearchOpen) searchRef.current?.focus()
+  }, [mobileSearchOpen])
+
+  const favoritesCount = Object.values(favorites).filter(Boolean).length
+
   return (
-    <aside className="wl-sidebar">
+    <aside className={`wl-sidebar ${mobileSearchOpen ? 'wl-mobile-search-open' : ''}`}>
+      <button
+        type="button"
+        className={`wl-search-toggle ${searchQuery ? 'active' : ''}`}
+        aria-label={mobileSearchOpen ? 'Закрыть поиск' : 'Поиск событий'}
+        aria-expanded={mobileSearchOpen}
+        onClick={() => setMobileSearchOpen(open => !open)}
+      >
+        {mobileSearchOpen ? <X size={20} /> : <Search size={20} />}
+      </button>
+
       <div className="wl-search-box">
         <Search className="wl-search-icon" size={16} />
         <input
+          ref={searchRef}
           type="text"
           className="wl-search-input"
           placeholder="Поиск событий..."
@@ -77,6 +99,8 @@ export default function Sidebar({
         />
         {searchQuery && (
           <button
+            className="wl-search-clear"
+            aria-label="Очистить поиск"
             style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: '#888' }}
             onClick={() => setSearchQuery('')}
           >
@@ -87,7 +111,9 @@ export default function Sidebar({
 
       <div className="wl-sidebar-quick">
         <button
-          className={`wl-sidebar-quick-btn ${favoritesOnly ? 'active' : ''}`}
+          className={`wl-sidebar-quick-btn wl-quick-favorites ${favoritesOnly ? 'active' : ''}`}
+          aria-label="Показать избранные события"
+          title="Избранное"
           onClick={() => {
             setFavoritesOnly(prev => !prev)
             if (view !== 'line' && view !== 'live') setView('line')
@@ -95,13 +121,13 @@ export default function Sidebar({
         >
           <Star size={16} color={favoritesOnly ? 'var(--org)' : '#94a3b8'} />
           <span>Избранное</span>
-          {Object.values(favorites).filter(Boolean).length > 0 && (
-            <span className="wl-badge-count">{Object.values(favorites).filter(Boolean).length}</span>
+          {favoritesCount > 0 && (
+            <span className="wl-badge-count">{favoritesCount}</span>
           )}
         </button>
 
         <button
-          className={`wl-sidebar-quick-btn ${selectedSport === null && !favoritesOnly ? 'active' : ''}`}
+          className={`wl-sidebar-quick-btn wl-quick-all ${selectedSport === null && !favoritesOnly ? 'active' : ''}`}
           onClick={() => {
             setSelectedSport(null)
             setFavoritesOnly(false)
@@ -114,7 +140,7 @@ export default function Sidebar({
 
         {isAdmin && (
           <button
-            className="wl-sidebar-quick-btn"
+            className="wl-sidebar-quick-btn wl-quick-admin"
             style={{ color: '#f59e0b', background: '#f59e0b11', borderColor: '#f59e0b33' }}
             onClick={onOpenAdmin}
           >
@@ -128,6 +154,33 @@ export default function Sidebar({
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-muted)', textTransform: 'uppercase', padding: '6px 12px' }}>
           Категории ставок
         </div>
+        <button
+          type="button"
+          className={`wl-sport-item wl-sport-mobile-chip wl-sport-all-mobile ${selectedSport === null && !favoritesOnly ? 'active' : ''}`}
+          onClick={() => {
+            setSelectedSport(null)
+            setFavoritesOnly(false)
+          }}
+        >
+          <div className="wl-sport-left">
+            <Clock size={15} />
+            <span>Все</span>
+          </div>
+        </button>
+        <button
+          type="button"
+          className={`wl-sport-item wl-sport-mobile-chip wl-sport-favorites-mobile ${favoritesOnly ? 'active' : ''}`}
+          onClick={() => {
+            setFavoritesOnly(prev => !prev)
+            if (view !== 'line' && view !== 'live') setView('line')
+          }}
+        >
+          <div className="wl-sport-left">
+            <Star size={15} color={favoritesOnly ? 'var(--org)' : 'inherit'} />
+            <span>Избранное</span>
+          </div>
+          {favoritesCount > 0 && <span className="wl-badge-count">{favoritesCount}</span>}
+        </button>
         {SPORT_CATEGORIES.map(sport => {
           const isActive = selectedSport === sport.id
           return (

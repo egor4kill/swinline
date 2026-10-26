@@ -106,6 +106,7 @@ import ResultsView from './components/ResultsView'
 import AboutView from './components/AboutView'
 import CouponBar from './components/CouponBar'
 import BetSlip from './components/BetSlip'
+import MobileNav from './components/MobileNav'
 import ProfileModal from './modals/ProfileModal'
 import AdminModal from './modals/AdminModal'
 import AuthModal from './modals/AuthModal'
@@ -1885,6 +1886,26 @@ export default function App() {
       </div>
 
       <CouponBar {...{ activeBetsCount, notify, selectedBet, setSlipOpen, slipOpen }} />
+      <MobileNav
+        view={view}
+        setView={setView}
+        setSelectedSport={setSelectedSport}
+        slipOpen={slipOpen}
+        onToggleSlip={() => setSlipOpen(prev => !prev)}
+        couponCount={selectedBet ? 1 : 0}
+        activeBetsCount={activeBetsCount}
+        currentUser={currentUser}
+        isAdmin={isAdmin}
+        balance={S.bal}
+        onOpenProfile={() => setProfileModalOpen(true)}
+        onOpenAdmin={() => { setAdminTab('users'); setAdminModalOpen(true) }}
+        onOAuthLogin={handleOAuthLogin}
+        onLogout={handleLogout}
+        onSupport={() => {
+          notify('💬 Поддержка: @egor4kill')
+          window.open('https://t.me/egor4kill', '_blank')
+        }}
+      />
       <BetSlip {...{ S, activeBetsCount, allEvents, err, handlePlaceBet, isStakeValid, potentialPayout, selectedBet, setErr, setSelectedBet, setSlipOpen, setSlipTab, setStake, slipOpen, slipTab, stake, playCurrency, setPlayCurrency, arBalance, currentUser, onNeedAuth: () => setAuthModalOpen(true) }} />
       <ProfileModal {...{ S, currentUser, handleLogout, isAdmin, myStats, profileModalOpen, setProfileModalOpen }} />
       <AdminModal {...{ CATS, S, accounts, addVirtualMoney, adminModalOpen, adminTab, allEvents, applyTemplate, currentUser, fetchSupabaseUsers, freshState, handleAdminDeleteUser, handleAdminPurgeEmpty, handleAdminReset, handleAdminToggleBlock, handleAdminTopUp, handleCancelEventAction, handleClearAllEvents, handleCreateMatch, handleSettleEventAction, handleToggleEventClosedAction, isAdmin, newMatchCat, newMatchIsLive, newMatchLeague, newMatchOdds1, newMatchOdds2, newMatchOddsX, newMatchScore, newMatchTeam1, newMatchTeam2, newMatchTime, newMatchTitle, notify, setAdminModalOpen, setAdminTab, setCreateMatchModalOpen, setDeleteEventModal, setEditEventModal, setEditIsLive, setEditLiveTime, setEditScore, setInspectingUser, setNewMatchCat, setNewMatchIsLive, setNewMatchLeague, setNewMatchOdds1, setNewMatchOdds2, setNewMatchOddsX, setNewMatchScore, setNewMatchTeam1, setNewMatchTeam2, setNewMatchTime, setNewMatchTitle, setS, setSelectedBet }} />

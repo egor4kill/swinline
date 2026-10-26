@@ -68,11 +68,24 @@ export default function BetSlip(props: Props) {
   const unit = playCurrency === 'ar' ? 'АР' : 'SV₽'
   const num = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
   const money = (n: number, u: string = unit) => num(n) + ' ' + u
+
+  // На телефоне купон — модальная шторка: фон не должен скроллиться под ней
+  useEffect(() => {
+    if (!slipOpen) return
+    if (!window.matchMedia('(max-width: 767px)').matches) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prevOverflow }
+  }, [slipOpen])
+
   return (
     <>
 {/* 4. Floating BetSlip Drawer */}
 {slipOpen && (
-  <div className="wl-betslip-drawer">
+  <>
+  <div className="wl-sheet-backdrop" onClick={() => setSlipOpen(false)} />
+  <div className="wl-betslip-drawer" role="dialog" aria-modal="true" aria-label="Купон">
+    <div className="wl-sheet-handle" aria-hidden="true" />
     <div className="wl-slip-header">
       <div className="wl-slip-tabs">
         <button
@@ -88,7 +101,12 @@ export default function BetSlip(props: Props) {
           В игре ({activeBetsCount})
         </button>
       </div>
-      <button onClick={() => setSlipOpen(false)} style={{ color: 'var(--tx-muted)' }}>
+      <button
+        type="button"
+        aria-label="Закрыть купон"
+        onClick={() => setSlipOpen(false)}
+        style={{ color: 'var(--tx-muted)' }}
+      >
         <X size={18} />
       </button>
     </div>
@@ -247,6 +265,7 @@ export default function BetSlip(props: Props) {
       </div>
     )}
   </div>
+  </>
 )}
     </>
   )

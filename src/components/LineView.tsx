@@ -257,8 +257,13 @@ export default function LineView({
               const winningIdx = S.st[ev.id]?.w
               const isExpanded = !!expandedMarkets[ev.id]
 
+              const extraOutcomesCount = Math.max(0, ev.out.length - 3) +
+                (ev.extraMarkets?.reduce((n, m) => n + m.out.length, 0) || 0)
+              // На телефоне первые три исхода главные, остальные прячутся под «+N»
+              const oddsCols = Math.min(4, ev.out.length + (extraOutcomesCount > 0 ? 1 : 0))
+
               return (
-                <div key={ev.id} style={{ borderBottom: '1px solid #1a202c' }}>
+                <div key={ev.id} className="wl-event-block">
                   <div className="wl-match-row">
                     <div className="wl-match-info">
                       <div className="wl-match-teams">
@@ -294,7 +299,7 @@ export default function LineView({
                       </div>
                     </div>
 
-                    <div className="wl-odds-matrix">
+                    <div className={`wl-odds-matrix ${isExpanded ? 'expanded' : ''} ${oddsCols < 4 ? `wl-odds-cols-${oddsCols}` : ''}`}>
                       {ev.out.slice(0, 7).map((outcome, idx) => {
                         const isSelected = selectedBet?.evId === ev.id && selectedBet?.outcomeIdx === idx
                         const isWinner = isDone && winningIdx === idx
@@ -316,6 +321,18 @@ export default function LineView({
                           </button>
                         )
                       })}
+                      {extraOutcomesCount > 0 && (
+                        <button
+                          type="button"
+                          className={`wl-odds-more ${isExpanded ? 'expanded' : ''}`}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? 'Скрыть дополнительные рынки' : `Показать ещё ${extraOutcomesCount} рынков`}
+                          title={isExpanded ? 'Скрыть дополнительные рынки' : `Ещё ${extraOutcomesCount} рынков`}
+                          onClick={() => toggleMarket(ev.id)}
+                        >
+                          {isExpanded ? 'Скрыть' : `+${extraOutcomesCount}`}
+                        </button>
+                      )}
                     </div>
                   </div>
 

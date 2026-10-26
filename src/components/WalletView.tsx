@@ -46,6 +46,26 @@ export default function WalletView({
   const betMoney = (n: number, b: any) =>
     n.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ' + (b.currency === 'ar' ? 'АР' : 'SV₽')
 
+  const rowViews = rows.map((b: any) => {
+    const isDb = rowsMeta === 'db'
+    const ev = isDb ? null : allEvents.find(e => e.id === b.ev)
+    const title = isDb ? (b.match_title || b.event_id) : (ev?.title || b.ev)
+    const pick = isDb ? (b.pick_name || b.pick) : (ev?.out[b.i]?.[0] || 'Исход')
+    const status = isDb ? b.status : b.state
+    const statusColor = status === 'won' ? 'var(--green)' : status === 'lost' ? '#ef4444' : status === 'refund' ? '#94a3b8' : 'var(--org)'
+    const statusText = status === 'won' ? 'ВЫИГРЫШ' : status === 'lost' ? 'ПРОИГРЫШ' : status === 'refund' ? 'ВОЗВРАТ' : 'В ИГРЕ'
+    return {
+      key: b.id,
+      title,
+      pick,
+      statusColor,
+      statusText,
+      payout: isDb && status === 'won' ? betMoney(Number(b.payout || 0), b) : '',
+      stake: betMoney(Number(b.stake), b),
+      odds: Number(b.odds).toFixed(2)
+    }
+  })
+
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
       <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 22, marginBottom: 16 }}>
@@ -54,12 +74,12 @@ export default function WalletView({
 
       <DailyRewards daily={daily} onClaim={claimDaily} />
 
-      <div className="wl-banner-card" style={{ marginBottom: 20 }}>
+      <div className="wl-banner-card wl-wallet-balance" style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 13, color: 'var(--tx-secondary)' }}>Доступный виртуальный баланс:</div>
-        <div style={{ fontFamily: 'var(--font-d)', fontSize: 36, fontWeight: 800, color: 'var(--org)', margin: '8px 0 16px' }}>
+        <div className="wl-wallet-balance-value" style={{ fontFamily: 'var(--font-d)', fontSize: 36, fontWeight: 800, color: 'var(--org)', margin: '8px 0 16px' }}>
           {fmt(balance)}
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div className="wl-wallet-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button className="wl-btn-orange" onClick={() => addVirtualMoney(5000)}>
             + 5 000 SV₽
           </button>
@@ -82,7 +102,7 @@ export default function WalletView({
       <h3 style={{ fontSize: 17, fontWeight: 700, margin: '24px 0 12px' }}>
         История ставок {rowsMeta === 'db' ? '(из базы)' : ''}
       </h3>
-      <div className="wl-table-container">
+      <div className="wl-table-container wl-wallet-table-wrap">
         {rows.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-muted)' }}>
             {rowsMeta === 'db' && dbBets === null
@@ -100,34 +120,49 @@ export default function WalletView({
               </tr>
             </thead>
             <tbody>
-              {rows.map((b: any) => {
-                const isDb = rowsMeta === 'db'
-                const ev = isDb ? null : allEvents.find(e => e.id === b.ev)
-                const title = isDb ? (b.match_title || b.event_id) : (ev?.title || b.ev)
-                const pick = isDb ? (b.pick_name || b.pick) : (ev?.out[b.i]?.[0] || 'Исход')
-                const status = isDb ? b.status : b.state
-                const statusColor = status === 'won' ? 'var(--green)' : status === 'lost' ? '#ef4444' : status === 'refund' ? '#94a3b8' : 'var(--org)'
-                const statusText = status === 'won' ? 'ВЫИГРЫШ' : status === 'lost' ? 'ПРОИГРЫШ' : status === 'refund' ? 'ВОЗВРАТ' : 'В ИГРЕ'
-
-                return (
-                  <tr key={b.id} style={{ borderBottom: '1px solid #1c2230' }}>
-                    <td style={{ padding: '10px 14px' }}>
-                      <div style={{ fontWeight: 700 }}>{title}</div>
-                      <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{pick}{isDb && status === 'won' ? ` • выплата ${betMoney(Number(b.payout || 0), b)}` : ''}</div>
-                    </td>
-                    <td style={{ padding: '10px 14px', fontWeight: 700 }}>{betMoney(Number(b.stake), b)}</td>
-                    <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{Number(b.odds).toFixed(2)}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{ color: statusColor, fontWeight: 800, fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#191f2c' }}>
-                        {statusText}
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
+              {rowViews.map(r => (
+                <tr key={r.key} style={{ borderBottom: '1px solid #1c2230' }}>
+                  <td style={{ padding: '10px 14px' }}>
+                    <div style={{ fontWeight: 700 }}>{r.title}</div>
+                    <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{r.pick}{r.payout ? ` • выплата ${r.payout}` : ''}</div>
+                  </td>
+                  <td style={{ padding: '10px 14px', fontWeight: 700 }}>{r.stake}</td>
+                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{r.odds}</td>
+                  <td style={{ padding: '10px 14px' }}>
+                    <span style={{ color: r.statusColor, fontWeight: 800, fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#191f2c' }}>
+                      {r.statusText}
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* На телефоне таблица превращается в карточки — горизонтальный скролл не нужен */}
+      <div className="wl-wallet-cards">
+        {rowViews.length === 0 ? (
+          <div className="wl-wallet-empty">
+            {rowsMeta === 'db' && dbBets === null
+              ? 'Загружаем из базы…'
+              : 'Ставок пока нет. Загляните в линию и выберите исход!'}
+          </div>
+        ) : rowViews.map(r => (
+          <article className="wl-wallet-card" key={r.key}>
+            <div className="wl-wallet-card-top">
+              <div className="wl-wallet-card-title">{r.title}</div>
+              <span className="wl-wallet-card-status" style={{ color: r.statusColor }}>{r.statusText}</span>
+            </div>
+            <div className="wl-wallet-card-pick">
+              {r.pick}{r.payout ? ` · выплата ${r.payout}` : ''}
+            </div>
+            <div className="wl-wallet-card-bottom">
+              <span>Ставка <b>{r.stake}</b></span>
+              <span>Коэф. <b className="wl-wallet-card-odds">{r.odds}</b></span>
+            </div>
+          </article>
+        ))}
       </div>
     </div>
   )
