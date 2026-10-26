@@ -23,6 +23,7 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_ADMIN_USERNAME: ${{ secrets.VITE_ADMIN_USERNAME }}
+          VITE_MC_SERVER: ${{ secrets.VITE_MC_SERVER }}
       - uses: actions/upload-pages-artifact@v3
         with: { path: dist }
       - id: d

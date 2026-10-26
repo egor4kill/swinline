@@ -1,0 +1,19 @@
+# Адрес проекта Supabase (без слэша на конце).
+supabase-url: "https://vkgzyeugrxxwlouqrxrh.supabase.co"
+
+# СЕРВИСНЫЙ ключ (service_role) из Supabase → Project Settings → API.
+# НЕ публикуй его и не клади в клиент сайта: ключ даёт полный доступ к базе.
+# После смены ключа перезапусти сервер.
+service-key: "PASTE_SERVICE_ROLE_KEY_HERE"
+
+# Какой предмет считается «алмазной рудой». По умолчанию — блок алмазной руды.
+ore-material: DIAMOND_ORE
+
+# Как часто плагин проверяет готовые выводы и повторяет зависшие заносы.
+poll-seconds: 15
+
+# Автоматически выдавать выводы при входе и раз в poll-seconds.
+auto-deliver: true
+
+# Подробные логи RPC (без ключа). Включай для отладки.
+debug: false

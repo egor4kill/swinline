@@ -75,6 +75,7 @@ import Plinko from './Plinko'
 import MudPuddles from './MudPuddles'
 import RubleChart, { type RubleResult } from './RubleChart'
 import Blackjack from './Blackjack'
+import MineView from './MineView'
 import CasinoStrip, { JackpotOverlay } from './CasinoStrip'
 import VipBadge from './VipBadge'
 import DailyRewards from './DailyRewards'
@@ -1726,6 +1727,17 @@ export default function App() {
           {/* E. PROMOS VIEW */}
           {view === 'promos' && (
             <PromosView notify={notify} />
+          )}
+
+          {/* H. MINE VIEW — алмазная руда из Minecraft */}
+          {view === 'mine' && (
+            <MineView
+              currentUser={currentUser}
+              balance={S.bal}
+              notify={notify}
+              onNeedAuth={() => setAuthModalOpen(true)}
+              onBal={bjBal}
+            />
           )}
 
           {/* F. RESULTS VIEW */}

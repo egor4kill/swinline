@@ -74,6 +74,13 @@ export default function Header({
               Игры 24/7
             </button>
             <button
+              className={`wl-nav-link ${view === 'mine' ? 'active' : ''}`}
+              onClick={() => setView('mine')}
+            >
+              <span className="mc-nav-dot" />
+              Шахта
+            </button>
+            <button
               className={`wl-nav-link ${view === 'wallet' ? 'active' : ''}`}
               onClick={() => setView('wallet')}
             >
