@@ -1,12 +1,26 @@
 # SwinlineMine — алмазная руда из Minecraft на сайт SWINLINE
 
-Плагин для Paper/Spigot 1.20.x (Java 17), который связывает Minecraft-сервер с
-сайтом SWINLINE. Игрок привязывает Minecraft-ник к аккаунту сайта, заносит
-алмазную руду, играет на неё в разделе «Шахта», обменивает на SV₽ и выводит
-руду обратно в инвентарь.
+Плагин для Paper 26.3 (Java 21+, на сервере Java 25), который связывает
+Minecraft-сервер с сайтом SWINLINE. Игрок привязывает Minecraft-ник к аккаунту
+сайта, заносит алмазную руду и получает **АР** — отдельную валюту шахты
+(**1 алмазная руда = 1 АР**). На АР можно играть в «Алмазной жиле», обменивать
+их на SV₽ и выводить обратно в инвентарь (1 АР = 1 руда).
+
+## Сервер UEBKI
+
+- **Paper 26.3**, Java 25, ядро в образе `yolks:java_25`.
+- Java-адрес: **`c8.play2go.cloud:20113`**; Bedrock (Geyser) `:20254` — отключён
+  с 23.10.2026; голос `:20246`; Dynmap `:20247`.
+- Панель Pterodactyl: https://control.play2go.cloud/server/cd0a374b
+  (сервер `UEBKI-MAIN`, id `cd0a374b`, 9 ГБ RAM / 50 ГБ диска).
+- Whitelist включён, online-mode выключен (авторизация через Telegram-бота).
+- Плагины лежат в `/plugins`; конфиг нашего плагина — `/plugins/SwinlineMine/config.yml`.
+- На сервере 36 JAR (UEBKI-плагины, MythicMobs 5.13.0, ModelEngine 4.1.1,
+  ExecutableItems, LuckPerms, CoreProtect и т.д.). Наш плагин использует только
+  стабильный Bukkit API и ни с чем не конфликтует.
 
 ```
-Minecraft (Paper/Spigot)                 Supabase                         Сайт (React)
+Minecraft (Paper 26.3)                   Supabase                         Сайт (React)
 ┌──────────────────────┐   service key   ┌──────────────────────────┐   ┌────────────────────┐
 │ SwinlineMine         │ ──────────────► │ mc_plugin_* RPC          │   │ «Шахта»            │
 │ /sw link/deposit/... │ ◄────────────── │ mc_links / mc_accounts   │ ◄─ │ mc_status          │
@@ -25,27 +39,29 @@ Minecraft (Paper/Spigot)                 Supabase                         Сай
    В игре: `/sw link ABC123`. Плагин вызывает `mc_plugin_link`, который проверяет
    код и привязывает Minecraft UUID к `auth.uid()` игрока.
 2. **Занос.** `/sw deposit 10` (или `all`) снимает 10 блоков `DIAMOND_ORE` из
-   инвентаря и вызывает `mc_plugin_deposit(uuid, 10, nonce)`. Nonce хранится в
+   инвентаря и вызывает `mc_plugin_deposit(uuid, 10, nonce)`. На сайт
+   зачисляется **10 АР** (1 руда = 1 АР). Nonce хранится в
    `pending.yml`, поэтому обрыв сети/рестарт не зачислит руду дважды.
 3. **Игра.** На сайте: «Начать спуск» → `mc_dig_start`, «Копать глубже» →
-   `mc_dig_step`, «Забрать» → `mc_dig_cashout`. Ставка и выплата — в руде.
-4. **Обмен.** `mc_convert` (руда → SV₽) и `mc_buy_ore` (SV₽ → руда).
-5. **Вывод.** Сайт: `mc_withdraw_ore` списывает руду и создаёт заявку.
+   `mc_dig_step`, «Забрать» → `mc_dig_cashout`. Ставка и выплата — в АР.
+4. **Обмен.** `mc_convert` (АР → SV₽) и `mc_buy_ore` (SV₽ → АР).
+5. **Вывод.** Сайт: `mc_withdraw_ore` списывает АР и создаёт заявку.
    Плагин при входе/раз в `poll-seconds` вызывает `mc_plugin_sync`, забирает
-   заявку через `mc_plugin_withdraw_claim` и выдаёт блоки. Если места в
-   инвентаре нет — заявка остаётся pending и повторится позже.
+   заявку через `mc_plugin_withdraw_claim` и выдаёт блоки: **1 АР = 1 алмазная
+   руда**. Если места в инвентаре нет — заявка остаётся pending и повторится позже.
 
 ## Установка
 
-1. Собери jar (нужен JDK 17+):
+1. Собери jar (нужен JDK 21+; на сервере Java 25):
    ```bash
    cd minecraft-plugin
-   bash build.sh          # без Maven/Gradle: скачает Spigot API и Gson
+   JAVA_HOME="/path/to/jdk-21+" bash build.sh   # скачает Spigot API 26.3 и Gson
    # или: mvn package
    ```
+   На Windows локально: `JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-25.0.2.10-hotspot" bash build.sh`.
    Готовый файл: `minecraft-plugin/build/SwinlineMine.jar`. Рядом с исходниками
-   уже лежит собранный `minecraft-plugin/SwinlineMine.jar` — можно взять его,
-   если не менял код.
+   уже лежит собранный под Paper 26.3 `minecraft-plugin/SwinlineMine.jar` —
+   можно взять его, если не менял код.
 2. Положи его в `plugins/` на сервере и один раз запусти сервер.
 3. Открой `plugins/SwinlineMine/config.yml`:
    ```yaml
@@ -74,7 +90,9 @@ Minecraft (Paper/Spigot)                 Supabase                         Сай
 
 ## Сайт
 
-1. Примени раздел 16 SQL (личный Management API токен, не service-role):
+Раздел 16 SQL уже применён к живому проекту 26.10.2026 (см. `swinline-docs/minecraft.md`).
+Если проект пересоздаётся с нуля — примени раздел заново (личный Management API
+токен, не service-role):
    ```bash
    SUPABASE_ACCESS_TOKEN=sbp_... node scripts/apply_mc_sql.mjs
    ```
@@ -84,8 +102,9 @@ Minecraft (Paper/Spigot)                 Supabase                         Сай
    файл в SQL Editor вручную.
 2. Адрес сервера в интерфейсе (необязательно): добавь GitHub Secret
    `VITE_MC_SERVER` (например, `play.swinline.fun`) и запушь `main`.
-3. Открой на сайте «Шахта». Если раздел SQL ещё не применён, страница покажет
-   «Шахта скоро откроется» — это нормально, ошибки в консоль не летят.
+3. Открой на сайте «Шахта». Раздел 16 уже применён к живому проекту; если база
+   пересоздана и SQL не применён, страница покажет заглушку «Шахта скоро
+   откроется» — примени раздел 16 и обнови страницу.
 
 ## Экономика
 
@@ -93,9 +112,10 @@ Minecraft (Paper/Spigot)                 Supabase                         Сай
 
 | Параметр | Значение | Смысл |
 |---|---|---|
-| `ore_to_sv` | 250 | 1 руда → 250 SV₽ |
-| `sv_to_ore` | 300 | 1 руда ← 300 SV₽ (спред 20%) |
-| `min_withdraw` | 5 | минимум руды на вывод |
+| занос/вывод | 1:1 | 1 алмазная руда = 1 АР, без комиссии |
+| `ore_to_sv` | 250 | 1 АР → 250 SV₽ |
+| `sv_to_ore` | 300 | 1 АР ← 300 SV₽ (спред 20%) |
+| `min_withdraw` | 5 | минимум АР на вывод |
 | `dig_bust` | 0.18 | шанс обвала на каждом шаге |
 | `dig_rtp` | 0.9758 | целевой возврат игры |
 | `dig_max_depth` | 30 | максимум шагов |
@@ -111,9 +131,10 @@ SET ore_to_sv = 250, sv_to_ore = 300, min_withdraw = 5,
 WHERE id;
 ```
 
-Важно: руда — это предмет Minecraft. Если на сервере есть плагины/моды, которые
-бесплатно выдают `DIAMOND_ORE`, их «добыча» автоматически становится деньгами на
-сайте. Настрой экономику сервера так, чтобы руда чего-то стоила.
+Важно: АР — это отдельная валюта, привязанная к предмету 1:1. Если на сервере
+есть плагины/моды, которые бесплатно выдают `DIAMOND_ORE`, их «добыча»
+автоматически становится АР на сайте. Настрой экономику сервера так, чтобы руда
+чего-то стоила.
 
 ## Безопасность и устойчивость
 

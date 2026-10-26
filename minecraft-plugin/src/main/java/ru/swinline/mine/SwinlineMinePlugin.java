@@ -51,6 +51,7 @@ import java.util.concurrent.TimeUnit;
 public final class SwinlineMinePlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
 
     private static final String PREFIX = "§8[§bШахта§8] §r";
+    private static final String UNIT = "АР";
     private static final String KEY_PLACEHOLDER = "PASTE_SERVICE_ROLE_KEY_HERE";
 
     private final HttpClient http = HttpClient.newBuilder()
@@ -287,18 +288,18 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             }
             case "balance", "bal", "баланс" -> {
                 if (!(sender instanceof Player player)) {
-                    err(sender, "Баланс руды доступен только игроку.");
+                    err(sender, "Баланс АР доступен только игроку.");
                     return true;
                 }
                 if (!requireConfigured(sender)) {
                     return true;
                 }
-                msg(player, "Смотрю руду на сайте...");
+                msg(player, "Смотрю АР на сайте...");
                 syncPlayer(player, true, false);
             }
             case "withdraw", "wd", "вывод" -> {
                 if (!(sender instanceof Player player)) {
-                    err(sender, "Вывод руды доступен только игроку.");
+                    err(sender, "Вывод АР доступен только игроку.");
                     return true;
                 }
                 if (!requireConfigured(sender)) {
@@ -315,9 +316,9 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
     private void help(CommandSender sender) {
         sender.sendMessage(PREFIX + "§eШахта SWINLINE");
         sender.sendMessage("§e/sw link <код> §7— привязать аккаунт сайта (код в разделе «Шахта» на сайте)");
-        sender.sendMessage("§e/sw deposit <кол-во|all> §7— занести алмазную руду на сайт");
-        sender.sendMessage("§e/sw balance §7— сколько руды на сайте и есть ли готовые выводы");
-        sender.sendMessage("§e/sw withdraw §7— забрать готовые выводы в инвентарь");
+        sender.sendMessage("§e/sw deposit <кол-во|all> §7— занести руду на сайт (1 руда = 1 АР)");
+        sender.sendMessage("§e/sw balance §7— сколько АР на сайте и есть ли готовые выводы");
+        sender.sendMessage("§e/sw withdraw §7— забрать готовые выводы (АР → руда в инвентарь)");
         sender.sendMessage("§e/sw ping §7— проверить связь с сайтом");
     }
 
@@ -343,7 +344,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 JsonObject result = rpc("mc_plugin_link", params);
                 int ore = result.has("ore") ? result.get("ore").getAsInt() : 0;
                 linked.add(player.getUniqueId());
-                runTask(() -> ok(player, "Аккаунт привязан к сайту. Руды на сайте: §e" + ore + "§a."));
+                runTask(() -> ok(player, "Аккаунт привязан к сайту. " + UNIT + " на сайте: §e" + ore + "§a."));
             } catch (SiteException ex) {
                 runTask(() -> err(player, ex.getMessage()));
             }
@@ -423,7 +424,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 player.getUniqueId(), player.getName(), amount, nonce, System.currentTimeMillis());
         pendingDeposits.put(nonce, pending);
         savePending();
-        msg(player, "Заношу §e" + amount + "§7 " + oreName() + " на сайт...");
+        msg(player, "Заношу §e" + amount + "§7 " + oreName() + " (§e" + amount + " " + UNIT + "§7) на сайт...");
         sendDeposit(pending);
     }
 
@@ -445,8 +446,8 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
 
                 Player player = Bukkit.getPlayer(pending.playerId);
                 if (player != null) {
-                    runTask(() -> ok(player, "Зачислено §e" + pending.amount + "§a " + oreName()
-                            + ". Всего на сайте: §e" + ore + "§a."));
+                    runTask(() -> ok(player, "Зачислено §e" + pending.amount + " " + UNIT
+                            + "§a (1 руда = 1 АР). Всего на сайте: §e" + ore + " " + UNIT + "§a."));
                 }
             } catch (SiteException ex) {
                 if (ex.isDefinitive()) {
@@ -548,7 +549,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                         ? result.getAsJsonArray("withdrawals") : new JsonArray();
 
                 if (announce) {
-                    runTask(() -> msg(player, "Руды на сайте: §e" + ore + "§7. Готовых выводов: §e"
+                    runTask(() -> msg(player, "АР на сайте: §e" + ore + "§7. Готовых выводов: §e"
                             + withdrawals.size() + "§7."));
                 }
 
@@ -588,8 +589,8 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         }
 
         if (!Boolean.TRUE.equals(hasSpace)) {
-            runTask(() -> err(player, "Не хватает места для §e" + amount + "§c " + oreName()
-                    + ". Освободи слоты — выдача повторится сама."));
+            runTask(() -> err(player, "Не хватает места для §e" + amount + "§c " + UNIT
+                    + " (" + oreName() + "). Освободи слоты — выдача повторится сама."));
             return;
         }
 
@@ -606,7 +607,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             int got = result.has("amount") ? result.get("amount").getAsInt() : amount;
             runTask(() -> {
                 giveOre(player, got, "вывод с сайта");
-                ok(player, "Выдано §e" + got + "§a " + oreName() + " с сайта.");
+                ok(player, "Выдано §e" + got + "§a " + oreName() + " (" + got + " " + UNIT + ") с сайта.");
             });
         } catch (SiteException ex) {
             getLogger().warning("Не смог забрать вывод " + withdrawalId + " для " + player.getName() + ": " + ex.getMessage());

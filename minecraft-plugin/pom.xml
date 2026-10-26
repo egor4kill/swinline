@@ -12,7 +12,7 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.release>17</maven.compiler.release>
+    <maven.compiler.release>21</maven.compiler.release>
   </properties>
 
   <repositories>
@@ -23,18 +23,18 @@
   </repositories>
 
   <dependencies>
-    <!-- Spigot API 1.20.4 — последняя ветка на Java 17. Плагин работает и на Paper 1.20+/1.21+. -->
+    <!-- Spigot API 26.3 — как у остальных UEBKI-плагинов. Сборка на JDK 21+. -->
     <dependency>
       <groupId>org.spigotmc</groupId>
       <artifactId>spigot-api</artifactId>
-      <version>1.20.4-R0.1-SNAPSHOT</version>
+      <version>26.3-R0.1-SNAPSHOT</version>
       <scope>provided</scope>
     </dependency>
     <!-- Gson уже есть в Paper; нужен только для компиляции. -->
     <dependency>
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
-      <version>2.10.1</version>
+      <version>2.14.0</version>
       <scope>provided</scope>
     </dependency>
   </dependencies>

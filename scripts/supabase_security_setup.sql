@@ -2243,8 +2243,9 @@ TO authenticated, anon;
 --
 --     Рудой распоряжается только сервер: клиентские RPC проверяют
 --     auth.uid(), плагин ходит сервисным ключом (mc_plugin_*).
---     Рудный баланс — отдельная валюта mc_accounts.ore (целые единицы),
---     она не смешивается с profiles.bal. Конвертация — явная операция.
+--     Рудный баланс — отдельная валюта АР: mc_accounts.ore (целые единицы),
+--     1 АР = 1 блок алмазной руды. С profiles.bal не смешивается.
+--     Конвертация АР ↔ SV₽ — явная операция.
 --
 --     Экономика по умолчанию:
 --       1 руда → 250 SV₽, 1 руда ← 300 SV₽ (спред 20%),
@@ -2288,7 +2289,7 @@ ALTER TABLE public.mc_link_codes ENABLE ROW LEVEL SECURITY;
 
 CREATE TABLE IF NOT EXISTS public.mc_accounts (
   user_id uuid PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
-  ore integer NOT NULL DEFAULT 0 CHECK (ore >= 0),
+  ore integer NOT NULL DEFAULT 0 CHECK (ore >= 0),  -- баланс АР, 1 = 1 алмазная руда
   deposited integer NOT NULL DEFAULT 0,
   withdrawn integer NOT NULL DEFAULT 0,
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -2432,6 +2433,7 @@ BEGIN
   IF v_uid IS NULL THEN
     RETURN jsonb_build_object(
       'authed', false, 'linked', false, 'ore', 0,
+      'unit', 'АР', 'ore_per_unit', 1,
       'rate_to_sv', v_conf.ore_to_sv, 'rate_from_sv', v_conf.sv_to_ore,
       'min_withdraw', v_conf.min_withdraw,
       'bust_chance', v_conf.dig_bust, 'rtp', v_conf.dig_rtp,
@@ -2464,6 +2466,7 @@ BEGIN
     'mc_name', v_link.mc_name,
     'mc_uuid', v_link.mc_uuid,
     'ore', coalesce(v_acc.ore, 0),
+    'unit', 'АР', 'ore_per_unit', 1,
     'deposited', coalesce(v_acc.deposited, 0),
     'withdrawn', coalesce(v_acc.withdrawn, 0),
     'rate_to_sv', v_conf.ore_to_sv,

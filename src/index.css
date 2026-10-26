@@ -2348,6 +2348,16 @@ button:focus-visible, input:focus-visible {
   color: var(--mc-cyan);
 }
 
+.mc-unit {
+  font-family: var(--font-b);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mc-cyan);
+  letter-spacing: 0.02em;
+  align-self: flex-end;
+  padding-bottom: 3px;
+}
+
 .mc-ore-equivalent {
   font-size: 11px;
   color: var(--tx-secondary);

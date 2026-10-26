@@ -19,6 +19,7 @@ import { fmt } from './fmt'
 import type { UserAccount } from './data'
 
 const MC_SERVER = ((import.meta.env.VITE_MC_SERVER as string | undefined) || '').trim()
+const UNIT = 'АР'
 const FALLBACK_RATE_TO_SV = 250
 const FALLBACK_RATE_FROM_SV = 300
 const FALLBACK_MIN_WITHDRAW = 5
@@ -112,7 +113,7 @@ function OnlyForAuth({ onNeedAuth }: { onNeedAuth: () => void }) {
         <h1>Шахта ждёт</h1>
         <p>
           Войди через Twitch, чтобы привязать Minecraft-аккаунт, заносить алмазную руду
-          и играть на неё. Без входа руда не привяжется к твоему счёту.
+          и получать АР — валюту шахты. 1 руда = 1 АР.
         </p>
         <button className="wl-btn-orange mc-gate-btn" onClick={onNeedAuth}>
           Войти через Twitch
@@ -130,7 +131,7 @@ function NotReady() {
         <h1>Шахта скоро откроется</h1>
         <p>
           Мы уже прокладываем ствол. Как только серверная часть будет подключена,
-          здесь появится привязка Minecraft, занос руды и спуск в алмазную жилу.
+          здесь появится привязка Minecraft, занос руды (1 руда = 1 АР) и спуск в алмазную жилу.
         </p>
       </section>
     </div>
@@ -254,11 +255,11 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
     if (busy || !status) return
     const amount = Math.floor(Number(stake))
     if (!Number.isFinite(amount) || amount < 1) {
-      setMessage('Ставка — целое число руды, минимум 1.')
+      setMessage('Ставка — целое число АР, минимум 1.')
       return
     }
     if (amount > status.ore) {
-      setMessage(`На сайте только ${integer(status.ore)} руды.`)
+      setMessage(`На сайте только ${integer(status.ore)} АР.`)
       return
     }
     setBusy('start')
@@ -299,7 +300,7 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
     setMessage('')
     const { data, error } = await supabase.rpc('mc_dig_cashout', { p_round: status.round.id })
     setBusy(null)
-    if (error || !data) return fail(error, 'Не удалось забрать руду')
+    if (error || !data) return fail(error, 'Не удалось забрать АР')
     setStatus(prev => prev ? { ...prev, ore: Number(data.ore), round: null } : prev)
     setResult({
       kind: 'cash',
@@ -307,18 +308,18 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
       depth: Number(data.depth),
       mult: Number(data.mult)
     })
-    notify(`⛏ Забрал ${integer(Number(data.payout))} руды на глубине ${data.depth}.`)
+    notify(`⛏ Забрал ${integer(Number(data.payout))} АР на глубине ${data.depth}.`)
   }
 
   const withdraw = async () => {
     if (busy || !status) return
     const amount = Math.floor(Number(withdrawAmount))
     if (!Number.isFinite(amount) || amount < status.minWithdraw) {
-      setMessage(`Минимум для вывода — ${status.minWithdraw} руды.`)
+      setMessage(`Минимум для вывода — ${status.minWithdraw} АР.`)
       return
     }
     if (amount > status.ore) {
-      setMessage(`На сайте только ${integer(status.ore)} руды.`)
+      setMessage(`На сайте только ${integer(status.ore)} АР.`)
       return
     }
     setBusy('withdraw')
@@ -327,7 +328,7 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
     setBusy(null)
     if (error || !data) return fail(error, 'Не удалось создать вывод')
     setStatus(prev => prev ? { ...prev, ore: Number(data.ore) } : prev)
-    notify(`Заявка на ${integer(amount)} руды создана. Забери её в игре: /sw withdraw.`)
+    notify(`Заявка на ${integer(amount)} АР создана. Забери её в игре: /sw withdraw.`)
     load(true)
   }
 
@@ -335,29 +336,29 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
     if (busy || !status) return
     const amount = Math.floor(Number(convertAmount))
     if (!Number.isFinite(amount) || amount < 1) {
-      setMessage('Укажи целое количество руды.')
+      setMessage('Укажи целое количество АР.')
       return
     }
     if (amount > status.ore) {
-      setMessage(`На сайте только ${integer(status.ore)} руды.`)
+      setMessage(`На сайте только ${integer(status.ore)} АР.`)
       return
     }
     setBusy('convert')
     setMessage('')
     const { data, error } = await supabase.rpc('mc_convert', { p_amount: amount })
     setBusy(null)
-    if (error || !data) return fail(error, 'Не удалось обменять руду')
+    if (error || !data) return fail(error, 'Не удалось обменять АР')
     setStatus(prev => prev ? { ...prev, ore: Number(data.ore) } : prev)
-    onBal(Number(data.bal), { x: `Обмен ${amount} руды на SV₽`, d: Number(data.sv) })
+    onBal(Number(data.bal), { x: `Обмен ${amount} АР на SV₽`, d: Number(data.sv) })
     setConvertAmount('')
-    notify(`⛏ ${integer(amount)} руды → ${fmt(Number(data.sv))}`)
+    notify(`⛏ ${integer(amount)} АР → ${fmt(Number(data.sv))}`)
   }
 
   const buy = async () => {
     if (busy || !status) return
     const amount = Math.floor(Number(buyAmount))
     if (!Number.isFinite(amount) || amount < 1) {
-      setMessage('Укажи целое количество руды.')
+      setMessage('Укажи целое количество АР.')
       return
     }
     const cost = amount * status.rateFromSv
@@ -369,11 +370,11 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
     setMessage('')
     const { data, error } = await supabase.rpc('mc_buy_ore', { p_amount: amount })
     setBusy(null)
-    if (error || !data) return fail(error, 'Не удалось купить руду')
+    if (error || !data) return fail(error, 'Не удалось купить АР')
     setStatus(prev => prev ? { ...prev, ore: Number(data.ore) } : prev)
-    onBal(Number(data.bal), { x: `Покупка ${amount} руды`, d: -Number(data.cost) })
+    onBal(Number(data.bal), { x: `Покупка ${amount} АР`, d: -Number(data.cost) })
     setBuyAmount('')
-    notify(`⛏ Куплено ${integer(amount)} руды за ${fmt(Number(data.cost))}`)
+    notify(`⛏ Куплено ${integer(amount)} АР за ${fmt(Number(data.cost))}`)
   }
 
   const share = useMemo(() => {
@@ -416,14 +417,16 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
             <h1>Шахта «Алмазная жила»</h1>
           </div>
           <p className="mc-sub">
-            Алмазная руда из Minecraft — на сайт. Заноси в игре, спускайся за множителем,
-            выводи обратно в инвентарь.
+            Алмазная руда из Minecraft становится <b>АР</b> — отдельной валютой шахты.
+            1 руда = 1 АР. Заноси в игре, спускайся за множителем и выводи обратно.
           </p>
         </div>
         <div className="mc-ore-hero">
-          <span className="mc-ore-label">На сайте</span>
-          <div className="mc-ore-value"><Gem size={20} /> {integer(status.ore)}</div>
-          <span className="mc-ore-equivalent">≈ {fmt(share?.sv || 0)}</span>
+          <span className="mc-ore-label">Баланс шахты</span>
+          <div className="mc-ore-value">
+            <Gem size={20} /> {integer(status.ore)} <span className="mc-unit">АР</span>
+          </div>
+          <span className="mc-ore-equivalent">≈ {fmt(share?.sv || 0)} · 1 АР = 1 руда</span>
         </div>
       </header>
 
@@ -440,7 +443,7 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
               <h2>Спуск в жилу</h2>
               <p>
                 Каждый шаг глубже — и множитель выше. Но порода может осыпаться.
-                Забери руду в любой момент.
+                Забери АР в любой момент.
               </p>
             </div>
             <div className="mc-rtp" title="Средний возврат на любой глубине">
@@ -454,14 +457,14 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
               <div>
                 {result.kind === 'bust'
                   ? <>Жила осыпалась на глубине {result.depth}. Ставка ушла в породу.</>
-                  : <>Ты забрал <b>{integer(result.payout)}</b> руды на глубине {result.depth} (x{result.mult.toFixed(2)}).</>}
+                  : <>Ты забрал <b>{integer(result.payout)}</b> АР на глубине {result.depth} (x{result.mult.toFixed(2)}).</>}
               </div>
             </div>
           )}
 
           {!round ? (
             <>
-              <label className="mc-label" htmlFor="mc-stake">Ставка, руда</label>
+              <label className="mc-label" htmlFor="mc-stake">Ставка, АР</label>
               <div className="mc-stake-row">
                 <input
                   id="mc-stake"
@@ -508,7 +511,7 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
                     <strong className="mc-cyan">x{round.mult.toFixed(2)}</strong>
                   </div>
                   <div className="mc-metric">
-                    <span>Заберёшь</span>
+                    <span>Заберёшь, АР</span>
                     <strong>{integer(potential)}</strong>
                   </div>
                 </div>
@@ -543,7 +546,7 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
                   disabled={busy === 'cash'}
                 >
                   {busy === 'cash' ? <Loader2 size={16} className="mc-spin" /> : <ArrowDownToLine size={16} />}
-                  Забрать {integer(potential)}
+                  Забрать {integer(potential)} АР
                 </button>
               </div>
               <p className="mc-fine">
@@ -563,8 +566,8 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
                   <span className="mc-linked-name">{status.mcName}</span>
                 </div>
                 <p className="mc-muted">
-                  Ник привязан. Заноси руду командой <code>/sw deposit all</code>,
-                  баланс смотри командой <code>/sw balance</code>.
+                  Ник привязан. Заноси руду командой <code>/sw deposit all</code> —
+                  1 руда = 1 АР. Баланс смотри командой <code>/sw balance</code>.
                 </p>
                 {confirmUnlink ? (
                   <div className="mc-inline-confirm">
@@ -610,16 +613,16 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
           </section>
 
           <section className="mc-card">
-            <div className="mc-card-head"><ArrowRightLeft size={16} /> <h3>Руда и SV₽</h3></div>
+            <div className="mc-card-head"><ArrowRightLeft size={16} /> <h3>АР и SV₽</h3></div>
             <div className="mc-rate-line">
-              <span>1 руда → <b>{integer(status.rateToSv)} SV₽</b></span>
-              <span>1 руда ← <b>{integer(status.rateFromSv)} SV₽</b></span>
+              <span>1 АР → <b>{integer(status.rateToSv)} SV₽</b></span>
+              <span>1 АР ← <b>{integer(status.rateFromSv)} SV₽</b></span>
             </div>
             <div className="mc-form-row">
               <input
                 className="mc-input"
                 inputMode="numeric"
-                placeholder="Сколько руды"
+                placeholder="Сколько АР"
                 value={convertAmount}
                 onChange={e => setConvertAmount(e.target.value.replace(/[^\d]/g, ''))}
               />
@@ -631,7 +634,7 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
               <input
                 className="mc-input"
                 inputMode="numeric"
-                placeholder="Сколько купить"
+                placeholder="Сколько АР купить"
                 value={buyAmount}
                 onChange={e => setBuyAmount(e.target.value.replace(/[^\d]/g, ''))}
               />
@@ -640,14 +643,15 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
               </button>
             </div>
             <p className="mc-fine">
-              Обмен руды на SV₽ — без комиссии. Покупка руды — по курсу {integer(status.rateFromSv)} SV₽.
+              Обмен АР на SV₽ — без комиссии. Покупка АР — по курсу {integer(status.rateFromSv)} SV₽.
             </p>
           </section>
 
           <section className="mc-card">
             <div className="mc-card-head"><ArrowUpFromLine size={16} /> <h3>Вывод в Minecraft</h3></div>
             <p className="mc-muted">
-              Руда спишется здесь и появится в игре при входе или по команде <code>/sw withdraw</code>.
+              АР спишутся здесь и появятся в игре: 1 АР = 1 алмазная руда.
+              Выдача — при входе или по команде <code>/sw withdraw</code>.
             </p>
             <div className="mc-form-row">
               <input
@@ -666,13 +670,13 @@ export default function MineView({ currentUser, balance, notify, onNeedAuth, onB
               </button>
             </div>
             <p className="mc-fine">
-              Минимум {status.minWithdraw} руды. Занесено всего: {integer(status.deposited)} · выведено: {integer(status.withdrawn)}.
+              Минимум {status.minWithdraw} АР. Занесено всего: {integer(status.deposited)} · выведено: {integer(status.withdrawn)}.
             </p>
             {status.pending.length > 0 && (
               <div className="mc-pending">
                 <ArrowDownToLine size={15} />
                 <span>
-                  В пути: {integer(status.pending.reduce((sum, p) => sum + p.amount, 0))} руды.
+                  В пути: {integer(status.pending.reduce((sum, p) => sum + p.amount, 0))} АР.
                   Забери в игре или подожди автовыдачу.
                 </span>
               </div>
