@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { REWARDS, msToMidnight } from './dailyLogic'
+import { useDocumentVisible } from './useDocumentVisible'
 import type { useDaily } from './useDaily'
 
 type Props = { daily: ReturnType<typeof useDaily>; onClaim: () => void }
@@ -25,13 +26,14 @@ const CSS = `
 
 export default function DailyRewards({ daily, onClaim }: Props) {
   const st = daily.status
+  const pageVisible = useDocumentVisible()
   const [left, setLeft] = useState(msToMidnight())
   useEffect(() => {
-    if (st.canClaim) return
+    if (st.canClaim || !pageVisible) return
     setLeft(msToMidnight())
     const t = setInterval(() => setLeft(msToMidnight()), 1000)
     return () => clearInterval(t)
-  }, [st.canClaim, daily.today])
+  }, [st.canClaim, daily.today, pageVisible])
 
   const note = !daily.loggedIn ? 'Войди через Twitch, чтобы получать награды'
     : st.broken && st.canClaim ? 'Серия прервалась, начинаем с первого дня'

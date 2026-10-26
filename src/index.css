@@ -1104,6 +1104,17 @@ button:focus-visible, input:focus-visible {
   margin-bottom: 20px;
 }
 
+/* Ленивая загрузка игровых чанков */
+.wl-game-loading {
+  min-height: 360px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tx-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 /* Responsive adjustments */
 @media (max-width: 1100px) and (min-width: 768px) {
   /* Tablet: keep one header row, let the nav scroll instead of pushing actions off-screen */

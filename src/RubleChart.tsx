@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
+import { useDocumentVisible } from './useDocumentVisible'
 import { TICK_SECONDS, PAYOUT, r2, type Side } from './rubleLogic'
 
 export type RubleResult = {
@@ -53,6 +54,7 @@ export default function RubleChart({ bal, unit, onPredict }: Props) {
   const [news, setNews] = useState('Один курс для всех. Лента идёт всегда, даже когда ты спишь')
   const [hist, setHist] = useState<{ id: number; dir: string; win: boolean; pct: number }[]>([])
   const [, setTick] = useState(0)
+  const pageVisible = useDocumentVisible()
 
   // Общая лента из БД, отрисовка по ВРЕМЕНИ тиков: история не прокручивается,
   // новые тики рисуются в естественном темпе 1/сек, между тиками плавный «хвост».
@@ -79,6 +81,7 @@ export default function RubleChart({ bal, unit, onPredict }: Props) {
   }
 
   useEffect(() => {
+    if (!pageVisible) return
     let alive = true
 
     const reseed = async () => {
@@ -126,9 +129,10 @@ export default function RubleChart({ bal, unit, onPredict }: Props) {
       }
     }, 2000)
     return () => { alive = false; clearInterval(pollId); clearInterval(healId) }
-  }, [])
+  }, [pageVisible])
 
   useEffect(() => {
+    if (!pageVisible) return
     const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     // setInterval вместо rAF: не замирает в неактивных/встроенных окнах
     const loopId = window.setInterval(() => {
@@ -161,7 +165,7 @@ export default function RubleChart({ bal, unit, onPredict }: Props) {
       setTick(t => t + 1)
     }, DRAW_MS)
     return () => clearInterval(loopId)
-  }, [])
+  }, [pageVisible])
 
   const launch = async (side: Side) => {
     const s = Math.floor(parseFloat(stake))

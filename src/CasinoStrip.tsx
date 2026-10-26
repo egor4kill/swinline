@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
+import { useDocumentVisible } from './useDocumentVisible'
 import { fmtSV } from './casinoStripHelpers'
 
 type Win = { username: string; game: string; win: number; at: string }
@@ -19,8 +20,10 @@ export default function CasinoStrip() {
   const [pot, setPot] = useState(0)
   const [lastWinner, setLastWinner] = useState('')
   const [wins, setWins] = useState<Win[]>([])
+  const pageVisible = useDocumentVisible()
 
   useEffect(() => {
+    if (!pageVisible) return
     let alive = true
     const poll = async () => {
       try {
@@ -36,7 +39,7 @@ export default function CasinoStrip() {
     poll()
     const id = window.setInterval(poll, 5000)
     return () => { alive = false; clearInterval(id) }
-  }, [])
+  }, [pageVisible])
 
   return (
     <div className="wl-casino-strip" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'stretch' }}>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import type { FormEvent } from 'react'
 import {
   Trophy,
@@ -76,15 +76,21 @@ const freshState = () => ({
   st: {} as Record<string, { s: string; w?: number }>
 })
 
-import Plinko from './Plinko'
-import MudPuddles from './MudPuddles'
-import RubleChart, { type RubleResult } from './RubleChart'
-import Blackjack from './Blackjack'
-import MineView from './MineView'
+import type { RubleResult } from './RubleChart'
 import CasinoStrip, { JackpotOverlay } from './CasinoStrip'
 import VipBadge from './VipBadge'
 import DailyRewards from './DailyRewards'
 import { useDaily } from './useDaily'
+
+// Игры — отдельными чанками: линия на телефоне не тянет код всего казино
+const Plinko = lazy(() => import('./Plinko'))
+const MudPuddles = lazy(() => import('./MudPuddles'))
+const RubleChart = lazy(() => import('./RubleChart'))
+const Blackjack = lazy(() => import('./Blackjack'))
+const MineView = lazy(() => import('./MineView'))
+const CrashArena = lazy(() => import('./components/games/CrashArena'))
+const RouletteWheel = lazy(() => import('./components/games/RouletteWheel'))
+const WHEEL_SEC_DEG = 360 / ROULETTE_SECTORS.length
 function loadJSON<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -94,12 +100,11 @@ function loadJSON<T>(key: string, fallback: T): T {
 }
 
 import { fmt } from './fmt'
+import { useDocumentVisible } from './useDocumentVisible'
 import { PigLogo, UserAvatar, getTwitchAvatar } from './components/Avatars'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import LineView from './components/LineView'
-import CrashArena from './components/games/CrashArena'
-import RouletteWheel, { WHEEL_SEC_DEG } from './components/games/RouletteWheel'
 import EsportsView from './components/EsportsView'
 import WalletView from './components/WalletView'
 import PromosView from './components/PromosView'
@@ -174,6 +179,8 @@ export default function App() {
 
   const isAdmin = currentUser?.role === 'admin'
   const daily = useDaily(currentUser?.id)
+  // Свёрнутая вкладка не должна тратить батарею и трафик на опрос игр
+  const pageVisible = useDocumentVisible()
 
   // 2. Events managed by Admin (starting clean / without old mock events)
   const [customEvents, setCustomEvents] = useState<Ev[]>(() => {
@@ -828,10 +835,10 @@ export default function App() {
   useEffect(() => { refreshAr() }, [refreshAr])
   useEffect(() => { if (playCurrency === 'ar') refreshAr() }, [playCurrency, refreshAr, view])
   useEffect(() => {
-    if (!currentUser || playCurrency !== 'ar') return
+    if (!currentUser || playCurrency !== 'ar' || !pageVisible) return
     const id = setInterval(refreshAr, 30000)
     return () => clearInterval(id)
-  }, [currentUser?.id, playCurrency, refreshAr])
+  }, [currentUser?.id, playCurrency, refreshAr, pageVisible])
 
   const fetchCrashBets = useCallback(async (roundId: number) => {
     const { data } = await supabase.from('crash_bets').select('*').eq('round_id', roundId).order('created_at', { ascending: true })
@@ -874,6 +881,7 @@ export default function App() {
 
   // Опрос состояния: во время полёта решается момент краша, в остальное время можно реже
   useEffect(() => {
+    if (!pageVisible) return
     pollCrashState()
     const id = setInterval(() => {
       if (view !== 'games24' || gamesTab !== 'crash') return
@@ -885,10 +893,11 @@ export default function App() {
       pollCrashState()
     }, 400)
     return () => clearInterval(id)
-  }, [pollCrashState, view, gamesTab])
+  }, [pollCrashState, view, gamesTab, pageVisible])
 
   // Локальная анимация: фаза и мультипликатор считаются от времени старта раунда из базы
   useEffect(() => {
+    if (!pageVisible) return
     const id = setInterval(() => {
       const r = crashRoundRef.current
       if (!r) return
@@ -908,7 +917,7 @@ export default function App() {
       }
     }, 50)
     return () => clearInterval(id)
-  }, [])
+  }, [pageVisible])
 
   const placeCrashBet = async () => {
     if (!currentUser) {
@@ -1801,6 +1810,7 @@ export default function App() {
                 </button>
               </div>
 
+              <Suspense fallback={<div className="wl-game-loading">Загрузка игры…</div>}>
               {/* CRASH GAME ARENA */}
               {gamesTab === 'crash' && (
                 <CrashArena
@@ -1849,6 +1859,7 @@ export default function App() {
                   stake={playCurrency === 'ar' ? 10 : 100}
                 />
               )}
+              </Suspense>
             </div>
           )}
 
@@ -1887,13 +1898,15 @@ export default function App() {
 
           {/* H. MINECRAFT — привязка аккаунта и вывод АР */}
           {view === 'minecraft' && (
-            <MineView
-              mode="link"
-              currentUser={currentUser}
-              notify={notify}
-              onNeedAuth={() => setAuthModalOpen(true)}
-              onPlay={() => { setView('games24'); setGamesTab('mine') }}
-            />
+            <Suspense fallback={<div className="wl-game-loading">Загрузка…</div>}>
+              <MineView
+                mode="link"
+                currentUser={currentUser}
+                notify={notify}
+                onNeedAuth={() => setAuthModalOpen(true)}
+                onPlay={() => { setView('games24'); setGamesTab('mine') }}
+              />
+            </Suspense>
           )}
 
           {/* F. RESULTS VIEW */}

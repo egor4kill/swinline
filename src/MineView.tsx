@@ -13,6 +13,7 @@ import {
   TrendingUp
 } from 'lucide-react'
 import { supabase } from './supabase'
+import { useDocumentVisible } from './useDocumentVisible'
 import type { UserAccount } from './data'
 
 const MC_SERVER = ((import.meta.env.VITE_MC_SERVER as string | undefined) || '').trim()
@@ -133,6 +134,7 @@ function NotReady({ mode }: { mode: MineMode }) {
 
 export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game', onOpenLink, onPlay }: Props) {
   const isGame = mode === 'game'
+  const pageVisible = useDocumentVisible()
   const [status, setStatus] = useState<MineStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [notReady, setNotReady] = useState(false)
@@ -194,16 +196,17 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
   }, [userId, load])
 
   useEffect(() => {
+    if (!pageVisible) return
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [])
+  }, [pageVisible])
 
   // Пока код живой — проверяем, не привязался ли игрок в игре.
   useEffect(() => {
-    if (!code || !userId) return
+    if (!code || !userId || !pageVisible) return
     const timer = setInterval(() => load(true), 3000)
     return () => clearInterval(timer)
-  }, [code, userId, load])
+  }, [code, userId, load, pageVisible])
 
   useEffect(() => {
     if (status?.linked && code) setCode(null)

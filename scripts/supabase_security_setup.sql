@@ -4690,4 +4690,16 @@ BEGIN
   RETURN v_count;
 END $$;
 
+-- ====================================================================
+-- 20. ХРЯК-КРЭШ 24/7: серверный тик.
+--     Без него раунд разрешается только когда кто-то вызывает crash_state:
+--     после простоя первый вошедший мгновенно видит завершение старого
+--     раунда. pg_cron двигает цепочку и рассчитывает авто-выводы каждую секунду.
+-- ====================================================================
+DO $cron$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'crash-tick') THEN
+    PERFORM cron.schedule('crash-tick', '* * * * * *', $job$ SELECT public.crash_ensure_current() $job$);
+  END IF;
+END $cron$;
+
 NOTIFY pgrst, 'reload schema';
