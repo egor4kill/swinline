@@ -6,7 +6,6 @@ import {
   RefreshCw,
   ArrowDownToLine,
   ArrowUpFromLine,
-  ShieldCheck,
   AlertTriangle,
   Loader2,
   Unlink,
@@ -21,7 +20,6 @@ const UNIT = 'АР'
 const FALLBACK_MIN_WITHDRAW = 1
 const FALLBACK_MAX_DEPTH = 30
 const FALLBACK_BUST = 0.18
-const FALLBACK_RTP = 0.9758
 
 type PendingWithdrawal = {
   id: string
@@ -47,7 +45,6 @@ type MineStatus = {
   withdrawn: number
   minWithdraw: number
   bustChance: number
-  rtp: number
   maxDepth: number
   pending: PendingWithdrawal[]
   round: DigRound | null
@@ -82,7 +79,6 @@ function normalizeStatus(raw: any): MineStatus {
     withdrawn: Number(raw?.withdrawn ?? 0),
     minWithdraw: Number(raw?.min_withdraw ?? FALLBACK_MIN_WITHDRAW),
     bustChance: Number(raw?.bust_chance ?? FALLBACK_BUST),
-    rtp: Number(raw?.rtp ?? FALLBACK_RTP),
     maxDepth: Number(raw?.max_depth ?? FALLBACK_MAX_DEPTH),
     pending: Array.isArray(raw?.pending) ? raw.pending.map((p: any) => ({
       id: String(p.id),
@@ -331,8 +327,7 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
   const share = useMemo(() => {
     if (!status) return null
     return {
-      bustPercent: (status.bustChance * 100).toFixed(0),
-      rtpPercent: (status.rtp * 100).toFixed(1)
+      bustPercent: (status.bustChance * 100).toFixed(0)
     }
   }, [status])
 
@@ -401,9 +396,6 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
                 Каждый шаг глубже — и множитель выше. Но порода может осыпаться.
                 Забери АР в любой момент.
               </p>
-            </div>
-            <div className="mc-rtp" title="Средний возврат на любой глубине">
-              <ShieldCheck size={14} /> {share?.rtpPercent}%
             </div>
           </div>
 

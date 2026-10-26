@@ -954,13 +954,13 @@ export default function App() {
     } else {
       setS(prev => {
         const next = structuredClone(prev)
-        next.log.unshift({ t: Date.now(), x: `Ставка в общем раунде Хряк-Крэш #${r.id}`, d: -v })
+        next.log.unshift({ t: Date.now(), x: `Ставка в раунде Хряк-Крэш #${r.id}`, d: -v })
         next.bal = Number(data.bal)
         return next
       })
     }
     fetchCrashBets(r.id)
-    notify(`Ставка ${fmtCur(v, cur)} на общий раунд #${r.id} принята! 🚀`)
+    notify(`Ставка ${fmtCur(v, cur)} на раунд #${r.id} принята! 🚀`)
   }
 
   const cancelCrashBet = async () => {
@@ -1007,7 +1007,7 @@ export default function App() {
     } else {
       setS(prev => {
         const next = structuredClone(prev)
-        next.log.unshift({ t: Date.now(), x: `Выигрыш в общем раунде Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
+        next.log.unshift({ t: Date.now(), x: `Выигрыш в раунде Хряк-Крэш (x${mul.toFixed(2)})`, d: winAmount })
         next.bal = Number(data.bal)
         return next
       })
@@ -1759,7 +1759,7 @@ export default function App() {
                   onClick={() => setGamesTab('crash')}
                 >
                   <Zap size={16} color="var(--org)" />
-                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7 (Общий)</span>
+                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7</span>
                 </button>
                 <button
                   className={`wl-round-btn ${gamesTab === 'roulette' ? 'active' : ''}`}

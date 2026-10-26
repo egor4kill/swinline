@@ -2995,19 +2995,6 @@ button:focus-visible, input:focus-visible {
   max-width: 54ch;
 }
 
-.mc-rtp {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--mc-cyan);
-  border: 1px solid var(--mc-cyan-line);
-  background: var(--mc-cyan-soft);
-  border-radius: 999px;
-  padding: 4px 9px;
-  height: fit-content;
-  white-space: nowrap;
-}
 
 .mc-result {
   display: flex;
