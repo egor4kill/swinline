@@ -43,6 +43,8 @@ export default function WalletView({
   // для вошедшего — серверная история, для гостя — локальная
   const rows: any[] = currentUser ? (dbBets || []) : (S.bets || [])
   const rowsMeta: 'db' | 'local' = currentUser ? 'db' : 'local'
+  const betMoney = (n: number, b: any) =>
+    n.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ' + (b.currency === 'ar' ? 'АР' : 'SV₽')
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
@@ -111,9 +113,9 @@ export default function WalletView({
                   <tr key={b.id} style={{ borderBottom: '1px solid #1c2230' }}>
                     <td style={{ padding: '10px 14px' }}>
                       <div style={{ fontWeight: 700 }}>{title}</div>
-                      <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{pick}{isDb && status === 'won' ? ` • выплата ${fmt(Number(b.payout || 0))}` : ''}</div>
+                      <div style={{ fontSize: 11, color: 'var(--tx-muted)' }}>{pick}{isDb && status === 'won' ? ` • выплата ${betMoney(Number(b.payout || 0), b)}` : ''}</div>
                     </td>
-                    <td style={{ padding: '10px 14px', fontWeight: 700 }}>{fmt(Number(b.stake))}</td>
+                    <td style={{ padding: '10px 14px', fontWeight: 700 }}>{betMoney(Number(b.stake), b)}</td>
                     <td style={{ padding: '10px 14px', fontFamily: 'var(--font-d)', color: 'var(--org)' }}>{Number(b.odds).toFixed(2)}</td>
                     <td style={{ padding: '10px 14px' }}>
                       <span style={{ color: statusColor, fontWeight: 800, fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#191f2c' }}>

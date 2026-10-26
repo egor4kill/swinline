@@ -19,7 +19,7 @@
   --pink: #ff8fb0;
   --tx-primary: #ffffff;
   --tx-secondary: #94a3b8;
-  --tx-muted: #64748b;
+  --tx-muted: #74839a;
   --font-d: 'Unbounded', system-ui, -apple-system, sans-serif;
   --font-b: 'Onest', system-ui, -apple-system, sans-serif;
 }
@@ -235,6 +235,10 @@ button:focus-visible, input:focus-visible {
 .wl-btn-green:hover {
   background: #25d366;
   transform: translateY(-1px);
+}
+
+.wl-login-short {
+  display: none;
 }
 
 /* Main Layout: Fixed-position Sidebar permanently anchored to the left across all tabs */
@@ -1210,6 +1214,12 @@ button:focus-visible, input:focus-visible {
   .wl-login-btn {
     white-space: nowrap;
   }
+  .wl-login-full {
+    display: none;
+  }
+  .wl-login-short {
+    display: inline;
+  }
   .wl-balance-chip {
     padding: 5px 10px;
     font-size: 13px;
@@ -1301,50 +1311,84 @@ button:focus-visible, input:focus-visible {
   .wl-casino-strip > .wl-banner-card {
     width: 100%;
     min-width: 0 !important;
+    flex: 0 0 auto !important;
   }
 
-  /* Каркас: сайдбар — горизонтальная полоса над контентом */
+  /* Каркас: компактная панель фильтров над контентом */
   .wl-layout {
     grid-template-columns: minmax(0, 1fr);
     min-height: calc(100vh - 100px);
   }
   .wl-sidebar {
-    display: block;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-areas:
+      "search favorites"
+      "sports sports";
+    align-items: center;
+    gap: 6px 8px;
     position: static;
     width: 100%;
     height: auto;
     overflow: visible;
-    padding: 10px 12px 8px;
+    padding: 8px 12px 6px;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
+  /* Фильтры видов спорта нужны только в линии и live */
+  .wl-layout:not(.wl-view-line):not(.wl-view-live) .wl-sidebar {
+    display: none;
+  }
   .wl-search-box {
-    margin-bottom: 8px;
+    grid-area: search;
+    margin-bottom: 0;
   }
   .wl-search-input {
-    padding: 10px 12px 10px 34px;
+    padding: 10px 44px 10px 34px;
     font-size: 16px;
     border-radius: 12px;
   }
-  .wl-sidebar-quick {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 8px;
-    padding-bottom: 8px;
+  .wl-search-clear {
+    width: 44px;
+    height: 44px;
+    right: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
-  .wl-sidebar-quick-btn {
-    padding: 7px 10px;
+  .wl-sidebar-quick {
+    display: contents;
+  }
+  .wl-sidebar .wl-sidebar-quick-btn {
+    display: none;
+  }
+  .wl-sidebar .wl-sidebar-quick-btn.wl-quick-favorites {
+    display: inline-flex;
+    grid-area: favorites;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
     border: 1px solid var(--border);
-    border-radius: 999px;
-    font-size: 12px;
-    white-space: nowrap;
+    border-radius: 12px;
+    position: relative;
+  }
+  .wl-quick-favorites > span:not(.wl-badge-count) {
+    display: none;
+  }
+  .wl-quick-favorites .wl-badge-count {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    padding: 0 5px;
+    line-height: 15px;
   }
   .wl-sports-list {
+    grid-area: sports;
     flex-direction: row;
     gap: 6px;
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding-bottom: 2px;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
@@ -1371,14 +1415,33 @@ button:focus-visible, input:focus-visible {
   .wl-center {
     padding: 12px 12px calc(100px + env(safe-area-inset-bottom));
   }
+  /* Баннеры — горизонтальная карусель со снапом, а не три экрана подряд */
   .wl-banners-slider {
+    display: flex;
     gap: 10px;
-    margin-bottom: 12px;
+    margin: 0 -12px 12px;
+    padding: 0 12px 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .wl-banners-slider::-webkit-scrollbar {
+    display: none;
   }
   .wl-banner-card {
     min-height: 0;
     padding: 16px;
     border-radius: 12px;
+  }
+  .wl-banners-slider .wl-banner-card {
+    flex: 0 0 88%;
+    min-height: 172px;
+    padding: 14px;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
   .wl-banner-title {
     font-size: 18px;
@@ -1387,6 +1450,10 @@ button:focus-visible, input:focus-visible {
   .wl-banner-desc {
     max-width: 100%;
     font-size: 12.5px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .wl-banner-mascot {
     display: none;
@@ -1415,7 +1482,7 @@ button:focus-visible, input:focus-visible {
     flex-wrap: wrap;
   }
   .wl-odds-matrix {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
     gap: 6px;
   }
   .wl-odd-box {
@@ -1489,13 +1556,17 @@ button:focus-visible, input:focus-visible {
   }
 
   /* Плавающий купон, шторка ставки и модалки */
+  /* Плавающий купон — полноширинная нижняя панель */
   .wl-floating-coupon-bar {
+    left: 10px;
     right: 10px;
     bottom: calc(10px + env(safe-area-inset-bottom));
     gap: 8px;
   }
   .wl-coupon-trigger-btn {
-    height: 46px;
+    flex: 1;
+    justify-content: center;
+    height: 48px;
     padding: 0 14px;
     border-radius: 10px;
     font-size: 13px;
@@ -3028,4 +3099,21 @@ button:focus-visible, input:focus-visible {
   font-size: 11px;
   color: var(--tx-muted);
   margin: -4px 0 12px;
+}
+
+.wl-slip-currency {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.wl-slip-currency .wl-round-btn {
+  font-family: var(--font-d);
+  font-size: 12px;
+}
+
+.wl-slip-currency .wl-round-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

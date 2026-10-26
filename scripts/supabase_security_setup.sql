@@ -2248,15 +2248,13 @@ TO authenticated, anon;
 --     Конвертация АР ↔ SV₽ — явная операция.
 --
 --     Экономика по умолчанию:
---       1 АР → 250 SV₽ (покупка АР за SV₽ запрещена — только занос руды),
---       вывод от 5 АР, игра: 18% обвал, глубина до 30.
+--       АР — закрытый контур: только занос алмазной руды и вывод рудой,
+--       обмена с SV₽ нет. Вывод от 5 АР, игра: 18% обвал, глубина до 30.
 --       Множитель считается как RTP / 0.82^глубина, поэтому возврат
 --       на любой глубине одинаковый (~97.6%), а не тает с каждым шагом. ====================================================================
 
 CREATE TABLE IF NOT EXISTS public.mc_config (
   id boolean PRIMARY KEY DEFAULT true CHECK (id),
-  ore_to_sv numeric NOT NULL DEFAULT 250,
-  sv_to_ore numeric NOT NULL DEFAULT 300,
   min_withdraw integer NOT NULL DEFAULT 5,
   dig_bust numeric NOT NULL DEFAULT 0.18,
   dig_rtp numeric NOT NULL DEFAULT 0.9758,
@@ -2434,7 +2432,6 @@ BEGIN
     RETURN jsonb_build_object(
       'authed', false, 'linked', false, 'ore', 0,
       'unit', 'АР', 'ore_per_unit', 1,
-      'rate_to_sv', v_conf.ore_to_sv, 'rate_from_sv', v_conf.sv_to_ore,
       'min_withdraw', v_conf.min_withdraw,
       'bust_chance', v_conf.dig_bust, 'rtp', v_conf.dig_rtp,
       'max_depth', v_conf.dig_max_depth,
@@ -2469,8 +2466,6 @@ BEGIN
     'unit', 'АР', 'ore_per_unit', 1,
     'deposited', coalesce(v_acc.deposited, 0),
     'withdrawn', coalesce(v_acc.withdrawn, 0),
-    'rate_to_sv', v_conf.ore_to_sv,
-    'rate_from_sv', v_conf.sv_to_ore,
     'min_withdraw', v_conf.min_withdraw,
     'bust_chance', v_conf.dig_bust,
     'rtp', v_conf.dig_rtp,
@@ -2529,40 +2524,6 @@ BEGIN
   PERFORM public.mc_prune_ledger(auth.uid());
 
   RETURN jsonb_build_object('ok', true, 'ore', v_ore, 'withdrawal_id', v_id);
-END $$;
-
-CREATE OR REPLACE FUNCTION public.mc_convert(p_amount integer)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_conf public.mc_config%rowtype;
-  v_ore integer;
-  v_bal numeric;
-  v_sv numeric;
-BEGIN
-  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
-  PERFORM public.assert_not_blocked();
-  SELECT * INTO v_conf FROM public.mc_config WHERE id;
-  IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Укажи количество руды'; END IF;
-
-  UPDATE public.mc_accounts
-    SET ore = ore - p_amount, updated_at = now()
-    WHERE user_id = auth.uid() AND ore >= p_amount
-    RETURNING ore INTO v_ore;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно алмазной руды'; END IF;
-
-  v_sv := p_amount * v_conf.ore_to_sv;
-  UPDATE public.profiles
-    SET bal = bal + v_sv, updated_at = now()
-    WHERE id = auth.uid()
-    RETURNING bal INTO v_bal;
-
-  INSERT INTO public.mc_ledger (user_id, kind, amount, ore_after, sv_delta, meta)
-    VALUES (auth.uid(), 'convert', -p_amount, v_ore, v_sv,
-            jsonb_build_object('rate', v_conf.ore_to_sv));
-  PERFORM public.mc_prune_ledger(auth.uid());
-
-  RETURN jsonb_build_object('ok', true, 'ore', v_ore, 'bal', v_bal, 'sv', v_sv);
 END $$;
 
 CREATE OR REPLACE FUNCTION public.mc_dig_start(p_stake integer)
@@ -2923,7 +2884,6 @@ REVOKE ALL ON FUNCTION
   public.mc_status(),
   public.mc_unlink(),
   public.mc_withdraw_ore(integer),
-  public.mc_convert(integer),
   public.mc_dig_start(integer),
   public.mc_dig_step(uuid),
   public.mc_dig_cashout(uuid)
@@ -2933,7 +2893,6 @@ GRANT EXECUTE ON FUNCTION
   public.mc_status(),
   public.mc_unlink(),
   public.mc_withdraw_ore(integer),
-  public.mc_convert(integer),
   public.mc_dig_start(integer),
   public.mc_dig_step(uuid),
   public.mc_dig_cashout(uuid)
@@ -3763,5 +3722,218 @@ GRANT EXECUTE ON FUNCTION
   public.bj_deal(numeric, text),
   public.crash_place_bet(bigint, numeric, numeric, text)
 TO authenticated, anon;
+
+NOTIFY pgrst, 'reload schema';
+
+-- ====================================================================
+-- 18. ЗАКРЫТЫЙ КОНТУР АР + СПОРТИВНЫЕ СТАВКИ В АР
+--
+--     Обмена АР ↔ SV₽ больше нет: mc_convert удалён, курсы из mc_config
+--     убраны. АР появляются только заносом алмазной руды (или выигрышем
+--     в игре/спорте) и тратятся на игры и спортивные ставки; вывод — только
+--     обратно в Minecraft (1 АР = 1 руда).
+--
+--     bets.currency хранит валюту ставки; расчёт и возврат платят в ней же.
+--     В АР выплаты по спорту — целые (floor), как и в играх.
+-- ====================================================================
+
+ALTER TABLE public.bets ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'sv';
+ALTER TABLE public.mc_config DROP COLUMN IF EXISTS ore_to_sv, DROP COLUMN IF EXISTS sv_to_ore;
+
+DROP FUNCTION IF EXISTS public.mc_convert(integer);
+
+CREATE OR REPLACE FUNCTION public.mc_status()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_conf public.mc_config%rowtype;
+  v_link public.mc_links%rowtype;
+  v_acc public.mc_accounts%rowtype;
+  v_round jsonb;
+  v_pending jsonb;
+BEGIN
+  SELECT * INTO v_conf FROM public.mc_config WHERE id;
+
+  IF v_uid IS NULL THEN
+    RETURN jsonb_build_object(
+      'authed', false, 'linked', false, 'ore', 0,
+      'unit', 'АР', 'ore_per_unit', 1,
+      'min_withdraw', v_conf.min_withdraw,
+      'bust_chance', v_conf.dig_bust, 'rtp', v_conf.dig_rtp,
+      'max_depth', v_conf.dig_max_depth,
+      'pending', '[]'::jsonb, 'round', NULL);
+  END IF;
+
+  SELECT * INTO v_link FROM public.mc_links WHERE user_id = v_uid;
+  INSERT INTO public.mc_accounts (user_id) VALUES (v_uid) ON CONFLICT (user_id) DO NOTHING;
+  SELECT * INTO v_acc FROM public.mc_accounts WHERE user_id = v_uid;
+
+  SELECT to_jsonb(r) INTO v_round
+    FROM (
+      SELECT id, stake, depth, mult, status, payout, created_at
+      FROM public.mc_dig_rounds
+      WHERE user_id = v_uid AND status = 'play'
+      ORDER BY created_at DESC LIMIT 1
+    ) r;
+
+  SELECT coalesce(jsonb_agg(jsonb_build_object(
+           'id', w.id, 'amount', w.amount, 'created_at', w.created_at
+         ) ORDER BY w.created_at), '[]'::jsonb)
+    INTO v_pending
+    FROM public.mc_withdrawals w
+    WHERE w.user_id = v_uid AND w.status = 'pending';
+
+  RETURN jsonb_build_object(
+    'authed', true,
+    'linked', v_link.user_id IS NOT NULL,
+    'mc_name', v_link.mc_name,
+    'mc_uuid', v_link.mc_uuid,
+    'ore', coalesce(v_acc.ore, 0),
+    'unit', 'АР', 'ore_per_unit', 1,
+    'deposited', coalesce(v_acc.deposited, 0),
+    'withdrawn', coalesce(v_acc.withdrawn, 0),
+    'min_withdraw', v_conf.min_withdraw,
+    'bust_chance', v_conf.dig_bust,
+    'rtp', v_conf.dig_rtp,
+    'max_depth', v_conf.dig_max_depth,
+    'pending', v_pending,
+    'round', v_round);
+END $$;
+
+DROP FUNCTION IF EXISTS public.place_sports_bet(text, integer, numeric);
+
+CREATE OR REPLACE FUNCTION public.place_sports_bet(
+  p_event text, p_outcome integer, p_stake numeric, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_event public.events%rowtype;
+  v_cur text := coalesce(p_currency, 'sv');
+  v_username text;
+  v_pick text;
+  v_odds numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  SELECT * INTO v_event FROM public.events WHERE id = p_event;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Событие не найдено'; END IF;
+  IF v_event.status <> 'open' THEN RAISE EXCEPTION 'Приём ставок на это событие закрыт'; END IF;
+  IF p_outcome IS NULL OR p_outcome < 0 OR p_outcome >= jsonb_array_length(v_event.data->'out') THEN
+    RAISE EXCEPTION 'Некорректный исход';
+  END IF;
+
+  SELECT username INTO v_username FROM public.profiles WHERE id = auth.uid();
+  IF v_username IS NULL THEN RAISE EXCEPTION 'Профиль не найден — войдите заново'; END IF;
+
+  v_pick := v_event.data->'out'->p_outcome->>0;
+  v_odds := (v_event.data->'out'->p_outcome->>1)::numeric;
+  v_bal := public.game_debit(p_stake, v_cur);
+
+  INSERT INTO public.bets (user_id, username, event_id, match_title, pick, pick_name, odds, stake, status, currency)
+    VALUES (auth.uid(), v_username, p_event, coalesce(v_event.data->>'title', p_event),
+            v_pick, v_pick, v_odds, p_stake, 'pending', v_cur);
+
+  RETURN jsonb_build_object(
+    'bal', v_bal, 'currency', v_cur, 'pick', v_pick, 'odds', v_odds, 'stake', p_stake);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_settle_bets(p_event text, p_winner integer)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_win_pick text;
+  v_count integer;
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может рассчитывать события';
+  END IF;
+
+  IF p_winner IS NOT NULL THEN
+    SELECT data->'out'->p_winner->>0 INTO v_win_pick FROM public.events WHERE id = p_event;
+    IF v_win_pick IS NULL THEN RAISE EXCEPTION 'Событие или исход не найдены'; END IF;
+
+    WITH won AS (
+      UPDATE public.bets
+      SET status = 'won',
+          payout = CASE WHEN currency = 'ar' THEN floor(stake * odds) ELSE round(stake * odds, 2) END
+      WHERE event_id = p_event AND status = 'pending'
+        AND coalesce(pick, pick_name) = v_win_pick
+      RETURNING user_id, currency, payout
+    ), lost AS (
+      UPDATE public.bets SET status = 'lost', payout = 0
+      WHERE event_id = p_event AND status = 'pending'
+        AND coalesce(pick, pick_name) <> v_win_pick
+      RETURNING user_id
+    ), sv AS (
+      UPDATE public.profiles p SET bal = p.bal + w.total, updated_at = now()
+      FROM (SELECT user_id, sum(payout) AS total FROM won
+            WHERE currency = 'sv' GROUP BY user_id) w
+      WHERE p.id = w.user_id
+      RETURNING 1
+    ), ar AS (
+      INSERT INTO public.mc_accounts (user_id, ore)
+      SELECT user_id, sum(payout)::int FROM won
+        WHERE currency = 'ar' GROUP BY user_id
+      ON CONFLICT (user_id) DO UPDATE
+        SET ore = mc_accounts.ore + EXCLUDED.ore, updated_at = now()
+      RETURNING 1
+    )
+    SELECT (SELECT count(*) FROM won) + (SELECT count(*) FROM lost) INTO v_count;
+  ELSE
+    WITH refunded AS (
+      UPDATE public.bets SET status = 'refund', payout = stake
+      WHERE event_id = p_event AND status = 'pending'
+      RETURNING user_id, currency, payout
+    ), sv AS (
+      UPDATE public.profiles p SET bal = p.bal + r.total, updated_at = now()
+      FROM (SELECT user_id, sum(payout) AS total FROM refunded
+            WHERE currency = 'sv' GROUP BY user_id) r
+      WHERE p.id = r.user_id
+      RETURNING 1
+    ), ar AS (
+      INSERT INTO public.mc_accounts (user_id, ore)
+      SELECT user_id, sum(payout)::int FROM refunded
+        WHERE currency = 'ar' GROUP BY user_id
+      ON CONFLICT (user_id) DO UPDATE
+        SET ore = mc_accounts.ore + EXCLUDED.ore, updated_at = now()
+      RETURNING 1
+    )
+    SELECT count(*) INTO v_count FROM refunded;
+  END IF;
+
+  RETURN v_count;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_list_players()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может смотреть список игроков';
+  END IF;
+  RETURN (
+    SELECT coalesce(jsonb_agg(row_to_json(t) ORDER BY t.created_at), '[]'::jsonb)
+    FROM (
+      SELECT p.id, p.username, p.avatar, p.bal, p.is_blocked, p.created_at,
+             (SELECT count(*) FROM public.bets b WHERE b.user_id = p.id) AS bets_count,
+             (SELECT jsonb_agg(jsonb_build_object(
+                       'id', b.id, 'event_id', b.event_id, 'match_title', b.match_title,
+                       'pick', b.pick, 'pick_name', b.pick_name, 'odds', b.odds,
+                       'stake', b.stake, 'status', b.status, 'payout', b.payout,
+                       'currency', b.currency, 'created_at', b.created_at)
+                    ORDER BY b.created_at DESC)
+              FROM (SELECT * FROM public.bets WHERE user_id = p.id
+                    ORDER BY created_at DESC LIMIT 20) b
+             ) AS recent_bets
+      FROM public.profiles p
+    ) t
+  );
+END $$;
+
+REVOKE ALL ON FUNCTION public.place_sports_bet(text, integer, numeric, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.place_sports_bet(text, integer, numeric, text) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';

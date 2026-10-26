@@ -752,9 +752,11 @@ export default function App() {
     }
     if (busy.current || !selectedBet) return
 
-    const v = parseFloat(stake)
+    const cur = playCurrency
+    const rawStake = parseFloat(stake)
+    const v = cur === 'ar' ? Math.floor(rawStake) : rawStake
     if (isNaN(v) || !isFinite(v) || v < 10) {
-      setErr('Минимальная сумма ставки — 10 SV₽')
+      setErr(`Минимальная сумма ставки — 10 ${unitOf(cur)}`)
       return
     }
 
@@ -773,7 +775,8 @@ export default function App() {
     const { data, error } = await supabase.rpc('place_sports_bet', {
       p_event: selectedBet.evId,
       p_outcome: selectedBet.outcomeIdx,
-      p_stake: v
+      p_stake: v,
+      p_currency: cur
     })
     setTimeout(() => { busy.current = false }, 350)
 
@@ -782,23 +785,34 @@ export default function App() {
       return
     }
 
-    const next = structuredClone(S)
-    next.bal = Number(data.bal)
-    next.bets.unshift({
+    const bet = {
       id: 'b' + Date.now() + Math.random().toString(36).slice(2, 6),
       ev: selectedBet.evId,
       i: selectedBet.outcomeIdx,
       stake: v,
       odds: Number(data.odds) || selectedBet.odds,
-      state: 'open'
-    })
-    next.log.unshift({ t: Date.now(), x: 'Ставка: ' + ev.title + ' (' + (data.pick || selectedBet.outcomeTitle) + ')', d: -v })
-    setS(next)
+      state: 'open',
+      currency: cur
+    }
+    if (cur === 'ar') {
+      setArBalance(Number(data.bal))
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.bets.unshift(bet)
+        return next
+      })
+    } else {
+      const next = structuredClone(S)
+      next.bal = Number(data.bal)
+      next.bets.unshift(bet)
+      next.log.unshift({ t: Date.now(), x: 'Ставка: ' + ev.title + ' (' + (data.pick || selectedBet.outcomeTitle) + ')', d: -v })
+      setS(next)
+    }
     fetchSupabaseUsers()
 
     setSelectedBet(null)
     setErr('')
-    notify(`Ставка ${fmt(v)} принята и сохранена в базе! ✅`)
+    notify(`Ставка ${fmtCur(v, cur)} принята и сохранена в базе! ✅`)
   }
 
   // ===== Общий движок Хряк-Крэша: раунды и ставки живут в базе =====
@@ -810,6 +824,11 @@ export default function App() {
 
   useEffect(() => { refreshAr() }, [refreshAr])
   useEffect(() => { if (playCurrency === 'ar') refreshAr() }, [playCurrency, refreshAr, view])
+  useEffect(() => {
+    if (!currentUser || playCurrency !== 'ar') return
+    const id = setInterval(refreshAr, 30000)
+    return () => clearInterval(id)
+  }, [currentUser?.id, playCurrency, refreshAr])
 
   const fetchCrashBets = useCallback(async (roundId: number) => {
     const { data } = await supabase.from('crash_bets').select('*').eq('round_id', roundId).order('created_at', { ascending: true })
@@ -1617,7 +1636,9 @@ export default function App() {
   const stakeVal = parseFloat(stake)
   const isStakeValid = isFinite(stakeVal) && stakeVal > 0
   const currentOdds = selectedBet?.odds || 1
-  const potentialPayout = isStakeValid ? payout(stakeVal, currentOdds) : 0
+  const potentialPayout = isStakeValid
+    ? (playCurrency === 'ar' ? Math.floor(payout(stakeVal, currentOdds)) : payout(stakeVal, currentOdds))
+    : 0
   const netProfit = isStakeValid ? r2(potentialPayout - stakeVal) : 0
 
   return (
@@ -1639,7 +1660,7 @@ export default function App() {
       />
 
       {/* 2. Main 3-Column Layout */}
-      <div className="wl-layout">
+      <div className={`wl-layout wl-view-${view}`}>
         {/* Left Sidebar */}
         <Sidebar
           view={view}
@@ -1848,7 +1869,6 @@ export default function App() {
               currentUser={currentUser}
               notify={notify}
               onNeedAuth={() => setAuthModalOpen(true)}
-              onBal={bjBal}
             />
           )}
 
@@ -1865,7 +1885,7 @@ export default function App() {
       </div>
 
       <CouponBar {...{ activeBetsCount, notify, selectedBet, setSlipOpen, slipOpen }} />
-      <BetSlip {...{ S, activeBetsCount, allEvents, err, handlePlaceBet, isStakeValid, potentialPayout, selectedBet, setErr, setSelectedBet, setSlipOpen, setSlipTab, setStake, slipOpen, slipTab, stake }} />
+      <BetSlip {...{ S, activeBetsCount, allEvents, err, handlePlaceBet, isStakeValid, potentialPayout, selectedBet, setErr, setSelectedBet, setSlipOpen, setSlipTab, setStake, slipOpen, slipTab, stake, playCurrency, setPlayCurrency, arBalance, currentUser, onNeedAuth: () => setAuthModalOpen(true) }} />
       <ProfileModal {...{ S, currentUser, handleLogout, isAdmin, myStats, profileModalOpen, setProfileModalOpen }} />
       <AdminModal {...{ CATS, S, accounts, addVirtualMoney, adminModalOpen, adminTab, allEvents, applyTemplate, currentUser, fetchSupabaseUsers, freshState, handleAdminDeleteUser, handleAdminPurgeEmpty, handleAdminReset, handleAdminToggleBlock, handleAdminTopUp, handleCancelEventAction, handleClearAllEvents, handleCreateMatch, handleSettleEventAction, handleToggleEventClosedAction, isAdmin, newMatchCat, newMatchIsLive, newMatchLeague, newMatchOdds1, newMatchOdds2, newMatchOddsX, newMatchScore, newMatchTeam1, newMatchTeam2, newMatchTime, newMatchTitle, notify, setAdminModalOpen, setAdminTab, setCreateMatchModalOpen, setDeleteEventModal, setEditEventModal, setEditIsLive, setEditLiveTime, setEditScore, setInspectingUser, setNewMatchCat, setNewMatchIsLive, setNewMatchLeague, setNewMatchOdds1, setNewMatchOdds2, setNewMatchOddsX, setNewMatchScore, setNewMatchTeam1, setNewMatchTeam2, setNewMatchTime, setNewMatchTitle, setS, setSelectedBet }} />
       <AuthModal {...{ authModalOpen, handleOAuthLogin, setAuthModalOpen }} />

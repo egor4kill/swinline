@@ -61,10 +61,13 @@ import ceoPhoto from '../assets/ceo.jpg'
 import { fmt } from '../fmt'
 import { PigLogo, UserAvatar, getTwitchAvatar } from '../components/Avatars'
 
-type Props = { S: any; activeBetsCount: any; allEvents: any; err: any; handlePlaceBet: any; isStakeValid: any; potentialPayout: any; selectedBet: any; setErr: any; setSelectedBet: any; setSlipOpen: any; setSlipTab: any; setStake: any; slipOpen: any; slipTab: any; stake: any }
+type Props = { S: any; activeBetsCount: any; allEvents: any; err: any; handlePlaceBet: any; isStakeValid: any; potentialPayout: any; selectedBet: any; setErr: any; setSelectedBet: any; setSlipOpen: any; setSlipTab: any; setStake: any; slipOpen: any; slipTab: any; stake: any; playCurrency: 'sv' | 'ar'; setPlayCurrency: (c: 'sv' | 'ar') => void; arBalance: number; currentUser: any; onNeedAuth: () => void }
 
 export default function BetSlip(props: Props) {
-  const { S, activeBetsCount, allEvents, err, handlePlaceBet, isStakeValid, potentialPayout, selectedBet, setErr, setSelectedBet, setSlipOpen, setSlipTab, setStake, slipOpen, slipTab, stake } = props
+  const { S, activeBetsCount, allEvents, err, handlePlaceBet, isStakeValid, potentialPayout, selectedBet, setErr, setSelectedBet, setSlipOpen, setSlipTab, setStake, slipOpen, slipTab, stake, playCurrency, setPlayCurrency, arBalance, currentUser, onNeedAuth } = props
+  const unit = playCurrency === 'ar' ? 'АР' : 'SV₽'
+  const num = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+  const money = (n: number, u: string = unit) => num(n) + ' ' + u
   return (
     <>
 {/* 4. Floating BetSlip Drawer */}
@@ -132,9 +135,32 @@ export default function BetSlip(props: Props) {
               )
             })()}
 
+            <div className="wl-slip-currency">
+              <button
+                type="button"
+                className={`wl-round-btn ${playCurrency === 'sv' ? 'active' : ''}`}
+                onClick={() => { setPlayCurrency('sv'); setErr('') }}
+              >
+                SV₽ · {num(Number(S.bal || 0))}
+              </button>
+              <button
+                type="button"
+                className={`wl-round-btn ${playCurrency === 'ar' ? 'active' : ''}`}
+                onClick={() => {
+                  if (!currentUser) { onNeedAuth(); return }
+                  setPlayCurrency('ar')
+                  setErr('')
+                }}
+                disabled={!currentUser}
+                title={currentUser ? 'Играть на алмазной валюте' : 'Войди через Twitch, чтобы играть на АР'}
+              >
+                АР · {num(arBalance)}
+              </button>
+            </div>
+
             <div>
               <label style={{ fontSize: 12, color: 'var(--tx-secondary)', fontWeight: 600 }}>
-                Сумма ставки, SV₽:
+                Сумма ставки, {unit}:
               </label>
               <input
                 type="text"
@@ -149,7 +175,7 @@ export default function BetSlip(props: Props) {
             </div>
 
             <div className="wl-quick-stakes">
-              {['100', '500', '1000'].map(val => (
+              {(playCurrency === 'ar' ? ['10', '50', '100', '500'] : ['100', '500', '1000']).map(val => (
                 <button
                   key={val}
                   type="button"
@@ -163,7 +189,7 @@ export default function BetSlip(props: Props) {
                 type="button"
                 className="wl-quick-btn"
                 style={{ color: 'var(--org)' }}
-                onClick={() => { setStake(String(Math.floor(S.bal))); setErr('') }}
+                onClick={() => { setStake(String(Math.floor(playCurrency === 'ar' ? arBalance : S.bal))); setErr('') }}
               >
                 Всё
               </button>
@@ -173,7 +199,7 @@ export default function BetSlip(props: Props) {
               <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--tx-secondary)' }}>
                 <span>Возможный выигрыш:</span>
                 <span style={{ fontFamily: 'var(--font-d)', fontWeight: 800, color: 'var(--org)', fontSize: 15 }}>
-                  {isStakeValid ? fmt(potentialPayout) : '—'}
+                  {isStakeValid ? money(potentialPayout) : '—'}
                 </span>
               </div>
             </div>
@@ -211,7 +237,7 @@ export default function BetSlip(props: Props) {
                   <div style={{ fontWeight: 700, fontSize: 13, marginTop: 2 }}>{ev?.title}</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 12 }}>
                     <span>{ev?.out[b.i]?.[0]} (x{b.odds.toFixed(2)})</span>
-                    <span style={{ fontWeight: 700, color: 'var(--org)' }}>{fmt(b.stake)}</span>
+                    <span style={{ fontWeight: 700, color: 'var(--org)' }}>{money(b.stake, b.currency === 'ar' ? 'АР' : 'SV₽')}</span>
                   </div>
                 </div>
               )

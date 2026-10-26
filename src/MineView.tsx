@@ -4,7 +4,6 @@ import {
   Gem,
   Link2,
   RefreshCw,
-  ArrowRightLeft,
   ArrowDownToLine,
   ArrowUpFromLine,
   ShieldCheck,
@@ -15,13 +14,10 @@ import {
   TrendingUp
 } from 'lucide-react'
 import { supabase } from './supabase'
-import { fmt } from './fmt'
 import type { UserAccount } from './data'
 
 const MC_SERVER = ((import.meta.env.VITE_MC_SERVER as string | undefined) || '').trim()
 const UNIT = 'АР'
-const FALLBACK_RATE_TO_SV = 250
-const FALLBACK_RATE_FROM_SV = 300
 const FALLBACK_MIN_WITHDRAW = 5
 const FALLBACK_MAX_DEPTH = 30
 const FALLBACK_BUST = 0.18
@@ -49,8 +45,6 @@ type MineStatus = {
   ore: number
   deposited: number
   withdrawn: number
-  rateToSv: number
-  rateFromSv: number
   minWithdraw: number
   bustChance: number
   rtp: number
@@ -68,7 +62,6 @@ type Props = {
   currentUser: UserAccount | null
   notify: (message: string) => void
   onNeedAuth: () => void
-  onBal: (bal: number, log: { x: string; d: number } | null) => void
 }
 
 const integer = (value: number) => Math.floor(value).toLocaleString('ru-RU')
@@ -82,8 +75,6 @@ function normalizeStatus(raw: any): MineStatus {
     ore: Number(raw?.ore ?? 0),
     deposited: Number(raw?.deposited ?? 0),
     withdrawn: Number(raw?.withdrawn ?? 0),
-    rateToSv: Number(raw?.rate_to_sv ?? FALLBACK_RATE_TO_SV),
-    rateFromSv: Number(raw?.rate_from_sv ?? FALLBACK_RATE_FROM_SV),
     minWithdraw: Number(raw?.min_withdraw ?? FALLBACK_MIN_WITHDRAW),
     bustChance: Number(raw?.bust_chance ?? FALLBACK_BUST),
     rtp: Number(raw?.rtp ?? FALLBACK_RTP),
@@ -137,7 +128,7 @@ function NotReady() {
   )
 }
 
-export default function MineView({ currentUser, notify, onNeedAuth, onBal }: Props) {
+export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
   const [status, setStatus] = useState<MineStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [notReady, setNotReady] = useState(false)
@@ -152,7 +143,6 @@ export default function MineView({ currentUser, notify, onNeedAuth, onBal }: Pro
 
   const [stake, setStake] = useState('1')
   const [withdrawAmount, setWithdrawAmount] = useState('5')
-  const [convertAmount, setConvertAmount] = useState('')
 
   const userId = currentUser?.id || null
   const notifyRef = useRef(notify)
@@ -330,33 +320,9 @@ export default function MineView({ currentUser, notify, onNeedAuth, onBal }: Pro
     load(true)
   }
 
-  const convert = async () => {
-    if (busy || !status) return
-    const amount = Math.floor(Number(convertAmount))
-    if (!Number.isFinite(amount) || amount < 1) {
-      setMessage('Укажи целое количество АР.')
-      return
-    }
-    if (amount > status.ore) {
-      setMessage(`На сайте только ${integer(status.ore)} АР.`)
-      return
-    }
-    setBusy('convert')
-    setMessage('')
-    const { data, error } = await supabase.rpc('mc_convert', { p_amount: amount })
-    setBusy(null)
-    if (error || !data) return fail(error, 'Не удалось обменять АР')
-    setStatus(prev => prev ? { ...prev, ore: Number(data.ore) } : prev)
-    onBal(Number(data.bal), { x: `Обмен ${amount} АР на SV₽`, d: Number(data.sv) })
-    setConvertAmount('')
-    notify(`⛏ ${integer(amount)} АР → ${fmt(Number(data.sv))}`)
-  }
-
   const share = useMemo(() => {
     if (!status) return null
-    const ore = status.ore
     return {
-      sv: ore * status.rateToSv,
       bustPercent: (status.bustChance * 100).toFixed(0),
       rtpPercent: (status.rtp * 100).toFixed(1)
     }
@@ -401,7 +367,7 @@ export default function MineView({ currentUser, notify, onNeedAuth, onBal }: Pro
           <div className="mc-ore-value">
             <Gem size={20} /> {integer(status.ore)} <span className="mc-unit">АР</span>
           </div>
-          <span className="mc-ore-equivalent">≈ {fmt(share?.sv || 0)} · 1 АР = 1 руда</span>
+          <span className="mc-ore-equivalent">1 АР = 1 руда · только из Minecraft</span>
         </div>
       </header>
 
@@ -585,29 +551,6 @@ export default function MineView({ currentUser, notify, onNeedAuth, onBal }: Pro
                 </button>
               </>
             )}
-          </section>
-
-          <section className="mc-card">
-            <div className="mc-card-head"><ArrowRightLeft size={16} /> <h3>Обмен АР → SV₽</h3></div>
-            <div className="mc-rate-line">
-              <span>1 АР → <b>{integer(status.rateToSv)} SV₽</b></span>
-            </div>
-            <div className="mc-form-row">
-              <input
-                className="mc-input"
-                inputMode="numeric"
-                placeholder="Сколько АР"
-                value={convertAmount}
-                onChange={e => setConvertAmount(e.target.value.replace(/[^\d]/g, ''))}
-              />
-              <button className="wl-btn-orange mc-btn" onClick={convert} disabled={busy === 'convert' || status.ore < 1}>
-                В SV₽
-              </button>
-            </div>
-            <p className="mc-fine">
-              Обмен АР на SV₽ — без комиссии. АР появляются только из алмазной руды в Minecraft,
-              купить их за SV₽ нельзя.
-            </p>
           </section>
 
           <section className="mc-card">
