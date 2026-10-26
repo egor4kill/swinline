@@ -809,7 +809,7 @@ export default function App() {
   }, [currentUser?.id])
 
   useEffect(() => { refreshAr() }, [refreshAr])
-  useEffect(() => { if (playCurrency === 'ar') refreshAr() }, [playCurrency, refreshAr])
+  useEffect(() => { if (playCurrency === 'ar') refreshAr() }, [playCurrency, refreshAr, view])
 
   const fetchCrashBets = useCallback(async (roundId: number) => {
     const { data } = await supabase.from('crash_bets').select('*').eq('round_id', roundId).order('created_at', { ascending: true })
