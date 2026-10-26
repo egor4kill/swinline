@@ -64,7 +64,7 @@ type Props = {
   onNeedAuth: () => void
 }
 
-const integer = (value: number) => Math.floor(value).toLocaleString('ru-RU')
+const arFmt = (value: number) => value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
 function normalizeStatus(raw: any): MineStatus {
   const round = raw?.round
@@ -247,7 +247,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
       return
     }
     if (amount > status.ore) {
-      setMessage(`На сайте только ${integer(status.ore)} АР.`)
+      setMessage(`На сайте только ${arFmt(status.ore)} АР.`)
       return
     }
     setBusy('start')
@@ -296,7 +296,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
       depth: Number(data.depth),
       mult: Number(data.mult)
     })
-    notify(`⛏ Забрал ${integer(Number(data.payout))} АР на глубине ${data.depth}.`)
+    notify(`⛏ Забрал ${arFmt(Number(data.payout))} АР на глубине ${data.depth}.`)
   }
 
   const withdraw = async () => {
@@ -307,7 +307,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
       return
     }
     if (amount > status.ore) {
-      setMessage(`На сайте только ${integer(status.ore)} АР.`)
+      setMessage(`На сайте только ${arFmt(status.ore)} АР.`)
       return
     }
     setBusy('withdraw')
@@ -316,7 +316,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
     setBusy(null)
     if (error || !data) return fail(error, 'Не удалось создать вывод')
     setStatus(prev => prev ? { ...prev, ore: Number(data.ore) } : prev)
-    notify(`Заявка на ${integer(amount)} АР создана. Забери её в игре: /sw withdraw.`)
+    notify(`Заявка на ${arFmt(amount)} АР создана. Забери её в игре: /sw withdraw.`)
     load(true)
   }
 
@@ -365,7 +365,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
         <div className="mc-ore-hero">
           <span className="mc-ore-label">Баланс шахты</span>
           <div className="mc-ore-value">
-            <Gem size={20} /> {integer(status.ore)} <span className="mc-unit">АР</span>
+            <Gem size={20} /> {arFmt(status.ore)} <span className="mc-unit">АР</span>
           </div>
           <span className="mc-ore-equivalent">1 АР = 1 руда · только из Minecraft</span>
         </div>
@@ -398,7 +398,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
               <div>
                 {result.kind === 'bust'
                   ? <>Жила осыпалась на глубине {result.depth}. Ставка ушла в породу.</>
-                  : <>Ты забрал <b>{integer(result.payout)}</b> АР на глубине {result.depth} (x{result.mult.toFixed(2)}).</>}
+                  : <>Ты забрал <b>{arFmt(result.payout)}</b> АР на глубине {result.depth} (x{result.mult.toFixed(2)}).</>}
               </div>
             </div>
           )}
@@ -430,7 +430,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
                     {value}
                   </button>
                 ))}
-                <button className="mc-chip" onClick={() => setStake(String(status.ore))}>
+                <button className="mc-chip" onClick={() => setStake(String(Math.floor(status.ore)))}>
                   MAX
                 </button>
               </div>
@@ -453,7 +453,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
                   </div>
                   <div className="mc-metric">
                     <span>Заберёшь, АР</span>
-                    <strong>{integer(potential)}</strong>
+                    <strong>{arFmt(potential)}</strong>
                   </div>
                 </div>
 
@@ -487,7 +487,7 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
                   disabled={busy === 'cash'}
                 >
                   {busy === 'cash' ? <Loader2 size={16} className="mc-spin" /> : <ArrowDownToLine size={16} />}
-                  Забрать {integer(potential)} АР
+                  Забрать {arFmt(potential)} АР
                 </button>
               </div>
               <p className="mc-fine">
@@ -576,13 +576,13 @@ export default function MineView({ currentUser, notify, onNeedAuth }: Props) {
               </button>
             </div>
             <p className="mc-fine">
-              Минимум {status.minWithdraw} АР. Занесено всего: {integer(status.deposited)} · выведено: {integer(status.withdrawn)}.
+              Минимум {status.minWithdraw} АР. Занесено всего: {arFmt(status.deposited)} · выведено: {arFmt(status.withdrawn)}.
             </p>
             {status.pending.length > 0 && (
               <div className="mc-pending">
                 <ArrowDownToLine size={15} />
                 <span>
-                  В пути: {integer(status.pending.reduce((sum, p) => sum + p.amount, 0))} АР.
+                  В пути: {arFmt(status.pending.reduce((sum, p) => sum + p.amount, 0))} АР.
                   Забери в игре или подожди автовыдачу.
                 </span>
               </div>

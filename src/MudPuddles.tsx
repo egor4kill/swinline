@@ -48,6 +48,7 @@ export default function MudPuddles({ bal, unit, onStart, onPick, onCash, onResto
   const [mines, setMines] = useState(3)
   const [roundUnit, setRoundUnit] = useState(unit)
   const money = (n: number, u: string = roundUnit) => fmt(n) + ' ' + u
+  const minBet = unit === 'АР' ? 1 : 10
   const [phase, setPhase] = useState<Phase>('idle')
   const [open, setOpen] = useState<number[]>([])
   const [boom, setBoom] = useState<number | null>(null)
@@ -81,7 +82,7 @@ export default function MudPuddles({ bal, unit, onStart, onPick, onCash, onResto
   const start = async () => {
     if (busy) return
     const s = Math.floor(parseFloat(stake))
-    if (!(s >= MIN_BET)) return setMsg(`Минимальная ставка: ${MIN_BET} ${unit}`)
+    if (!(s >= minBet)) return setMsg(`Минимальная ставка: ${minBet} ${unit}`)
     setBusy(true)
     const id = await onStart(s, mines)
     setBusy(false)
@@ -190,8 +191,8 @@ export default function MudPuddles({ bal, unit, onStart, onPick, onCash, onResto
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
             <input aria-label={`Ставка, ${unit}`} inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
               style={{ width: 110, padding: 12, borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
-            {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
-            <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
+            {(unit === 'АР' ? [1, 5, 10, 50] : [10, 100, 500]).map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
+            <button className="wl-round-btn" onClick={() => setStake(String(Math.max(minBet, Math.floor(bal))))}>Всё</button>
             <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={start}>{busy ? 'Старт…' : phase === 'idle' ? 'Начать' : 'Ещё раунд'}</button>
           </div>
         </>

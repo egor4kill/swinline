@@ -3937,3 +3937,757 @@ REVOKE ALL ON FUNCTION public.place_sports_bet(text, integer, numeric, text) FRO
 GRANT EXECUTE ON FUNCTION public.place_sports_bet(text, integer, numeric, text) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ====================================================================
+-- 19. ДРОБНЫЙ АР: ставки от 1 АР
+--     mc_accounts.ore становится numeric(18,2): выплаты в играх/спорте
+--     могут быть дробными (x1.95 от 1 АР = 1.95 АР), а не floor.
+--     Занос/вывод руды остаются целыми (1 руда = 1 АР); дробный остаток
+--     можно копить и выводить целыми АР.
+-- ====================================================================
+
+ALTER TABLE public.mc_accounts ALTER COLUMN ore TYPE numeric(18,2) USING ore::numeric;
+ALTER TABLE public.mc_ledger ALTER COLUMN amount TYPE numeric(18,2) USING amount::numeric;
+ALTER TABLE public.mc_ledger ALTER COLUMN ore_after TYPE numeric(18,2) USING ore_after::numeric;
+ALTER TABLE public.mc_dig_rounds ALTER COLUMN payout TYPE numeric(18,2) USING payout::numeric;
+
+CREATE OR REPLACE FUNCTION public.mc_plugin_link(p_code text, p_uuid uuid, p_name text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_code public.mc_link_codes%rowtype;
+  v_ore numeric;
+BEGIN
+  PERFORM public.mc_require_service();
+  IF p_uuid IS NULL THEN RAISE EXCEPTION 'Не передан UUID игрока'; END IF;
+  IF p_name IS NULL OR length(trim(p_name)) = 0 THEN RAISE EXCEPTION 'Не передан ник игрока'; END IF;
+
+  -- Два одновременных кода на один Minecraft-аккаунт не должны оба сработать.
+  PERFORM pg_advisory_xact_lock(hashtext('mc_link:' || p_uuid));
+
+  SELECT * INTO v_code FROM public.mc_link_codes
+    WHERE code = upper(trim(p_code)) FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Код неверный или истёк'; END IF;
+  IF v_code.used_at IS NOT NULL THEN RAISE EXCEPTION 'Код уже использован'; END IF;
+  IF v_code.expires_at < now() THEN RAISE EXCEPTION 'Код истёк — создай новый на сайте'; END IF;
+
+  IF EXISTS (SELECT 1 FROM public.mc_links
+             WHERE mc_uuid = p_uuid AND user_id <> v_code.user_id) THEN
+    RAISE EXCEPTION 'Этот Minecraft-аккаунт уже привязан к другому игроку';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.mc_links
+             WHERE user_id = v_code.user_id AND mc_uuid <> p_uuid) THEN
+    RAISE EXCEPTION 'Аккаунт сайта уже привязан к другому Minecraft-профилю';
+  END IF;
+
+  UPDATE public.mc_link_codes SET used_at = now() WHERE code = v_code.code;
+
+  INSERT INTO public.mc_links (user_id, mc_uuid, mc_name)
+    VALUES (v_code.user_id, p_uuid, left(trim(p_name), 32))
+    ON CONFLICT (user_id) DO UPDATE
+      SET mc_uuid = excluded.mc_uuid,
+          mc_name = excluded.mc_name,
+          linked_at = now();
+
+  INSERT INTO public.mc_accounts (user_id) VALUES (v_code.user_id)
+    ON CONFLICT (user_id) DO NOTHING;
+  SELECT ore INTO v_ore FROM public.mc_accounts WHERE user_id = v_code.user_id;
+
+  RETURN jsonb_build_object(
+    'ok', true, 'user_id', v_code.user_id,
+    'mc_name', left(trim(p_name), 32), 'ore', v_ore);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.mc_plugin_deposit(p_uuid uuid, p_amount integer, p_nonce text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_link public.mc_links%rowtype;
+  v_ore numeric;
+BEGIN
+  PERFORM public.mc_require_service();
+  IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Количество руды должно быть больше нуля'; END IF;
+  IF p_nonce IS NULL OR length(p_nonce) < 8 THEN RAISE EXCEPTION 'Некорректный nonce операции'; END IF;
+
+  SELECT * INTO v_link FROM public.mc_links WHERE mc_uuid = p_uuid;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Сначала привяжи аккаунт: /sw link КОД'; END IF;
+
+  -- Один и тот же nonce не может зачислить руду дважды (повтор после обрыва сети).
+  PERFORM pg_advisory_xact_lock(hashtext('mc_deposit:' || p_nonce));
+
+  IF EXISTS (SELECT 1 FROM public.mc_ledger WHERE nonce = p_nonce) THEN
+    SELECT ore INTO v_ore FROM public.mc_accounts WHERE user_id = v_link.user_id;
+    RETURN jsonb_build_object('ok', true, 'duplicate', true, 'ore', v_ore);
+  END IF;
+
+  INSERT INTO public.mc_accounts (user_id) VALUES (v_link.user_id)
+    ON CONFLICT (user_id) DO NOTHING;
+
+  UPDATE public.mc_accounts
+    SET ore = ore + p_amount, deposited = deposited + p_amount, updated_at = now()
+    WHERE user_id = v_link.user_id
+    RETURNING ore INTO v_ore;
+
+  INSERT INTO public.mc_ledger (user_id, kind, amount, ore_after, nonce, meta)
+    VALUES (v_link.user_id, 'deposit', p_amount, v_ore, p_nonce,
+            jsonb_build_object('mc_name', v_link.mc_name));
+  PERFORM public.mc_prune_ledger(v_link.user_id);
+
+  RETURN jsonb_build_object(
+    'ok', true, 'duplicate', false, 'ore', v_ore,
+    'user_id', v_link.user_id);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.mc_plugin_sync(p_uuid uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_link public.mc_links%rowtype;
+  v_ore numeric;
+  v_withdrawals jsonb;
+BEGIN
+  PERFORM public.mc_require_service();
+  SELECT * INTO v_link FROM public.mc_links WHERE mc_uuid = p_uuid;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('linked', false);
+  END IF;
+
+  INSERT INTO public.mc_accounts (user_id) VALUES (v_link.user_id)
+    ON CONFLICT (user_id) DO NOTHING;
+  SELECT ore INTO v_ore FROM public.mc_accounts WHERE user_id = v_link.user_id;
+
+  SELECT coalesce(jsonb_agg(jsonb_build_object(
+           'id', w.id, 'amount', w.amount, 'created_at', w.created_at
+         ) ORDER BY w.created_at), '[]'::jsonb)
+    INTO v_withdrawals
+    FROM (
+      SELECT id, amount, created_at FROM public.mc_withdrawals
+      WHERE user_id = v_link.user_id AND status = 'pending'
+      ORDER BY created_at LIMIT 20
+    ) w;
+
+  RETURN jsonb_build_object(
+    'linked', true, 'user_id', v_link.user_id,
+    'mc_name', v_link.mc_name, 'ore', v_ore,
+    'withdrawals', v_withdrawals);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.mc_plugin_withdraw_fail(p_id uuid, p_reason text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_w public.mc_withdrawals%rowtype;
+  v_ore numeric;
+BEGIN
+  PERFORM public.mc_require_service();
+  SELECT * INTO v_w FROM public.mc_withdrawals WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Заявка на вывод не найдена'; END IF;
+  IF v_w.status <> 'pending' THEN
+    RETURN jsonb_build_object('ok', false, 'status', v_w.status);
+  END IF;
+
+  UPDATE public.mc_withdrawals
+    SET status = 'failed', note = left(coalesce(p_reason, 'delivery failed'), 200)
+    WHERE id = p_id;
+
+  UPDATE public.mc_accounts
+    SET ore = ore + v_w.amount,
+        withdrawn = greatest(withdrawn - v_w.amount, 0),
+        updated_at = now()
+    WHERE user_id = v_w.user_id
+    RETURNING ore INTO v_ore;
+
+  INSERT INTO public.mc_ledger (user_id, kind, amount, ore_after, meta)
+    VALUES (v_w.user_id, 'withdraw_refund', v_w.amount, v_ore,
+            jsonb_build_object('withdrawal_id', p_id, 'reason', left(coalesce(p_reason, ''), 200)));
+  PERFORM public.mc_prune_ledger(v_w.user_id);
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+    FROM public.mc_withdrawals WHERE user_id = v_w.user_id AND status <> 'pending'
+  )
+  DELETE FROM public.mc_withdrawals w USING ranked r
+    WHERE w.id = r.id AND r.rn > 50;
+
+  RETURN jsonb_build_object('ok', true, 'ore', v_ore);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.mc_withdraw_ore(p_amount integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_conf public.mc_config%rowtype;
+  v_link public.mc_links%rowtype;
+  v_ore numeric;
+  v_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_conf FROM public.mc_config WHERE id;
+  SELECT * INTO v_link FROM public.mc_links WHERE user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Сначала привяжи Minecraft: /sw link КОД'; END IF;
+  IF p_amount IS NULL OR p_amount < v_conf.min_withdraw THEN
+    RAISE EXCEPTION 'Минимум для вывода — % руды', v_conf.min_withdraw;
+  END IF;
+
+  UPDATE public.mc_accounts
+    SET ore = ore - p_amount, withdrawn = withdrawn + p_amount, updated_at = now()
+    WHERE user_id = auth.uid() AND ore >= p_amount
+    RETURNING ore INTO v_ore;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно алмазной руды'; END IF;
+
+  INSERT INTO public.mc_withdrawals (user_id, amount, mc_uuid, mc_name)
+    VALUES (auth.uid(), p_amount, v_link.mc_uuid, v_link.mc_name)
+    RETURNING id INTO v_id;
+
+  INSERT INTO public.mc_ledger (user_id, kind, amount, ore_after, meta)
+    VALUES (auth.uid(), 'withdraw', -p_amount, v_ore,
+            jsonb_build_object('withdrawal_id', v_id));
+  PERFORM public.mc_prune_ledger(auth.uid());
+
+  RETURN jsonb_build_object('ok', true, 'ore', v_ore, 'withdrawal_id', v_id);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.mc_dig_start(p_stake integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_ore numeric;
+  v_id uuid;
+  v_round public.mc_dig_rounds%rowtype;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF p_stake IS NULL OR p_stake <= 0 THEN RAISE EXCEPTION 'Ставка должна быть целым числом руды'; END IF;
+  IF EXISTS (SELECT 1 FROM public.mc_dig_rounds WHERE user_id = auth.uid() AND status = 'play') THEN
+    RAISE EXCEPTION 'Сначала заверши текущий спуск';
+  END IF;
+
+  UPDATE public.mc_accounts
+    SET ore = ore - p_stake, updated_at = now()
+    WHERE user_id = auth.uid() AND ore >= p_stake
+    RETURNING ore INTO v_ore;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно алмазной руды'; END IF;
+
+  INSERT INTO public.mc_dig_rounds (user_id, stake)
+    VALUES (auth.uid(), p_stake) RETURNING id INTO v_id;
+
+  INSERT INTO public.mc_ledger (user_id, kind, amount, ore_after, meta)
+    VALUES (auth.uid(), 'dig_stake', -p_stake, v_ore,
+            jsonb_build_object('round_id', v_id));
+  PERFORM public.mc_prune_ledger(auth.uid());
+
+  SELECT * INTO v_round FROM public.mc_dig_rounds WHERE id = v_id;
+  RETURN jsonb_build_object(
+    'round', to_jsonb(v_round), 'ore', v_ore,
+    'potential', p_stake);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.mc_dig_step(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_conf public.mc_config%rowtype;
+  v_round public.mc_dig_rounds%rowtype;
+  v_depth integer;
+  v_mult numeric;
+  v_ore numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  SELECT * INTO v_conf FROM public.mc_config WHERE id;
+
+  SELECT * INTO v_round FROM public.mc_dig_rounds
+    WHERE id = p_round AND user_id = auth.uid() FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Спуск не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Спуск уже завершён'; END IF;
+  IF v_round.depth >= v_conf.dig_max_depth THEN
+    RAISE EXCEPTION 'Глубже некуда — забирай %', round(v_round.stake * v_round.mult, 2);
+  END IF;
+
+  IF random() < v_conf.dig_bust THEN
+    UPDATE public.mc_dig_rounds
+      SET status = 'busted', payout = 0
+      WHERE id = p_round;
+    SELECT ore INTO v_ore FROM public.mc_accounts WHERE user_id = auth.uid();
+    PERFORM public.mc_prune_ledger(auth.uid());
+    WITH ranked AS (
+      SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+      FROM public.mc_dig_rounds WHERE user_id = auth.uid() AND status <> 'play'
+    )
+    DELETE FROM public.mc_dig_rounds d USING ranked r
+      WHERE d.id = r.id AND r.rn > 20;
+    RETURN jsonb_build_object(
+      'busted', true, 'depth', v_round.depth, 'mult', v_round.mult,
+      'payout', 0, 'ore', v_ore);
+  END IF;
+
+  v_depth := v_round.depth + 1;
+  v_mult := round(v_conf.dig_rtp / power(1 - v_conf.dig_bust, v_depth), 4);
+  UPDATE public.mc_dig_rounds
+    SET depth = v_depth, mult = v_mult
+    WHERE id = p_round;
+
+  SELECT ore INTO v_ore FROM public.mc_accounts WHERE user_id = auth.uid();
+  RETURN jsonb_build_object(
+    'busted', false, 'depth', v_depth, 'mult', v_mult,
+    'potential', round(v_round.stake * v_mult, 2), 'ore', v_ore);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.mc_dig_cashout(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.mc_dig_rounds%rowtype;
+  v_payout numeric;
+  v_ore numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+
+  SELECT * INTO v_round FROM public.mc_dig_rounds
+    WHERE id = p_round AND user_id = auth.uid() FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Спуск не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Спуск уже завершён'; END IF;
+
+  v_payout := round(v_round.stake * v_round.mult, 2);
+  UPDATE public.mc_dig_rounds
+    SET status = 'cashed', payout = v_payout
+    WHERE id = p_round;
+
+  UPDATE public.mc_accounts
+    SET ore = ore + v_payout, updated_at = now()
+    WHERE user_id = auth.uid()
+    RETURNING ore INTO v_ore;
+
+  INSERT INTO public.mc_ledger (user_id, kind, amount, ore_after, meta)
+    VALUES (auth.uid(), 'dig_win', v_payout, v_ore,
+            jsonb_build_object('round_id', p_round, 'stake', v_round.stake,
+                               'depth', v_round.depth, 'mult', v_round.mult));
+  PERFORM public.mc_prune_ledger(auth.uid());
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+    FROM public.mc_dig_rounds WHERE user_id = auth.uid() AND status <> 'play'
+  )
+  DELETE FROM public.mc_dig_rounds d USING ranked r
+    WHERE d.id = r.id AND r.rn > 20;
+
+  RETURN jsonb_build_object(
+    'ok', true, 'payout', v_payout, 'ore', v_ore,
+    'depth', v_round.depth, 'mult', v_round.mult);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.game_debit(p_amount numeric, p_currency text)
+RETURNS numeric
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v numeric;
+BEGIN
+  IF p_amount IS NULL OR p_amount < (CASE WHEN p_currency = 'ar' THEN 1 ELSE 10 END) THEN
+    RAISE EXCEPTION 'Минимальная ставка — % %',
+      CASE WHEN p_currency = 'ar' THEN 1 ELSE 10 END,
+      CASE WHEN p_currency = 'ar' THEN 'АР' ELSE 'SV₽' END;
+  END IF;
+  IF p_currency = 'ar' THEN
+    UPDATE public.mc_accounts
+      SET ore = ore - p_amount, updated_at = now()
+      WHERE user_id = auth.uid() AND ore >= p_amount
+      RETURNING ore INTO v;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно АР'; END IF;
+    RETURN v;
+  END IF;
+  UPDATE public.profiles
+    SET bal = bal - p_amount, updated_at = now()
+    WHERE id = auth.uid() AND bal >= p_amount
+    RETURNING bal INTO v;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Недостаточно SV₽'; END IF;
+  RETURN v;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.game_credit(p_amount numeric, p_currency text)
+RETURNS numeric
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v numeric;
+  v_amount numeric;
+BEGIN
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RETURN public.game_balance(p_currency);
+  END IF;
+  IF p_currency = 'ar' THEN
+    v_amount := round(p_amount, 2);
+    IF v_amount <= 0 THEN RETURN public.game_balance('ar'); END IF;
+    INSERT INTO public.mc_accounts (user_id) VALUES (auth.uid())
+      ON CONFLICT (user_id) DO NOTHING;
+    UPDATE public.mc_accounts
+      SET ore = ore + v_amount, updated_at = now()
+      WHERE user_id = auth.uid()
+      RETURNING ore INTO v;
+    RETURN v;
+  END IF;
+  UPDATE public.profiles
+    SET bal = bal + p_amount, updated_at = now()
+    WHERE id = auth.uid()
+    RETURNING bal INTO v;
+  RETURN v;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.wheel_spin(p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_stake numeric;
+  v_bal numeric;
+  v_idx integer;
+  v_mul numeric;
+  v_win numeric;
+  v_muls numeric[] := ARRAY[0,0.5,0,1.2,0,0.5,0,1.2,0,0.5,0,1.0,0,0.5,0,10];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+
+  v_stake := CASE WHEN v_cur = 'ar' THEN 1 ELSE 100 END;
+  v_bal := public.game_debit(v_stake, v_cur);
+
+  v_idx := floor(random() * array_length(v_muls, 1))::int;
+  v_mul := v_muls[v_idx + 1];
+  v_win := round(v_stake * v_mul, 2);
+  v_bal := public.game_credit(v_win, v_cur);
+
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'wheel', jsonb_build_object(
+      'stake', v_stake, 'currency', v_cur, 'sector', v_idx, 'mul', v_mul, 'win', v_win));
+
+  IF v_cur = 'sv' THEN
+    v_casino := public.casino_take(v_stake);
+    v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'sector', v_idx, 'mul', v_mul, 'win', v_win,
+    'stake', v_stake, 'currency', v_cur, 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.plinko_drop(p_stake numeric, p_risk text, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_bal numeric;
+  v_slot integer := 0;
+  v_i integer;
+  v_mul numeric;
+  v_win numeric;
+  v_low  numeric[] := ARRAY[6.6,3.3,1.9,1.3,1.1,1,0.5,1,1.1,1.3,1.9,3.3,6.6];
+  v_mid  numeric[] := ARRAY[21,6.5,2.8,1.4,1,0.8,0.5,0.8,1,1.4,2.8,6.5,21];
+  v_high numeric[] := ARRAY[65,15,4.2,1.9,0.9,0.6,0.3,0.6,0.9,1.9,4.2,15,65];
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  IF p_risk NOT IN ('low', 'mid', 'high') THEN RAISE EXCEPTION 'Неизвестный уровень риска'; END IF;
+
+  v_bal := public.game_debit(p_stake, v_cur);
+
+  FOR v_i IN 1..12 LOOP
+    IF random() < 0.5 THEN v_slot := v_slot + 1; END IF;
+  END LOOP;
+  v_mul := CASE p_risk
+    WHEN 'low' THEN v_low[v_slot + 1]
+    WHEN 'mid' THEN v_mid[v_slot + 1]
+    ELSE v_high[v_slot + 1]
+  END;
+  v_win := round(p_stake * v_mul, 2);
+  v_bal := public.game_credit(v_win, v_cur);
+
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'plinko', jsonb_build_object(
+      'stake', p_stake, 'currency', v_cur, 'risk', p_risk, 'slot', v_slot, 'mul', v_mul, 'win', v_win));
+
+  IF v_cur = 'sv' THEN
+    v_casino := public.casino_take(p_stake);
+    v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'slot', v_slot, 'mul', v_mul, 'win', v_win,
+    'stake', p_stake, 'currency', v_cur, 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_pick(p_round uuid, p_cell integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.puddles_rounds%rowtype;
+  v_mines integer[];
+  v_opened integer[];
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_round FROM public.puddles_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раунд уже завершён'; END IF;
+  IF p_cell < 0 OR p_cell > 24 THEN RAISE EXCEPTION 'Клетка за пределами поля'; END IF;
+  IF p_cell = ANY (v_round.opened) THEN RAISE EXCEPTION 'Клетка уже открыта'; END IF;
+  SELECT mines INTO v_mines FROM public.puddles_secrets WHERE round_id = p_round;
+
+  IF p_cell = ANY (v_mines) THEN
+    UPDATE public.puddles_rounds SET status = 'lost' WHERE id = p_round;
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'puddles', jsonb_build_object(
+        'stake', v_round.stake, 'currency', v_round.currency, 'mines', v_round.mines_count,
+        'opened', array_length(v_round.opened, 1), 'outcome', 'lost'));
+    RETURN jsonb_build_object('hit', true, 'mines', v_mines, 'opened', v_round.opened,
+      'currency', v_round.currency);
+  END IF;
+
+  UPDATE public.puddles_rounds SET opened = opened || p_cell WHERE id = p_round RETURNING opened INTO v_opened;
+
+  IF array_length(v_opened, 1) >= 25 - v_round.mines_count THEN
+    v_mul := public.puddles_multiplier(v_round.mines_count, array_length(v_opened, 1));
+    v_win := round(v_round.stake * v_mul, 2);
+    UPDATE public.puddles_rounds SET status = 'cashed' WHERE id = p_round;
+    v_bal := public.game_credit(v_win, v_round.currency);
+    INSERT INTO public.game_attempts (user_id, game, result)
+      VALUES (auth.uid(), 'puddles', jsonb_build_object(
+        'stake', v_round.stake, 'currency', v_round.currency, 'mines', v_round.mines_count,
+        'opened', array_length(v_opened, 1), 'outcome', 'cashed', 'mul', v_mul, 'win', v_win));
+    RETURN jsonb_build_object('hit', false, 'opened', v_opened, 'auto_cashed', true,
+      'mul', v_mul, 'win', v_win, 'bal', v_bal, 'mines', v_mines,
+      'currency', v_round.currency);
+  END IF;
+
+  RETURN jsonb_build_object('hit', false, 'opened', v_opened, 'currency', v_round.currency);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.puddles_cash(p_round uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.puddles_rounds%rowtype;
+  v_mines integer[];
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_round FROM public.puddles_rounds WHERE id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Раунд не найден'; END IF;
+  IF v_round.status <> 'play' THEN RAISE EXCEPTION 'Раунд уже завершён'; END IF;
+  IF array_length(v_round.opened, 1) < 1 THEN RAISE EXCEPTION 'Сначала открой хотя бы одну клетку'; END IF;
+  SELECT mines INTO v_mines FROM public.puddles_secrets WHERE round_id = p_round;
+  v_mul := public.puddles_multiplier(v_round.mines_count, array_length(v_round.opened, 1));
+  v_win := round(v_round.stake * v_mul, 2);
+  UPDATE public.puddles_rounds SET status = 'cashed' WHERE id = p_round;
+  v_bal := public.game_credit(v_win, v_round.currency);
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'puddles', jsonb_build_object(
+      'stake', v_round.stake, 'currency', v_round.currency, 'mines', v_round.mines_count,
+      'opened', array_length(v_round.opened, 1), 'outcome', 'cashed', 'mul', v_mul, 'win', v_win));
+  RETURN jsonb_build_object('mul', v_mul, 'win', v_win, 'bal', v_bal, 'mines', v_mines,
+    'currency', v_round.currency);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.ruble_predict(p_side text, p_stake numeric, p_currency text DEFAULT 'sv')
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_cur text := coalesce(p_currency, 'sv');
+  v_bal numeric;
+  v_tick timestamptz;
+  v_at numeric;
+  v_future numeric;
+  v_dir text;
+  v_win boolean;
+  v_mul numeric;
+  v_payout numeric;
+  v_casino jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  PERFORM public.assert_not_blocked();
+  IF v_cur NOT IN ('sv', 'ar') THEN RAISE EXCEPTION 'Валюта: sv или ar'; END IF;
+  IF p_side NOT IN ('up', 'down') THEN RAISE EXCEPTION 'Ставка только «вверх» или «вниз»'; END IF;
+
+  v_bal := public.game_debit(p_stake, v_cur);
+
+  PERFORM public.ruble_ensure(now() + interval '45 seconds');
+  v_tick := date_trunc('second', now());
+  SELECT price INTO v_at FROM public.ruble_prices WHERE tick_at = v_tick;
+  IF v_at IS NULL THEN
+    SELECT price INTO v_at FROM public.ruble_prices
+      WHERE tick_at < v_tick ORDER BY tick_at DESC LIMIT 1;
+  END IF;
+  SELECT price INTO v_future FROM public.ruble_prices
+    WHERE tick_at = v_tick + interval '30 seconds';
+  IF v_at IS NULL OR v_future IS NULL THEN
+    RAISE EXCEPTION 'Лента ещё не готова — попробуй через секунду';
+  END IF;
+
+  v_dir := CASE WHEN v_future > v_at THEN 'up' WHEN v_future < v_at THEN 'down' ELSE 'flat' END;
+  v_win := (p_side = 'up' AND v_dir = 'up') OR (p_side = 'down' AND v_dir = 'down');
+  v_mul := CASE WHEN v_win THEN 1.95 ELSE 0 END;
+  v_payout := round(p_stake * v_mul, 2);
+  v_bal := public.game_credit(v_payout, v_cur);
+
+  INSERT INTO public.game_attempts (user_id, game, result)
+    VALUES (auth.uid(), 'ruble', jsonb_build_object(
+      'stake', p_stake, 'currency', v_cur, 'side', p_side, 'start', v_at, 'final', v_future,
+      'dir', v_dir, 'mul', v_mul, 'win', v_payout));
+
+  IF v_cur = 'sv' THEN
+    v_casino := public.casino_take(p_stake);
+    v_bal := coalesce((v_casino->>'bal')::numeric, v_bal);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'start', v_at, 'final', v_future,
+    'resolve_ms', (extract(epoch FROM (v_tick + interval '30 seconds')) * 1000)::bigint,
+    'dir', v_dir, 'win', v_win, 'mul', v_mul, 'payout', v_payout,
+    'stake', p_stake, 'currency', v_cur, 'bal', v_bal,
+    'jackpot', coalesce(v_casino->>'jackpot', '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.crash_cashout(p_round bigint)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_round public.crash_rounds%rowtype;
+  v_secret numeric;
+  v_bet public.crash_bets%rowtype;
+  v_elapsed double precision;
+  v_mul numeric;
+  v_win numeric;
+  v_bal numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Нужно войти через Twitch'; END IF;
+  SELECT * INTO v_bet FROM public.crash_bets WHERE round_id = p_round AND user_id = auth.uid();
+  IF NOT FOUND THEN RAISE EXCEPTION 'Ставки на этот раунд нет'; END IF;
+  IF v_bet.cashed_out_mul IS NOT NULL THEN RAISE EXCEPTION 'Вывод уже сделан'; END IF;
+  SELECT * INTO v_round FROM public.crash_rounds WHERE id = p_round;
+  SELECT point INTO v_secret FROM public.crash_secrets WHERE round_id = p_round;
+  v_elapsed := extract(epoch FROM (now() - (v_round.start_at + make_interval(secs => v_round.betting_seconds))));
+  IF v_elapsed < 0 THEN RAISE EXCEPTION 'Раунд ещё не стартовал'; END IF;
+  IF public.crash_mult(v_elapsed) >= v_secret THEN
+    UPDATE public.crash_rounds SET crashed = true, crash_point = v_secret WHERE id = p_round AND NOT crashed;
+    PERFORM public.crash_settle_round(p_round);
+    RAISE EXCEPTION 'Ракета уже упала — вывод невозможен';
+  END IF;
+  v_mul := round(least(public.crash_mult(v_elapsed), v_secret)::numeric, 2);
+  v_win := round(v_bet.stake * v_mul, 2);
+  UPDATE public.crash_bets SET cashed_out_mul = v_mul, win_amount = v_win WHERE id = v_bet.id;
+  v_bal := public.game_credit(v_win, v_bet.currency);
+  RETURN jsonb_build_object('mul', v_mul, 'win', v_win, 'bal', v_bal,
+    'currency', v_bet.currency);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.crash_settle_round(p_round bigint)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_point numeric;
+  v_count integer := 0;
+BEGIN
+  SELECT point INTO v_point FROM public.crash_secrets WHERE round_id = p_round;
+  IF v_point IS NULL THEN RETURN 0; END IF;
+
+  WITH cashed AS (
+    UPDATE public.crash_bets
+    SET cashed_out_mul = auto_cashout,
+        win_amount = round(stake * auto_cashout, 2)
+    WHERE round_id = p_round AND cashed_out_mul IS NULL
+      AND auto_cashout IS NOT NULL AND auto_cashout <= v_point
+    RETURNING user_id, currency, win_amount
+  ), sv AS (
+    UPDATE public.profiles p SET bal = p.bal + c.total, updated_at = now()
+    FROM (SELECT user_id, sum(win_amount) AS total FROM cashed
+          WHERE currency = 'sv' GROUP BY user_id) c
+    WHERE p.id = c.user_id
+    RETURNING 1
+  ), ar AS (
+    INSERT INTO public.mc_accounts (user_id, ore)
+    SELECT user_id, sum(win_amount) FROM cashed
+      WHERE currency = 'ar' GROUP BY user_id
+    ON CONFLICT (user_id) DO UPDATE
+      SET ore = mc_accounts.ore + EXCLUDED.ore, updated_at = now()
+    RETURNING 1
+  )
+  SELECT count(*) INTO v_count FROM cashed;
+
+  RETURN v_count;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_settle_bets(p_event text, p_winner integer)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_win_pick text;
+  v_count integer;
+BEGIN
+  IF NOT public.is_platform_owner() THEN
+    RAISE EXCEPTION 'Только владелец платформы может рассчитывать события';
+  END IF;
+
+  IF p_winner IS NOT NULL THEN
+    SELECT data->'out'->p_winner->>0 INTO v_win_pick FROM public.events WHERE id = p_event;
+    IF v_win_pick IS NULL THEN RAISE EXCEPTION 'Событие или исход не найдены'; END IF;
+
+    WITH won AS (
+      UPDATE public.bets
+      SET status = 'won',
+          payout = round(stake * odds, 2)
+      WHERE event_id = p_event AND status = 'pending'
+        AND coalesce(pick, pick_name) = v_win_pick
+      RETURNING user_id, currency, payout
+    ), lost AS (
+      UPDATE public.bets SET status = 'lost', payout = 0
+      WHERE event_id = p_event AND status = 'pending'
+        AND coalesce(pick, pick_name) <> v_win_pick
+      RETURNING user_id
+    ), sv AS (
+      UPDATE public.profiles p SET bal = p.bal + w.total, updated_at = now()
+      FROM (SELECT user_id, sum(payout) AS total FROM won
+            WHERE currency = 'sv' GROUP BY user_id) w
+      WHERE p.id = w.user_id
+      RETURNING 1
+    ), ar AS (
+      INSERT INTO public.mc_accounts (user_id, ore)
+      SELECT user_id, sum(payout) FROM won
+        WHERE currency = 'ar' GROUP BY user_id
+      ON CONFLICT (user_id) DO UPDATE
+        SET ore = mc_accounts.ore + EXCLUDED.ore, updated_at = now()
+      RETURNING 1
+    )
+    SELECT (SELECT count(*) FROM won) + (SELECT count(*) FROM lost) INTO v_count;
+  ELSE
+    WITH refunded AS (
+      UPDATE public.bets SET status = 'refund', payout = stake
+      WHERE event_id = p_event AND status = 'pending'
+      RETURNING user_id, currency, payout
+    ), sv AS (
+      UPDATE public.profiles p SET bal = p.bal + r.total, updated_at = now()
+      FROM (SELECT user_id, sum(payout) AS total FROM refunded
+            WHERE currency = 'sv' GROUP BY user_id) r
+      WHERE p.id = r.user_id
+      RETURNING 1
+    ), ar AS (
+      INSERT INTO public.mc_accounts (user_id, ore)
+      SELECT user_id, sum(payout) FROM refunded
+        WHERE currency = 'ar' GROUP BY user_id
+      ON CONFLICT (user_id) DO UPDATE
+        SET ore = mc_accounts.ore + EXCLUDED.ore, updated_at = now()
+      RETURNING 1
+    )
+    SELECT count(*) INTO v_count FROM refunded;
+  END IF;
+
+  RETURN v_count;
+END $$;
+
+NOTIFY pgrst, 'reload schema';

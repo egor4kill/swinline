@@ -47,6 +47,7 @@ type TickPoint = { t: number; p: number }
 
 export default function RubleChart({ bal, unit, onPredict }: Props) {
   const money = (n: number) => fmt(n) + ' ' + unit
+  const minBet = unit === 'АР' ? 1 : 10
   const [stake, setStake] = useState('100')
   const [busy, setBusy] = useState(false)
   const [news, setNews] = useState('Один курс для всех. Лента идёт всегда, даже когда ты спишь')
@@ -164,7 +165,7 @@ export default function RubleChart({ bal, unit, onPredict }: Props) {
 
   const launch = async (side: Side) => {
     const s = Math.floor(parseFloat(stake))
-    if (!(s >= MIN_BET)) return alert(`Минимальная ставка: ${MIN_BET} ${unit}`)
+    if (!(s >= minBet)) return alert(`Минимальная ставка: ${minBet} ${unit}`)
     if (busy) return
     setBusy(true)
     resultRef.current = null
@@ -243,8 +244,8 @@ export default function RubleChart({ bal, unit, onPredict }: Props) {
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
         <input aria-label={`Ставка, ${unit}`} inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
           style={{ width: 110, padding: '12px', borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
-        {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
-        <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
+        {(unit === 'АР' ? [1, 5, 10, 50] : [10, 100, 500]).map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
+        <button className="wl-round-btn" onClick={() => setStake(String(Math.max(minBet, Math.floor(bal))))}>Всё</button>
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap' }}>
         <button className="wl-btn-orange" disabled={busy} style={{ minHeight: 46, padding: '0 26px', fontWeight: 800, background: busy ? '#268a4e' : undefined, opacity: busy ? 0.85 : 1 }} onClick={() => launch('up')}>

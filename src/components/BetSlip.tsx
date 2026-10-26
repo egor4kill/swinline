@@ -175,7 +175,7 @@ export default function BetSlip(props: Props) {
             </div>
 
             <div className="wl-quick-stakes">
-              {(playCurrency === 'ar' ? ['10', '50', '100', '500'] : ['100', '500', '1000']).map(val => (
+              {(playCurrency === 'ar' ? ['1', '5', '10', '50'] : ['100', '500', '1000']).map(val => (
                 <button
                   key={val}
                   type="button"

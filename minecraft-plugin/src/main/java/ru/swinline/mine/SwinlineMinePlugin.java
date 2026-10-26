@@ -342,9 +342,9 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             params.addProperty("p_name", player.getName());
             try {
                 JsonObject result = rpc("mc_plugin_link", params);
-                int ore = result.has("ore") ? result.get("ore").getAsInt() : 0;
+                double ore = result.has("ore") ? result.get("ore").getAsDouble() : 0;
                 linked.add(player.getUniqueId());
-                runTask(() -> ok(player, "Аккаунт привязан к сайту. " + UNIT + " на сайте: §e" + ore + "§a."));
+                runTask(() -> ok(player, "Аккаунт привязан к сайту. " + UNIT + " на сайте: §e" + ar(ore) + "§a."));
             } catch (SiteException ex) {
                 runTask(() -> err(player, ex.getMessage()));
             }
@@ -440,14 +440,14 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 params.addProperty("p_nonce", pending.nonce);
 
                 JsonObject result = rpc("mc_plugin_deposit", params);
-                int ore = result.has("ore") ? result.get("ore").getAsInt() : 0;
+                double ore = result.has("ore") ? result.get("ore").getAsDouble() : 0;
                 pendingDeposits.remove(pending.nonce);
                 savePending();
 
                 Player player = Bukkit.getPlayer(pending.playerId);
                 if (player != null) {
                     runTask(() -> ok(player, "Зачислено §e" + pending.amount + " " + UNIT
-                            + "§a (1 руда = 1 АР). Всего на сайте: §e" + ore + " " + UNIT + "§a."));
+                            + "§a (1 руда = 1 АР). Всего на сайте: §e" + ar(ore) + " " + UNIT + "§a."));
                 }
             } catch (SiteException ex) {
                 if (ex.isDefinitive()) {
@@ -544,12 +544,12 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 }
 
                 linked.add(playerId);
-                int ore = result.has("ore") ? result.get("ore").getAsInt() : 0;
+                double ore = result.has("ore") ? result.get("ore").getAsDouble() : 0;
                 JsonArray withdrawals = result.has("withdrawals") && result.get("withdrawals").isJsonArray()
                         ? result.getAsJsonArray("withdrawals") : new JsonArray();
 
                 if (announce) {
-                    runTask(() -> msg(player, "АР на сайте: §e" + ore + "§7. Готовых выводов: §e"
+                    runTask(() -> msg(player, "АР на сайте: §e" + ar(ore) + "§7. Готовых выводов: §e"
                             + withdrawals.size() + "§7."));
                 }
 
@@ -677,6 +677,13 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         if (debug) {
             getLogger().info("Выдано " + amount + " x " + oreMaterial + " игроку " + player.getName() + " (" + reason + ")");
         }
+    }
+
+    private static String ar(double value) {
+        if (Math.abs(value - Math.rint(value)) < 0.005) {
+            return String.valueOf((long) Math.rint(value));
+        }
+        return String.format(Locale.ROOT, "%.2f", value);
     }
 
     private String oreName() {

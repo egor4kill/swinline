@@ -755,8 +755,9 @@ export default function App() {
     const cur = playCurrency
     const rawStake = parseFloat(stake)
     const v = cur === 'ar' ? Math.floor(rawStake) : rawStake
-    if (isNaN(v) || !isFinite(v) || v < 10) {
-      setErr(`Минимальная сумма ставки — 10 ${unitOf(cur)}`)
+    const minStake = cur === 'ar' ? 1 : 10
+    if (isNaN(v) || !isFinite(v) || v < minStake) {
+      setErr(`Минимальная сумма ставки — ${minStake} ${unitOf(cur)}`)
       return
     }
 
@@ -931,8 +932,9 @@ export default function App() {
     const cur = playCurrency
     const raw = parseFloat(crashStake)
     const v = cur === 'ar' ? Math.floor(raw) : raw
-    if (!isFinite(v) || isNaN(v) || v < 10) {
-      notify(`Минимальная ставка — 10 ${unitOf(cur)}`)
+    const minStake = cur === 'ar' ? 1 : 10
+    if (!isFinite(v) || isNaN(v) || v < minStake) {
+      notify(`Минимальная ставка — ${minStake} ${unitOf(cur)}`)
       return
     }
     const autoMul = parseFloat(crashAutoCashout)
@@ -1636,9 +1638,7 @@ export default function App() {
   const stakeVal = parseFloat(stake)
   const isStakeValid = isFinite(stakeVal) && stakeVal > 0
   const currentOdds = selectedBet?.odds || 1
-  const potentialPayout = isStakeValid
-    ? (playCurrency === 'ar' ? Math.floor(payout(stakeVal, currentOdds)) : payout(stakeVal, currentOdds))
-    : 0
+  const potentialPayout = isStakeValid ? payout(stakeVal, currentOdds) : 0
   const netProfit = isStakeValid ? r2(potentialPayout - stakeVal) : 0
 
   return (
@@ -1738,7 +1738,7 @@ export default function App() {
                   disabled={!currentUser}
                   title={currentUser ? 'Играть на алмазной валюте' : 'Войди через Twitch, чтобы играть на АР'}
                 >
-                  АР · {arBalance.toLocaleString('ru-RU')}
+                  АР · {arBalance.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
                 </button>
               </div>
               {playCurrency === 'ar' && (

@@ -92,6 +92,7 @@ export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAu
 
   const roundUnit = round ? (round.currency === 'ar' ? 'АР' : 'SV₽') : unit
   const money = (n: number, u: string = roundUnit) => fmt(n) + ' ' + u
+  const minBet = unit === 'АР' ? 1 : 10
 
   const err = (e: { message?: string } | null, fallback: string) => {
     const m = e?.message || fallback
@@ -103,7 +104,7 @@ export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAu
   const deal = async () => {
     if (busy) return
     const s = Math.floor(parseFloat(stake))
-    if (!(s >= MIN_BET)) { setMsg(`Минимальная ставка: ${MIN_BET} ${unit}`); return }
+    if (!(s >= minBet)) { setMsg(`Минимальная ставка: ${minBet} ${unit}`); return }
     setBusy(true)
     const cur = currency
     const { data, error } = await supabase.rpc('bj_deal', { p_stake: s, p_currency: cur })
@@ -241,8 +242,8 @@ export default function Blackjack({ bal, currency, unit, onBal, notify, onNeedAu
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
               <input aria-label={`Ставка, ${unit}`} inputMode="numeric" value={stake} onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
                 style={{ width: 110, padding: 12, borderRadius: 10, border: '1px solid var(--line, #2d2f33)', background: '#262729', color: 'inherit', fontWeight: 800, fontSize: 18, textAlign: 'center' }} />
-              {[10, 100, 500].map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
-              <button className="wl-round-btn" onClick={() => setStake(String(Math.max(MIN_BET, Math.floor(bal))))}>Всё</button>
+              {(unit === 'АР' ? [1, 5, 10, 50] : [10, 100, 500]).map(v => <button key={v} className="wl-round-btn" onClick={() => setStake(String(v))}>{v}</button>)}
+              <button className="wl-round-btn" onClick={() => setStake(String(Math.max(minBet, Math.floor(bal))))}>Всё</button>
             </div>
             <div style={{ display: 'flex', justifyContent: 'center' }}>
               <button className="wl-btn-orange" disabled={busy || !restored} style={{ minHeight: 46, padding: '0 30px', fontWeight: 800, opacity: busy ? 0.6 : 1 }} onClick={deal}>

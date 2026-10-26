@@ -223,7 +223,7 @@ export default function CrashArena({
           </div>
 
           <div style={{ display: 'flex', gap: 6 }}>
-            {(unit === 'АР' ? ['10', '25', '50', '100'] : ['100', '200', '500', '1000']).map(val => (
+            {(unit === 'АР' ? ['1', '5', '10', '25'] : ['100', '200', '500', '1000']).map(val => (
               <button
                 key={val}
                 className="wl-quick-btn"
