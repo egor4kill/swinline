@@ -80,8 +80,9 @@ BEGIN
 END $$;
 
 DROP FUNCTION IF EXISTS public.mc_dig_start(integer);
+DROP FUNCTION IF EXISTS public.mc_dig_start(integer, text);
 
-CREATE OR REPLACE FUNCTION public.mc_dig_start(p_stake integer, p_currency text DEFAULT 'ar')
+CREATE OR REPLACE FUNCTION public.mc_dig_start(p_stake integer, p_currency text)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -124,6 +125,16 @@ END $$;
 
 REVOKE ALL ON FUNCTION public.mc_dig_start(integer, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.mc_dig_start(integer, text) TO authenticated;
+
+-- Совместимость со старым кэшированным клиентом: вызов с одной ставкой = АР
+CREATE OR REPLACE FUNCTION public.mc_dig_start(p_stake integer)
+RETURNS jsonb
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.mc_dig_start(p_stake, 'ar');
+$$;
+
+REVOKE ALL ON FUNCTION public.mc_dig_start(integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.mc_dig_start(integer) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.mc_dig_step(p_round uuid)
 RETURNS jsonb
