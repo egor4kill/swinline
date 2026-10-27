@@ -1,5 +1,22 @@
 import type { ReactNode } from 'react'
 
+// Свои картинки: положи файл в src/assets/games/ с именем <id игры>.png|jpg|webp
+// (см. README в той папке) — он заменит CSS-миниатюру автоматически.
+const customImages = import.meta.glob('../assets/games/*.{png,jpg,jpeg,webp,avif,gif}', {
+  eager: true,
+  import: 'default'
+}) as Record<string, string>
+
+function customImageFor(id: string): string | undefined {
+  const entry = Object.entries(customImages).find(([path]) => {
+    const name = (path.split('/').pop() || '').toLowerCase()
+    return name === `${id}.png` || name === `${id}.jpg` || name === `${id}.jpeg`
+      || name === `${id}.webp` || name === `${id}.avif` || name === `${id}.gif`
+      || name.startsWith(`${id}.`) // суффиксы вида crash.v2.png тоже подходят
+  })
+  return entry?.[1]
+}
+
 type GameTab = 'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'pick' | 'mine' | 'bonanza'
 
 type Card = {
@@ -173,7 +190,9 @@ export default function GameCards({ gamesTab, setGamesTab }: Props) {
           onClick={() => setGamesTab(c.id)}
         >
           <span className="game-card-art" style={{ background: c.bg }}>
-            {c.art}
+            {customImageFor(c.id)
+              ? <img src={customImageFor(c.id)} alt={c.name} className="game-card-img" loading="lazy" />
+              : c.art}
             {gamesTab === c.id && <i className="game-card-live" />}
           </span>
           <span className="game-card-name">{c.name}</span>

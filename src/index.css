@@ -5168,3 +5168,11 @@ button:focus-visible, input:focus-visible {
     height: 82px;
   }
 }
+
+/* Своя картинка на карточке игры (src/assets/games/<id>.png) */
+.game-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
