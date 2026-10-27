@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Pickaxe,
   Gem,
+  Coins,
   Link2,
   RefreshCw,
   ArrowDownToLine,
@@ -444,7 +445,7 @@ export default function MineView({
         <div className="mc-ore-hero">
           <span className="mc-ore-label">{isGame ? `Баланс ${displayUnit}` : 'Баланс шахты'}</span>
           <div className="mc-ore-value">
-            <Gem size={20} /> {arFmt(displayBalance)} <span className="mc-unit">{displayUnit}</span>
+            {displayCurrency === 'ar' ? <Gem size={20} /> : <Coins size={20} />} {arFmt(displayBalance)} <span className="mc-unit">{displayUnit}</span>
           </div>
           <span className="mc-ore-equivalent">
             {isGame
