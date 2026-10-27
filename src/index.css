@@ -4024,6 +4024,614 @@ button:focus-visible, input:focus-visible {
   }
 }
 /* ============================================================
+   «Бонанза»: Megaways в стиле золотой шахты — деревянная рама,
+   вагонетки, самоцветы, падающие каскады.
+   ============================================================ */
+.bz-root {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.bz-tunnel {
+  position: relative;
+  width: 100%;
+  border-radius: 16px;
+  padding: 12px 10px 16px;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(255, 170, 60, 0.18), transparent 55%),
+    linear-gradient(180deg, #241505 0%, #120b04 45%, #0b0806 100%);
+  border: 1px solid #4a3211;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+}
+
+.bz-beam {
+  height: 10px;
+  border-radius: 4px;
+  background: repeating-linear-gradient(90deg, #5a3d16 0 26px, #6b4a1d 26px 52px, #4a3211 52px 54px);
+  border: 1px solid #2e1e08;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+.bz-beam-top { margin-bottom: 10px; }
+.bz-beam-bottom { margin-top: 10px; }
+
+.bz-title {
+  text-align: center;
+  margin-bottom: 8px;
+  line-height: 1;
+}
+
+.bz-title-main {
+  display: block;
+  font-family: var(--font-d);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  background: linear-gradient(180deg, #ffe9a8, #f5a623 55%, #b45309);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 14px rgba(245, 166, 35, 0.35);
+}
+
+.bz-title-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #a8842f;
+}
+
+/* Вагонетки над средними барабанами */
+.bz-carts {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  max-width: 470px;
+  margin: 0 auto 4px;
+  min-height: 24px;
+}
+
+.bz-cart {
+  display: none;
+  justify-content: center;
+  font-size: 17px;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.6));
+}
+
+.bz-cart:nth-child(1) { display: flex; }
+.bz-cart:nth-child(2) { display: flex; }
+.bz-cart:nth-child(3) { display: flex; }
+.bz-cart:nth-child(4) { display: flex; }
+
+.bz-frame {
+  width: 100%;
+  max-width: 470px;
+  margin: 0 auto;
+  background: linear-gradient(180deg, #2b1c08, #1a1006);
+  border: 3px solid #6b4a1d;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 2px #3a2810, 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: 8px;
+}
+
+.bz-hud {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 26px;
+  margin-bottom: 8px;
+}
+
+.bz-ways-total {
+  font-family: var(--font-d);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #ffe9a8;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid #a8842f;
+  border-radius: 999px;
+  padding: 3px 12px;
+}
+
+.bz-mult-badge {
+  font-family: var(--font-d);
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #1c1002;
+  background: linear-gradient(160deg, #fbbf24, #d97706);
+  border-radius: 999px;
+  padding: 3px 12px;
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.5);
+  animation: bz-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes bz-pulse {
+  50% { box-shadow: 0 0 26px rgba(251, 191, 36, 0.8); }
+}
+
+.bz-runwin {
+  font-family: var(--font-d);
+  font-size: 15px;
+  font-weight: 800;
+  color: #7fe0ad;
+}
+
+.bz-board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(90, 61, 22, 0.5), transparent 70%),
+    #0d0a06;
+  border: 1px solid #3a2810;
+  border-radius: 8px;
+  padding: 7px;
+  position: relative;
+}
+
+.bz-board-flash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background: radial-gradient(ellipse at center, rgba(255, 215, 120, 0.22), transparent 65%);
+  animation: bz-flash 0.6s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes bz-flash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.bz-reel {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bz-reel-ways {
+  text-align: center;
+  font-family: var(--font-d);
+  font-size: 9px;
+  font-weight: 800;
+  color: #a8842f;
+  min-height: 12px;
+  line-height: 12px;
+}
+
+.bz-reel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+}
+
+.bz-cell {
+  height: 30px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-d);
+  font-size: 12px;
+  font-weight: 800;
+  position: relative;
+  overflow: hidden;
+}
+
+.bz-cell.bz-empty {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(255, 255, 255, 0.04);
+}
+
+.bz-cell.bz-preview {
+  background: linear-gradient(180deg, #2a2113, #1c150a);
+  border: 1px solid #4a3211;
+}
+
+.bz-cell:not(.empty):not(.preview) {
+  background: linear-gradient(180deg, #3f3222, #241b0f);
+  border: 1px solid #5a4322;
+  box-shadow: inset 0 1px 0 rgba(255, 220, 150, 0.08);
+}
+
+/* Самоцветы: огранённый ромб с бликом */
+.bz-gem-shape {
+  width: 16px;
+  height: 16px;
+  transform: rotate(45deg);
+  border-radius: 3px;
+  position: relative;
+  box-shadow: inset -3px -3px 5px rgba(0, 0, 0, 0.45), inset 2px 2px 4px rgba(255, 255, 255, 0.35);
+}
+
+.bz-gem-shape::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.gem-1 .bz-gem-shape { background: linear-gradient(135deg, #ff6b6b, #c0392b); }
+.gem-2 .bz-gem-shape { background: linear-gradient(135deg, #d8b4fe, #8e44ad); }
+.gem-3 .bz-gem-shape { background: linear-gradient(135deg, #86efac, #27ae60); }
+.gem-4 .bz-gem-shape { background: linear-gradient(135deg, #93c5fd, #2980b9); }
+
+.bz-rank b {
+  color: #e8d5a3;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* GOLD-буквы */
+.bz-cell.bz-gold {
+  background: linear-gradient(160deg, #fbbf24, #b45309);
+  border: 1px solid #fde68a;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.55);
+}
+
+.bz-cell.bz-gold b {
+  color: #1c1002;
+  font-size: 13px;
+}
+
+/* Выигрыш и падение */
+.bz-cell.bz-hit {
+  border-color: #ffd76a;
+  box-shadow: 0 0 14px rgba(255, 215, 120, 0.7);
+  animation: bz-hit-pulse 0.55s ease-in-out infinite alternate;
+}
+
+@keyframes bz-hit-pulse {
+  from { filter: brightness(1); }
+  to { filter: brightness(1.45); }
+}
+
+.bz-cell.bz-drop {
+  animation: bz-drop-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes bz-drop-in {
+  from { transform: translateY(-26px); opacity: 0.2; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.bz-summary {
+  width: 100%;
+  margin: 10px auto 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.bz-summary.bz-win {
+  background: rgba(52, 199, 123, 0.12);
+  border: 1px solid rgba(52, 199, 123, 0.4);
+  color: #7fe0ad;
+}
+
+.bz-summary.bz-lose {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid #4a3211;
+  color: #c9b38a;
+}
+
+.bz-spin {
+  width: 100%;
+  max-width: 470px;
+  display: block;
+  margin: 12px auto 0;
+}
+
+@media (max-width: 420px) {
+  .bz-cell { height: 25px; font-size: 11px; }
+  .bz-gem-shape { width: 13px; height: 13px; }
+  .bz-board { gap: 3px; padding: 5px; }
+  .bz-title-main { font-size: 20px; letter-spacing: 3px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bz-mult-badge, .bz-cell.bz-hit { animation: none; }
+  .bz-cell.bz-drop { animation: none; }
+  .bz-board-flash::after { animation: none; opacity: 0; }
+}
+
+/* ============================================================
+   «Кирка»: башня из 8 рядов по 3 блока, падающая кирка.
+   ============================================================ */
+.pick-tower-wrap {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto 14px;
+}
+
+.pick-ladder {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: space-between;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pick-ladder-step {
+  font-family: var(--font-d);
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--tx-muted);
+  background: #141822;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 7px;
+  text-align: center;
+  min-width: 46px;
+}
+
+.pick-ladder-step.base {
+  color: var(--tx-secondary);
+}
+
+.pick-ladder-step.reached {
+  color: var(--org);
+  border-color: rgba(255, 85, 0, 0.45);
+  background: #231d16;
+}
+
+.pick-tower {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pick-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  opacity: 0.45;
+}
+
+.pick-row.active {
+  opacity: 1;
+}
+
+.pick-block {
+  position: relative;
+  height: 40px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #3a4358, #232b3b);
+  border: 1px solid #4a5570;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.12), 0 2px 0 #131824;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+}
+
+.pick-row.active .pick-block.pickable {
+  cursor: pointer;
+}
+
+.pick-row.active .pick-block.pickable:hover {
+  border-color: var(--org);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.12), 0 0 12px var(--org-glow);
+}
+
+.pick-block .pick-stone {
+  width: 18px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.pick-block.cleared {
+  background: linear-gradient(180deg, #16301f, #0f2016);
+  border-color: #35b06e;
+  box-shadow: 0 0 10px rgba(52, 199, 123, 0.35);
+}
+
+.pick-block.boom {
+  background: linear-gradient(180deg, #47201a, #2a120e);
+  border-color: #ef4444;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.5);
+  animation: pick-shake 0.4s ease;
+}
+
+.pick-block.ghost-bomb {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+.pick-gem {
+  font-size: 18px;
+  animation: pick-pop 0.25s ease;
+}
+
+.pick-bomb {
+  font-size: 18px;
+}
+
+.pick-bomb.ghost {
+  opacity: 0.55;
+}
+
+.pick-falling {
+  position: absolute;
+  top: -14px;
+  transform: translateX(-50%);
+  font-size: 20px;
+  z-index: 3;
+  pointer-events: none;
+  animation: pick-fall 0.45s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+@keyframes pick-fall {
+  from { top: -46px; opacity: 0.4; }
+  60% { opacity: 1; }
+  to { top: 6px; opacity: 1; }
+}
+
+@keyframes pick-pop {
+  0% { transform: scale(0.4); }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pick-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.pick-target-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--org);
+  text-align: center;
+}
+
+.pick-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.pick-stake {
+  width: 96px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0f131a;
+  color: #fff;
+  font-family: var(--font-d);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.pick-cashbar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 420px;
+  margin: 0 auto 12px;
+  background: #10141e;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.pick-cashbar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.pick-cashbar-info span {
+  font-size: 11.5px;
+  color: var(--tx-muted);
+  font-weight: 700;
+}
+
+.pick-cashbar-info b {
+  font-family: var(--font-d);
+  font-size: 15px;
+  color: var(--org);
+}
+
+.pick-result {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.pick-result.bust {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ff8f8f;
+}
+
+.pick-result.cash {
+  background: rgba(52, 199, 123, 0.12);
+  border: 1px solid rgba(52, 199, 123, 0.4);
+  color: #7fe0ad;
+}
+
+.pick-notice {
+  color: var(--tx-secondary);
+  font-size: 12.5px;
+  margin: 8px 0 0;
+}
+
+.pick-fine {
+  color: var(--tx-muted);
+  font-size: 11.5px;
+  margin-top: 10px;
+}
+
+@media (max-width: 420px) {
+  .pick-ladder-step {
+    font-size: 9.5px;
+    min-width: 40px;
+    padding: 3px 5px;
+  }
+  .pick-block {
+    height: 36px;
+  }
+}
+
+@media (pointer: coarse) {
+  .pick-block {
+    min-width: 44px;
+  }
+  .pick-row.active .pick-block {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pick-falling {
+    animation: none;
+    top: 6px;
+  }
+  .pick-block.boom,
+  .pick-gem {
+    animation: none;
+  }
+}
+/* ============================================================
    «Бонанза»: Megaways-барабаны, каскады, GOLD-бонус.
    Родитель .wl-banner-card — column-flex: ширина задаётся явно.
    ============================================================ */

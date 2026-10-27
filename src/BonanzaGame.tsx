@@ -33,14 +33,13 @@ type Props = {
 
 const ROWS = 7
 const REELS = 6
-const GEM_CLASS: Record<number, string> = { 1: 'gem-red', 2: 'gem-purple', 3: 'gem-green', 4: 'gem-blue' }
 const RANK_TEXT: Record<number, string> = { 5: '9', 6: '10', 7: 'J', 8: 'Q', 9: 'K', 10: 'A' }
 const LETTER_TEXT: Record<number, string> = { 11: 'G', 12: 'O', 13: 'L', 14: 'D' }
-const FRAME_MS = 750
+const FRAME_MS = 850
 
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
-// «Бонанза»: Megaways-барабаны с каскадами и GOLD-бонусом.
+// «Бонанза»: Megaways-барабаны с каскадами и GOLD-бонусом в стиле золотой шахты.
 // Исход считает сервер одним RPC, клиент проигрывает полученную раскадровку.
 export default function BonanzaGame({ currentUser, bal, unit, currency, onSpin, notify }: Props) {
   const [stake, setStake] = useState(currency === 'ar' ? '1' : '100')
@@ -52,15 +51,27 @@ export default function BonanzaGame({ currentUser, bal, unit, currency, onSpin, 
   const [summary, setSummary] = useState<{ win: number; free: number; total: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [flashWin, setFlashWin] = useState(0)
   const timers = useRef<number[]>([])
 
   useEffect(() => () => timers.current.forEach(t => clearInterval(t)), [])
 
   const frame = frames && frameIdx >= 0 && frameIdx < frames.length ? frames[frameIdx] : null
-  const currentMult = frame && frame.phase === 'free' ? frame.mult : 1
+  const prevFrame = frames && frameIdx > 0 ? frames[frameIdx - 1] : null
+  const inFree = Boolean(frame?.phase === 'free' || (frames && frameIdx >= frames.length && frames.some(f => f.phase === 'free')))
+  const currentMult = frame?.phase === 'free' ? frame.mult : 1
   const runWin = frames
-    ? frames.slice(0, frameIdx + 1).reduce((a, f) => a + (f.phase === 'base' ? f.win : 0), 0)
+    ? frames.slice(0, frameIdx + 1).reduce((a, f) => a + f.win, 0)
     : 0
+
+  const winningCell = (r: number, row: number, value: number) => {
+    if (!frame || value < 1 || value > 10) return false
+    return frame.wins.some(w => w.s === value && r >= w.start && r < w.start + w.k)
+  }
+  const cellChanged = (r: number, row: number, value: number) => {
+    if (!prevFrame) return false
+    return prevFrame.grid[r * ROWS + row] !== value
+  }
 
   const play = (run: SpinRun['run']) => {
     const list: Frame[] = run.base.steps.map(f => ({ ...f, phase: 'base' as const }))
@@ -80,12 +91,15 @@ export default function BonanzaGame({ currentUser, bal, unit, currency, onSpin, 
       if (idx >= list.length) {
         clearInterval(id)
         const win = list.reduce((a, f) => a + f.win, 0)
+        setFlashWin(win)
         setSummary({ win, free: run.free.triggered ? run.free.count : 0, total: run.total })
         setSpinning(false)
         if (run.free.triggered) notify(`🆓 GOLD-бонус: ${run.free.count} фриспинов, выигрыш ${fmt(run.free.total)} ${unit}`)
         return
       }
+      const f = list[idx]
       setFrameIdx(idx)
+      if (f.win > 0) setFlashWin(f.win)
     }, FRAME_MS)
   }
 
@@ -104,6 +118,7 @@ export default function BonanzaGame({ currentUser, bal, unit, currency, onSpin, 
     setBusy(true)
     setError('')
     setSummary(null)
+    setFlashWin(0)
     setFrames(null)
     setFrameIdx(-1)
     const data = await onSpin(s)
@@ -114,58 +129,81 @@ export default function BonanzaGame({ currentUser, bal, unit, currency, onSpin, 
   }
 
   return (
-    <div className="wl-banner-card highlight" style={{ padding: '18px 12px 26px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
-      <span className="wl-banner-tag">ИГРЫ 24/7 • MEGAWAYS</span>
-      <h2 style={{ fontFamily: 'var(--font-d)', fontSize: 'clamp(22px, 6vw, 28px)', margin: '10px 0 4px' }}>БОНАНЗА ⛏️💎</h2>
-      <p style={{ color: 'var(--tx-secondary)', fontSize: 13, margin: '0 auto 10px', maxWidth: 560 }}>
-        До 117 649 способов выиграть. Каскады сносят winners и сыпят новые блоки,
-        4 буквы G·O·L·D дают фриспины с безлимитным множителем.
-      </p>
-
-      <div className="bonanza-hud">
-        <span className="bonanza-megaways">{megaways > 0 ? `${megaways.toLocaleString('ru-RU')} ways` : 'MEGAWAYS™'}</span>
-        {spinning && frame?.phase === 'free' && (
-          <span className="bonanza-mult">x{currentMult} безлимит</span>
-        )}
-        {spinning && runWin > 0 && (
-          <span className="bonanza-runwin">{fmt(runWin)} {unit}</span>
-        )}
-      </div>
-
-      <div className="bonanza-board" role="img" aria-label="Барабаны Бонанзы">
-        {heights.map((h, r) => (
-          <div key={r} className="bonanza-reel">
-            {Array.from({ length: h }).map((_, rowFromTop) => {
-              const row = ROWS - h + rowFromTop
-              const cell = frame ? frame.grid[r * ROWS + row] : -1
-              const isWin = Boolean(frame && cell >= 1 && frame.wins.some(w => w.s === cell))
-              const isLetter = cell >= 11 && cell <= 14
-              return (
-                <div
-                  key={row}
-                  className={[
-                    'bonanza-cell',
-                    cell === 0 ? 'empty' : '',
-                    cell === -1 ? 'preview' : '',
-                    isWin ? 'hit' : '',
-                    isLetter ? 'gold-letter' : GEM_CLASS[cell] || (cell > 0 && cell <= 10 ? 'rank' : '')
-                  ].join(' ')}
-                >
-                  {isLetter ? LETTER_TEXT[cell] : RANK_TEXT[cell] || (cell >= 1 && cell <= 4 ? '💎' : '')}
-                </div>
-              )
-            })}
-          </div>
-        ))}
-      </div>
-
-      {summary && (
-        <div className={`bonanza-summary ${summary.win > 0 ? 'win' : 'lose'}`}>
-          {summary.win > 0
-            ? <>Выигрыш <b>{fmt(summary.win)} {unit}</b>{summary.free > 0 ? ` · GOLD-бонус ${summary.free} фриспинов` : ''}</>
-            : 'Пусто. Каскады не сложились — крут ещё раз'}
+    <div className="bz-root">
+      <div className="bz-tunnel">
+        <div className="bz-beam bz-beam-top" />
+        <div className="bz-title">
+          <span className="bz-title-main">BONANZA</span>
+          <span className="bz-title-sub">SWINLINE · MEGAWAYS</span>
         </div>
-      )}
+
+        {/* Вагонетки над средними барабанами — как в оригинале */}
+        <div className="bz-carts">
+          {[1, 2, 3, 4].map(r => (
+            <div key={r} className="bz-cart" style={{ gridArea: `1 / ${r + 1}` }}>
+              <span className="bz-cart-body">🛒</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="bz-frame">
+          <div className="bz-hud">
+            <span className="bz-ways-total">{megaways > 0 ? `${megaways.toLocaleString('ru-RU')} WAYS` : 'MEGAWAYS™'}</span>
+            {inFree && (
+              <span className="bz-mult-badge">БЕЗЛИМИТ ×{currentMult}</span>
+            )}
+            {runWin > 0 && (
+              <span className="bz-runwin">{fmt(runWin)} {unit}</span>
+            )}
+          </div>
+
+          <div className={`bz-board ${frame && frame.win > 0 ? 'bz-board-flash' : ''}`} key={frameIdx} role="img" aria-label="Барабаны Бонанзы">
+            {heights.map((h, r) => (
+              <div key={r} className="bz-reel">
+                <span className="bz-reel-ways">{h}</span>
+                <div className="bz-reel-stack">
+                  {Array.from({ length: h }).map((_, rowFromTop) => {
+                    const row = ROWS - h + rowFromTop
+                    const cell = frame ? frame.grid[r * ROWS + row] : -1
+                    const isLetter = cell >= 11 && cell <= 14
+                    const isGem = cell >= 1 && cell <= 4
+                    const isRank = cell >= 5 && cell <= 10
+                    return (
+                      <div
+                        key={`${frameIdx}-${r}-${row}`}
+                        className={[
+                          'bz-cell',
+                          cell === 0 ? 'bz-empty' : '',
+                          cell === -1 ? 'bz-preview' : '',
+                          winningCell(r, row, cell) ? 'bz-hit' : '',
+                          cellChanged(r, row, cell) && cell !== 0 ? 'bz-drop' : '',
+                          isLetter ? 'bz-gold' : '',
+                          isGem ? `bz-gem gem-${cell}` : '',
+                          isRank ? 'bz-rank' : ''
+                        ].join(' ')}
+                      >
+                        {isLetter ? <b>{LETTER_TEXT[cell]}</b> : null}
+                        {isRank ? <b>{RANK_TEXT[cell]}</b> : null}
+                        {isGem ? <i className="bz-gem-shape" /> : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bz-beam bz-beam-bottom" />
+        </div>
+
+        {summary && (
+          <div className={`bz-summary ${summary.win > 0 ? 'bz-win' : 'bz-lose'}`}>
+            {summary.win > 0
+              ? <>🏆 Выигрыш <b>{fmt(summary.win)} {unit}</b>{summary.free > 0 ? ` · GOLD-бонус: ${summary.free} фриспинов` : ''}</>
+              : 'Каскады не сложились — крут ещё раз'}
+          </div>
+        )}
+      </div>
 
       <div className="pick-controls">
         <input
@@ -183,18 +221,18 @@ export default function BonanzaGame({ currentUser, bal, unit, currency, onSpin, 
 
       <button
         type="button"
-        className="wl-btn-orange"
-        style={{ minHeight: 48, padding: '0 34px', fontWeight: 800, opacity: busy || spinning ? 0.6 : 1 }}
+        className="wl-btn-orange bz-spin"
+        style={{ minHeight: 48, fontWeight: 800, opacity: busy || spinning ? 0.6 : 1 }}
         disabled={busy || spinning}
         onClick={spin}
       >
-        {busy ? 'Крутим…' : spinning ? 'Каскады…' : 'Крутить'}
+        {busy ? 'Крутим…' : spinning ? 'Каскады…' : '⛏ КРУТИТЬ'}
       </button>
 
       {error && <p className="pick-notice" style={{ color: '#ff8f8f' }}>{error}</p>}
       <p className="pick-fine">
-        Символы падают каскадами: собранные комбинации сгорают, новые падают сверху.
-        4 буквы G·O·L·D — 10 фриспинов, множитель растёт с каждым каскадом. RTP ~97%.
+        Собери 3+ символа на соседних барабанах слева направо. Каждая победа взрывает блоки —
+        новые падают сверху. G·O·L·D — фриспины с безлимитным множителем. RTP ~97%.
       </p>
     </div>
   )
