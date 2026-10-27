@@ -89,6 +89,7 @@ const RubleChart = lazy(() => import('./RubleChart'))
 const Blackjack = lazy(() => import('./Blackjack'))
 const MineView = lazy(() => import('./MineView'))
 const PickGame = lazy(() => import('./PickGame'))
+const BonanzaGame = lazy(() => import('./BonanzaGame'))
 const CrashArena = lazy(() => import('./components/games/CrashArena'))
 const RouletteWheel = lazy(() => import('./components/games/RouletteWheel'))
 const WHEEL_SEC_DEG = 360 / ROULETTE_SECTORS.length
@@ -249,7 +250,7 @@ export default function App() {
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
-  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'mine' | 'pick'>('crash')
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'mine' | 'pick' | 'bonanza'>('crash')
   const [playCurrency, setPlayCurrency] = useState<'sv' | 'ar'>('sv')
   const [arBalance, setArBalance] = useState(0)
   const [jackpotWin, setJackpotWin] = useState<number | null>(null)
@@ -1242,6 +1243,33 @@ export default function App() {
     })
   }
 
+  // «Бонанза»: исход (каскады + фриспины) считает сервер одним RPC, клиент проигрывает раскадровку
+  const bonanzaSpin = async (stake: number): Promise<any> => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
+    const cur = playCurrency
+    const s = cur === 'ar' ? Math.floor(stake) : stake
+    const { data, error } = await supabase.rpc('bonanza_spin', { p_stake: s, p_currency: cur })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось крутить'}`); return null }
+    const jp = Number(data.jackpot || 0)
+    const win = Number(data.win || 0)
+    const realCur = (data.currency === 'ar' ? 'ar' : cur) as 'sv' | 'ar'
+    if (realCur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: 'Ставка в «Бонанзе»', d: -s })
+        if (win > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Бонанзе» (x${(win / s).toFixed(2)})`, d: win })
+        if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
+    if (jp > 0) setJackpotWin(jp)
+    return data
+  }
+
   // «Кирка»: ставка/ход/вывод решает сервер, клиент рисует башню и падение кирки
   const pickStart = async (stake: number): Promise<string | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
@@ -1858,6 +1886,12 @@ export default function App() {
                   <span>⛏ Кирка</span>
                 </button>
                 <button
+                  className={`wl-round-btn ${gamesTab === 'bonanza' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('bonanza')}
+                >
+                  <span>💎 Бонанза</span>
+                </button>
+                <button
                   className={`wl-round-btn ${gamesTab === 'mine' ? 'active' : ''}`}
                   onClick={() => setGamesTab('mine')}
                 >
@@ -1904,6 +1938,16 @@ export default function App() {
                   onCash={pickCash}
                   onRestore={pickRestore}
                   onBal={bjBal}
+                />
+              )}
+              {gamesTab === 'bonanza' && (
+                <BonanzaGame
+                  currentUser={currentUser}
+                  bal={playCurrency === 'ar' ? arBalance : S.bal}
+                  unit={unitOf(playCurrency)}
+                  currency={playCurrency}
+                  onSpin={bonanzaSpin}
+                  notify={notify}
                 />
               )}
               {gamesTab === 'mine' && (

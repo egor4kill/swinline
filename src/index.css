@@ -4023,3 +4023,170 @@ button:focus-visible, input:focus-visible {
     animation: none;
   }
 }
+/* ============================================================
+   «Бонанза»: Megaways-барабаны, каскады, GOLD-бонус.
+   Родитель .wl-banner-card — column-flex: ширина задаётся явно.
+   ============================================================ */
+.bonanza-hud {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  min-height: 26px;
+}
+
+.bonanza-megaways {
+  font-family: var(--font-d);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--org);
+  background: #231d16;
+  border: 1px solid rgba(255, 85, 0, 0.45);
+  border-radius: 999px;
+  padding: 3px 12px;
+}
+
+.bonanza-mult {
+  font-family: var(--font-d);
+  font-size: 13px;
+  font-weight: 800;
+  color: #fde68a;
+  background: linear-gradient(100deg, #3a1500, #7c2d12);
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  padding: 3px 12px;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+  animation: bonanza-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes bonanza-pulse {
+  50% { box-shadow: 0 0 22px rgba(245, 158, 11, 0.7); }
+}
+
+.bonanza-runwin {
+  font-family: var(--font-d);
+  font-size: 14px;
+  font-weight: 800;
+  color: #7fe0ad;
+}
+
+.bonanza-board {
+  width: 100%;
+  max-width: 460px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0 auto 14px;
+  background: #0b0e15;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.bonanza-reel {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bonanza-cell {
+  height: 26px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-d);
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  transition: background 0.25s, border-color 0.25s, box-shadow 0.25s;
+}
+
+.bonanza-cell.empty {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.bonanza-cell.preview {
+  background: linear-gradient(180deg, #232b3b, #1a2130);
+  border: 1px solid #333d52;
+}
+
+.bonanza-cell:not(.empty) {
+  background: linear-gradient(180deg, #3a4358, #232b3b);
+  border: 1px solid #4a5570;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.bonanza-cell.gem-red { color: #ff8f8f; }
+.bonanza-cell.gem-purple { color: #d8b4fe; }
+.bonanza-cell.gem-green { color: #86efac; }
+.bonanza-cell.gem-blue { color: #93c5fd; }
+.bonanza-cell.rank {
+  color: #cbd5e1;
+  background: linear-gradient(180deg, #2b3345, #1d2431);
+}
+
+.bonanza-cell.gold-letter {
+  background: linear-gradient(160deg, #b45309, #f59e0b);
+  border-color: #fde68a;
+  color: #1c1002;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.55);
+}
+
+.bonanza-cell.hit {
+  border-color: var(--org);
+  box-shadow: 0 0 12px var(--org-glow);
+  animation: bonanza-hit 0.5s ease;
+}
+
+@keyframes bonanza-hit {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+.bonanza-summary {
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.bonanza-summary.win {
+  background: rgba(52, 199, 123, 0.12);
+  border: 1px solid rgba(52, 199, 123, 0.4);
+  color: #7fe0ad;
+}
+
+.bonanza-summary.lose {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid var(--border);
+  color: var(--tx-secondary);
+}
+
+@media (max-width: 420px) {
+  .bonanza-cell {
+    height: 22px;
+    font-size: 10px;
+  }
+  .bonanza-board {
+    gap: 3px;
+    padding: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bonanza-mult {
+    animation: none;
+  }
+  .bonanza-cell.hit {
+    animation: none;
+  }
+}
