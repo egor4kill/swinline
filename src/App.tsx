@@ -1845,6 +1845,20 @@ export default function App() {
                   notify={notify}
                   onNeedAuth={() => setAuthModalOpen(true)}
                   onOpenLink={() => setView('minecraft')}
+                  playCurrency={playCurrency}
+                  setPlayCurrency={setPlayCurrency}
+                  svBalance={S.bal}
+                  onBal={(cur, bal) => {
+                    if (cur === 'ar') {
+                      setArBalance(bal)
+                    } else {
+                      setS(prev => {
+                        const next = structuredClone(prev)
+                        next.bal = bal
+                        return next
+                      })
+                    }
+                  }}
                 />
               )}
 
@@ -1905,6 +1919,7 @@ export default function App() {
                 notify={notify}
                 onNeedAuth={() => setAuthModalOpen(true)}
                 onPlay={() => { setView('games24'); setGamesTab('mine') }}
+                onBal={(cur, bal) => { if (cur === 'ar') setArBalance(bal) }}
               />
             </Suspense>
           )}

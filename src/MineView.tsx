@@ -16,8 +16,6 @@ import { supabase } from './supabase'
 import { useDocumentVisible } from './useDocumentVisible'
 import type { UserAccount } from './data'
 
-const MC_SERVER = ((import.meta.env.VITE_MC_SERVER as string | undefined) || '').trim()
-const UNIT = 'АР'
 const FALLBACK_MIN_WITHDRAW = 1
 const FALLBACK_MAX_DEPTH = 30
 const FALLBACK_BUST = 0.18
@@ -28,6 +26,8 @@ type PendingWithdrawal = {
   created_at: string
 }
 
+type Currency = 'sv' | 'ar'
+
 type DigRound = {
   id: string
   stake: number
@@ -35,6 +35,7 @@ type DigRound = {
   mult: number
   status: string
   payout: number
+  currency: Currency
 }
 
 type MineStatus = {
@@ -42,6 +43,8 @@ type MineStatus = {
   linked: boolean
   mcName: string | null
   ore: number
+  svBal: number
+  svEnabled: boolean
   deposited: number
   withdrawn: number
   minWithdraw: number
@@ -53,7 +56,7 @@ type MineStatus = {
 
 type Result =
   | { kind: 'bust'; depth: number; mult: number }
-  | { kind: 'cash'; payout: number; depth: number; mult: number }
+  | { kind: 'cash'; payout: number; depth: number; mult: number; currency: Currency }
   | null
 
 type MineMode = 'game' | 'link'
@@ -65,6 +68,10 @@ type Props = {
   mode?: MineMode
   onOpenLink?: () => void
   onPlay?: () => void
+  playCurrency?: Currency
+  setPlayCurrency?: (c: Currency) => void
+  svBalance?: number
+  onBal?: (currency: Currency, bal: number) => void
 }
 
 const arFmt = (value: number) => value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
@@ -76,6 +83,8 @@ function normalizeStatus(raw: any): MineStatus {
     linked: Boolean(raw?.linked),
     mcName: raw?.mc_name || null,
     ore: Number(raw?.ore ?? 0),
+    svBal: Number(raw?.sv_bal ?? 0),
+    svEnabled: Boolean(raw?.sv_enabled),
     deposited: Number(raw?.deposited ?? 0),
     withdrawn: Number(raw?.withdrawn ?? 0),
     minWithdraw: Number(raw?.min_withdraw ?? FALLBACK_MIN_WITHDRAW),
@@ -92,7 +101,8 @@ function normalizeStatus(raw: any): MineStatus {
       depth: Number(round.depth),
       mult: Number(round.mult),
       status: String(round.status),
-      payout: Number(round.payout ?? 0)
+      payout: Number(round.payout ?? 0),
+      currency: round.currency === 'sv' ? 'sv' : 'ar'
     } : null
   }
 }
@@ -105,7 +115,7 @@ function OnlyForAuth({ onNeedAuth, mode }: { onNeedAuth: () => void; mode: MineM
         <h1>{mode === 'game' ? 'Шахта ждёт' : 'Minecraft'}</h1>
         <p>
           {mode === 'game'
-            ? 'Войди через Twitch, чтобы играть в Шахту и забирать АР на любой глубине.'
+            ? 'Войди через Twitch, чтобы играть в Шахту на SV₽ или АР.'
             : 'Войди через Twitch, чтобы привязать Minecraft-аккаунт, заносить руду и выводить АР.'}
         </p>
         <button className="wl-btn-orange mc-gate-btn" onClick={onNeedAuth}>
@@ -124,7 +134,7 @@ function NotReady({ mode }: { mode: MineMode }) {
         <h1>{mode === 'game' ? 'Шахта скоро откроется' : 'Привязка скоро откроется'}</h1>
         <p>
           {mode === 'game'
-            ? 'Мы уже прокладываем ствол. Скоро здесь появится спуск в алмазную жилу и игра на АР.'
+            ? 'Мы уже прокладываем ствол. Скоро здесь появится спуск в алмазную жилу и игра на SV₽ или АР.'
             : 'Как только серверная часть будет подключена, здесь появится привязка Minecraft-аккаунта и вывод АР.'}
         </p>
       </section>
@@ -132,7 +142,18 @@ function NotReady({ mode }: { mode: MineMode }) {
   )
 }
 
-export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game', onOpenLink, onPlay }: Props) {
+export default function MineView({
+  currentUser,
+  notify,
+  onNeedAuth,
+  mode = 'game',
+  onOpenLink,
+  onPlay,
+  playCurrency = 'ar',
+  setPlayCurrency,
+  svBalance = 0,
+  onBal
+}: Props) {
   const isGame = mode === 'game'
   const pageVisible = useDocumentVisible()
   const [status, setStatus] = useState<MineStatus | null>(null)
@@ -212,6 +233,12 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
     if (status?.linked && code) setCode(null)
   }, [status?.linked, code])
 
+  // После перезагрузки активный спуск мог быть в другой валюте — синхронизируем переключатель
+  useEffect(() => {
+    const cur = status?.round?.currency
+    if (cur && cur !== playCurrency) setPlayCurrency?.(cur)
+  }, [status?.round?.currency, playCurrency, setPlayCurrency])
+
   const secondsLeft = code ? Math.max(0, Math.floor((code.expiresAt - now) / 1000)) : 0
 
   const fail = (error: { message?: string } | null, fallback: string) => {
@@ -246,28 +273,39 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
     load(true)
   }
 
+  const effectiveCurrency: Currency = status?.svEnabled ? playCurrency : 'ar'
+
   const startDig = async () => {
     if (busy || !status) return
+    const cur = effectiveCurrency
+    const minBet = cur === 'ar' ? 1 : 10
+    const unit = cur === 'ar' ? 'АР' : 'SV₽'
+    const curBalance = cur === 'ar' ? status.ore : (status.svBal ?? svBalance)
     const amount = Math.floor(Number(stake))
-    if (!Number.isFinite(amount) || amount < 1) {
-      setMessage('Ставка — целое число АР, минимум 1.')
+    if (!Number.isFinite(amount) || amount < minBet) {
+      setMessage(`Ставка — целое число ${unit}, минимум ${minBet}.`)
       return
     }
-    if (amount > status.ore) {
-      setMessage(`На сайте только ${arFmt(status.ore)} АР.`)
+    if (amount > curBalance) {
+      setMessage(`На сайте только ${arFmt(curBalance)} ${unit}.`)
       return
     }
     setBusy('start')
     setMessage('')
     setResult(null)
-    const { data, error } = await supabase.rpc('mc_dig_start', { p_stake: amount })
+    const params: { p_stake: number; p_currency?: Currency } = { p_stake: amount }
+    if (status.svEnabled) params.p_currency = cur
+    const { data, error } = await supabase.rpc('mc_dig_start', params)
     setBusy(null)
     if (error || !data) return fail(error, 'Не удалось начать спуск')
     setStatus(prev => prev ? {
       ...prev,
-      ore: Number(data.ore),
+      ore: Number(data.ore ?? prev.ore),
+      svBal: Number(data.sv_bal ?? prev.svBal),
       round: normalizeStatus({ round: data.round }).round
     } : prev)
+    if (data.ore != null) onBal?.('ar', Number(data.ore))
+    if (data.sv_bal != null) onBal?.('sv', Number(data.sv_bal))
   }
 
   const dig = async () => {
@@ -278,32 +316,53 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
     setBusy(null)
     if (error || !data) return fail(error, 'Жила не поддалась')
     if (data.busted) {
-      setStatus(prev => prev ? { ...prev, ore: Number(data.ore), round: null } : prev)
+      setStatus(prev => prev ? {
+        ...prev,
+        ore: Number(data.ore ?? prev.ore),
+        svBal: Number(data.sv_bal ?? prev.svBal),
+        round: null
+      } : prev)
+      if (data.ore != null) onBal?.('ar', Number(data.ore))
+      if (data.sv_bal != null) onBal?.('sv', Number(data.sv_bal))
       setResult({ kind: 'bust', depth: Number(data.depth), mult: Number(data.mult) })
       return
     }
     setStatus(prev => prev && prev.round ? {
       ...prev,
-      ore: Number(data.ore),
+      ore: Number(data.ore ?? prev.ore),
+      svBal: Number(data.sv_bal ?? prev.svBal),
       round: { ...prev.round, depth: Number(data.depth), mult: Number(data.mult) }
     } : prev)
+    if (data.ore != null) onBal?.('ar', Number(data.ore))
+    if (data.sv_bal != null) onBal?.('sv', Number(data.sv_bal))
   }
 
   const cashout = async () => {
     if (busy || !status?.round) return
+    const cur = status.round.currency
+    const unit = cur === 'ar' ? 'АР' : 'SV₽'
     setBusy('cash')
     setMessage('')
     const { data, error } = await supabase.rpc('mc_dig_cashout', { p_round: status.round.id })
     setBusy(null)
-    if (error || !data) return fail(error, 'Не удалось забрать АР')
-    setStatus(prev => prev ? { ...prev, ore: Number(data.ore), round: null } : prev)
+    if (error || !data) return fail(error, 'Не удалось забрать выигрыш')
+    const payout = Number(data.payout)
+    setStatus(prev => prev ? {
+      ...prev,
+      ore: Number(data.ore ?? prev.ore),
+      svBal: Number(data.sv_bal ?? prev.svBal),
+      round: null
+    } : prev)
+    if (data.ore != null) onBal?.('ar', Number(data.ore))
+    if (data.sv_bal != null) onBal?.('sv', Number(data.sv_bal))
     setResult({
       kind: 'cash',
-      payout: Number(data.payout),
+      payout,
       depth: Number(data.depth),
-      mult: Number(data.mult)
+      mult: Number(data.mult),
+      currency: cur
     })
-    notify(`⛏ Забрал ${arFmt(Number(data.payout))} АР на глубине ${data.depth}.`)
+    notify(`⛏ Забрал ${arFmt(payout)} ${unit} на глубине ${data.depth}.`)
   }
 
   const withdraw = async () => {
@@ -323,6 +382,7 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
     setBusy(null)
     if (error || !data) return fail(error, 'Не удалось создать вывод')
     setStatus(prev => prev ? { ...prev, ore: Number(data.ore) } : prev)
+    if (data.ore != null) onBal?.('ar', Number(data.ore))
     notify(`Заявка на ${arFmt(amount)} АР создана. Забери её в игре: /sw withdraw.`)
     load(true)
   }
@@ -352,8 +412,13 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
   if (!status.authed) return <OnlyForAuth onNeedAuth={onNeedAuth} mode={mode} />
 
   const round = status.round
-  const potential = round ? Math.floor(round.stake * round.mult) : 0
+  const potential = round ? Math.round(round.stake * round.mult * 100) / 100 : 0
   const depthPercent = round ? Math.min(100, (round.depth / Math.max(1, status.maxDepth)) * 100) : 0
+  const svBal = status.svEnabled ? (status.svBal ?? svBalance) : svBalance
+  const activeCurrency: Currency = round ? round.currency : (status.svEnabled ? playCurrency : 'ar')
+  const displayCurrency: Currency = isGame ? activeCurrency : 'ar'
+  const displayBalance = displayCurrency === 'ar' ? status.ore : svBal
+  const displayUnit = displayCurrency === 'ar' ? 'АР' : 'SV₽'
 
   return (
     <div className={`mc-view ${isGame ? 'mc-view-game' : 'mc-view-link'}`}>
@@ -365,8 +430,10 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
           </div>
           <p className="mc-sub">
             {isGame
-              ? <>Спускайся в жилу и забирай <b>АР</b> на любой глубине: каждый шаг повышает множитель, но порода может осыпаться.</>
-              : <>Привязка Minecraft-аккаунта, занос и вывод <b>АР</b>. 1 алмазная руда = 1 АР.</>}
+              ? (status.svEnabled
+                ? <>Спускайся в жилу и забирай <b>SV₽</b> или <b>АР</b>. Каждый шаг повышает множитель, но порода может осыпаться. Валюту выбираешь перед спуском.</>
+                : <>Спускайся в жилу и забирай <b>АР</b> на любой глубине: каждый шаг повышает множитель, но порода может осыпаться.</>)
+              : <>Привязка Minecraft-аккаунта, занос и вывод <b>АР</b>. 1 алмазная руда = 1 АР. Код привязки выдаётся здесь и вводится в игре.</>}
           </p>
           {!isGame && onPlay && (
             <button type="button" className="wl-btn-orange mc-play-btn" onClick={onPlay}>
@@ -375,13 +442,40 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
           )}
         </div>
         <div className="mc-ore-hero">
-          <span className="mc-ore-label">{isGame ? 'Баланс АР' : 'Баланс шахты'}</span>
+          <span className="mc-ore-label">{isGame ? `Баланс ${displayUnit}` : 'Баланс шахты'}</span>
           <div className="mc-ore-value">
-            <Gem size={20} /> {arFmt(status.ore)} <span className="mc-unit">АР</span>
+            <Gem size={20} /> {arFmt(displayBalance)} <span className="mc-unit">{displayUnit}</span>
           </div>
-          <span className="mc-ore-equivalent">{isGame ? 'Ставки и выигрыш — в АР' : '1 АР = 1 алмазная руда'}</span>
+          <span className="mc-ore-equivalent">
+            {isGame
+              ? (displayCurrency === 'ar' ? 'Ставка от 1 АР' : 'Ставка от 10 SV₽')
+              : '1 АР = 1 алмазная руда'}
+          </span>
         </div>
       </header>
+
+      {isGame && status.svEnabled && (
+        <div className="wl-currency-switch mc-currency-switch">
+          <span className="wl-currency-label">Играть на:</span>
+          <button
+            type="button"
+            className={`wl-round-btn ${activeCurrency === 'sv' ? 'active' : ''}`}
+            disabled={Boolean(round)}
+            onClick={() => setPlayCurrency?.('sv')}
+          >
+            SV₽ · {arFmt(svBal)}
+          </button>
+          <button
+            type="button"
+            className={`wl-round-btn ${activeCurrency === 'ar' ? 'active' : ''}`}
+            disabled={Boolean(round)}
+            onClick={() => setPlayCurrency?.('ar')}
+          >
+            АР · {arFmt(status.ore)}
+          </button>
+          {round && <span className="mc-currency-note">Текущий спуск — в {round.currency === 'ar' ? 'АР' : 'SV₽'}</span>}
+        </div>
+      )}
 
       {message && (
         <div className="mc-inline-msg">
@@ -397,7 +491,7 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
               <h2>Спуск в жилу</h2>
               <p>
                 Каждый шаг глубже — и множитель выше. Но порода может осыпаться.
-                Забери АР в любой момент.
+                Забери выигрыш в любой момент.
               </p>
             </div>
           </div>
@@ -408,14 +502,14 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
               <div>
                 {result.kind === 'bust'
                   ? <>Жила осыпалась на глубине {result.depth}. Ставка ушла в породу.</>
-                  : <>Ты забрал <b>{arFmt(result.payout)}</b> АР на глубине {result.depth} (x{result.mult.toFixed(2)}).</>}
+                  : <>Ты забрал <b>{arFmt(result.payout)}</b> {result.currency === 'ar' ? 'АР' : 'SV₽'} на глубине {result.depth} (x{result.mult.toFixed(2)}).</>}
               </div>
             </div>
           )}
 
           {!round ? (
             <>
-              <label className="mc-label" htmlFor="mc-stake">Ставка, АР</label>
+              <label className="mc-label" htmlFor="mc-stake">Ставка, {displayUnit}</label>
               <div className="mc-stake-row">
                 <input
                   id="mc-stake"
@@ -423,24 +517,24 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
                   inputMode="numeric"
                   value={stake}
                   onChange={e => setStake(e.target.value.replace(/[^\d]/g, ''))}
-                  placeholder="1"
+                  placeholder={displayCurrency === 'ar' ? '1' : '10'}
                 />
                 <button
                   className="wl-btn-orange mc-main-btn"
                   onClick={startDig}
-                  disabled={busy === 'start' || status.ore < 1}
+                  disabled={busy === 'start' || (displayCurrency === 'ar' ? status.ore < 1 : svBal < 10)}
                 >
                   {busy === 'start' ? <Loader2 size={16} className="mc-spin" /> : <Pickaxe size={16} />}
                   Начать спуск
                 </button>
               </div>
               <div className="mc-chips">
-                {[1, 5, 10, 25].map(value => (
+                {(displayCurrency === 'ar' ? [1, 5, 10, 25] : [10, 50, 100, 500]).map(value => (
                   <button key={value} className="mc-chip" onClick={() => setStake(String(value))}>
                     {value}
                   </button>
                 ))}
-                <button className="mc-chip" onClick={() => setStake(String(Math.floor(status.ore)))}>
+                <button className="mc-chip" onClick={() => setStake(String(Math.floor(displayCurrency === 'ar' ? status.ore : svBal)))}>
                   MAX
                 </button>
               </div>
@@ -448,10 +542,15 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
                 Шанс обвала на каждом шаге — {share?.bustPercent}%. Ставка списывается сразу.
                 Глубже {status.maxDepth} шагов крепь не пускает.
               </p>
-              {isGame && status.ore < 1 && onOpenLink && (
+              {isGame && displayCurrency === 'ar' && status.ore < 1 && onOpenLink && (
                 <p className="mc-fine mc-game-link">
                   АР на нуле.{' '}
                   <button type="button" className="mc-link-btn" onClick={onOpenLink}>Пополнить</button>
+                </p>
+              )}
+              {isGame && displayCurrency === 'sv' && svBal < 10 && (
+                <p className="mc-fine mc-game-link">
+                  SV₽ на нуле. Пополни баланс в «Моём счёте».
                 </p>
               )}
             </>
@@ -468,7 +567,7 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
                     <strong className="mc-cyan">x{round.mult.toFixed(2)}</strong>
                   </div>
                   <div className="mc-metric">
-                    <span>Заберёшь, АР</span>
+                    <span>Заберёшь, {round.currency === 'ar' ? 'АР' : 'SV₽'}</span>
                     <strong>{arFmt(potential)}</strong>
                   </div>
                 </div>
@@ -503,7 +602,7 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
                   disabled={busy === 'cash'}
                 >
                   {busy === 'cash' ? <Loader2 size={16} className="mc-spin" /> : <ArrowDownToLine size={16} />}
-                  Забрать {arFmt(potential)} АР
+                  Забрать {arFmt(potential)} {round.currency === 'ar' ? 'АР' : 'SV₽'}
                 </button>
               </div>
               <p className="mc-fine">
@@ -546,7 +645,6 @@ export default function MineView({ currentUser, notify, onNeedAuth, mode = 'game
                   Получи код на сайте и введи его на сервере — так мы поймём,
                   что Minecraft-ник твой.
                 </p>
-                {MC_SERVER && <div className="mc-server">Сервер: <code>{MC_SERVER}</code></div>}
                 {code && secondsLeft > 0 ? (
                   <div className="mc-code-box">
                     <span className="mc-code">{code.code}</span>

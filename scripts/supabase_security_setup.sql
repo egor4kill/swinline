@@ -4702,4 +4702,7 @@ DO $cron$ BEGIN
   END IF;
 END $cron$;
 
+-- 21. «Шахта» на SV₽: scripts/mc_dig_sv_migration.sql
+--     Отдельный идемпотентный файл — применить после основной схемы.
+
 NOTIFY pgrst, 'reload schema';
