@@ -104,6 +104,7 @@ function loadJSON<T>(key: string, fallback: T): T {
 
 import { fmt } from './fmt'
 import { useDocumentVisible } from './useDocumentVisible'
+import { useHashNav } from './useHashNav'
 import { PigLogo, UserAvatar, getTwitchAvatar } from './components/Avatars'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
@@ -252,6 +253,8 @@ export default function App() {
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
   const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'mine' | 'pick' | 'bonanza'>('crash')
+  // Глубокие ссылки: #/games/crash, #/wallet … + кнопка «назад»
+  useHashNav(view, setView, gamesTab, setGamesTab)
   const [playCurrency, setPlayCurrency] = useState<'sv' | 'ar'>('sv')
   const [arBalance, setArBalance] = useState(0)
   const [jackpotWin, setJackpotWin] = useState<number | null>(null)
