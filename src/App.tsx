@@ -90,6 +90,7 @@ const Blackjack = lazy(() => import('./Blackjack'))
 const MineView = lazy(() => import('./MineView'))
 const PickGame = lazy(() => import('./PickGame'))
 const BonanzaGame = lazy(() => import('./BonanzaGame'))
+import GameCards from './components/GameCards'
 const CrashArena = lazy(() => import('./components/games/CrashArena'))
 const RouletteWheel = lazy(() => import('./components/games/RouletteWheel'))
 const WHEEL_SEC_DEG = 360 / ROULETTE_SECTORS.length
@@ -1832,66 +1833,8 @@ export default function App() {
                   )}
                 </>
               )}
-              {/* Game Mode Switcher */}
-              <div className="wl-games-tabs">
-                <button
-                  className={`wl-round-btn ${gamesTab === 'crash' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('crash')}
-                >
-                  <Zap size={16} color="var(--org)" />
-                  <span style={{ fontWeight: 800 }}>Хряк-Крэш 24/7</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'roulette' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('roulette')}
-                >
-                  <Sparkles size={16} />
-                  <span>Корыто Фортуны</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'plinko' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('plinko')}
-                >
-                  <span>🐷 Пяточок-Плинко</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'puddles' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('puddles')}
-                >
-                  <span>🟤 Грязевые лужи</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'ruble' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('ruble')}
-                >
-                  <span>📉 Курс рубля</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'blackjack' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('blackjack')}
-                >
-                  <span>🃏 Хрякджек</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'pick' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('pick')}
-                >
-                  <span>⛏ Кирка</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'bonanza' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('bonanza')}
-                >
-                  <span>💎 Бонанза</span>
-                </button>
-                <button
-                  className={`wl-round-btn ${gamesTab === 'mine' ? 'active' : ''}`}
-                  onClick={() => setGamesTab('mine')}
-                >
-                  <Pickaxe size={16} />
-                  <span>Шахта</span>
-                </button>
-              </div>
+              {/* Game Cards — витрина в стиле казино-лобби */}
+              <GameCards gamesTab={gamesTab} setGamesTab={setGamesTab} />
 
               <Suspense fallback={<div className="wl-game-loading">Загрузка игры…</div>}>
               {/* CRASH GAME ARENA */}

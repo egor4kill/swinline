@@ -4886,3 +4886,285 @@ button:focus-visible, input:focus-visible {
     border-top: 1px solid var(--border);
   }
 }
+
+/* ============================================================
+   Витрина игр «Игры 24/7» — карточки в стиле казино-лобби.
+   Вся рисовка CSS/SVG: кривая краша, колесо, пеги, плитки,
+   карты, лава — без сторонних картинок.
+   ============================================================ */
+.game-cards-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  margin: 0 -20px 16px;
+  padding: 2px 20px 4px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.game-cards-row::-webkit-scrollbar {
+  display: none;
+}
+
+.game-card {
+  flex: 0 0 148px;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.game-card-art {
+  position: relative;
+  width: 148px;
+  height: 92px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  overflow: hidden;
+  display: block;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.game-card:hover .game-card-art {
+  transform: translateY(-2px);
+}
+
+.game-card.active .game-card-art {
+  border-color: var(--org);
+  box-shadow: 0 0 14px var(--org-glow);
+}
+
+.game-card-live {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--org);
+  box-shadow: 0 0 8px var(--org-glow);
+}
+
+.game-card-name {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-card-sub {
+  font-size: 10.5px;
+  color: var(--tx-muted);
+}
+
+.game-card.active .game-card-name {
+  color: var(--org);
+}
+
+/* --- элементы миниатюр --- */
+.gc-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.gc-star {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.6);
+}
+
+.gc-float {
+  position: absolute;
+  font-size: 21px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+.gc-float.gold {
+  font-family: var(--font-d);
+  font-size: 13px;
+  font-weight: 800;
+  color: #1c1002;
+  background: linear-gradient(160deg, #fbbf24, #b45309);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+.gc-big {
+  position: absolute;
+  bottom: 7px;
+  left: 8px;
+  right: 8px;
+  font-family: var(--font-d);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8), 0 0 10px rgba(255, 122, 26, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* колесо */
+.gc-wheel {
+  position: absolute;
+  right: -18px;
+  top: 50%;
+  transform: translateY(-42%);
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  background: conic-gradient(
+    #ff7a1a 0 45deg, #3a2410 45deg 90deg,
+    #ffc247 90deg 135deg, #3a2410 135deg 180deg,
+    #ff7a1a 180deg 225deg, #3a2410 225deg 270deg,
+    #ffc247 270deg 315deg, #3a2410 315deg 360deg
+  );
+  border: 3px solid #6b4a1d;
+  box-shadow: 0 0 14px rgba(255, 194, 71, 0.35), inset 0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+.gc-wheel::after {
+  content: '';
+  position: absolute;
+  inset: 30%;
+  border-radius: 50%;
+  background: #241505;
+  border: 2px solid #a8842f;
+}
+
+/* плинко: пеги */
+.gc-pegs {
+  position: absolute;
+  inset: 14px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.gc-peg-row {
+  display: flex;
+  gap: 7px;
+}
+
+.gc-peg-row b {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(147, 197, 253, 0.65);
+}
+
+/* лужи/кирка: плитки */
+.gc-tiles {
+  position: absolute;
+  inset: 12px 14px 26px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.gc-tiles.small {
+  grid-template-columns: repeat(2, 1fr);
+  inset: 14px 30px 22px;
+}
+
+.gc-tiles b {
+  border-radius: 4px;
+  background: rgba(90, 61, 22, 0.55);
+  border: 1px solid rgba(140, 100, 45, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.gc-tiles b.safe {
+  background: rgba(52, 199, 123, 0.35);
+  border-color: rgba(52, 199, 123, 0.6);
+}
+
+.gc-tiles b.boom {
+  background: rgba(239, 68, 68, 0.4);
+  border-color: rgba(239, 68, 68, 0.7);
+}
+
+/* карты хрякджека */
+.gc-card {
+  position: absolute;
+  width: 26px;
+  height: 36px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #fff, #e8e2d5);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-d);
+}
+
+.gc-card b {
+  font-size: 12px;
+  color: #1a1a1a;
+  line-height: 1;
+}
+
+.gc-card i {
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.gc-card-a {
+  left: 34px;
+  top: 16px;
+  transform: rotate(-10deg);
+}
+
+.gc-card-b {
+  left: 62px;
+  top: 22px;
+  transform: rotate(9deg);
+}
+
+.gc-card-b i { color: #c0392b; }
+
+/* лава шахты */
+.gc-lava {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 26%;
+  background: linear-gradient(180deg, rgba(255, 122, 26, 0.55), rgba(255, 68, 0, 0.75));
+  filter: blur(1px);
+}
+
+@media (max-width: 767px) {
+  .game-cards-row {
+    margin: 0 -12px 14px;
+    padding: 2px 12px 4px;
+  }
+  .game-card {
+    flex: 0 0 132px;
+  }
+  .game-card-art {
+    width: 132px;
+    height: 82px;
+  }
+}
