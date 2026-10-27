@@ -279,13 +279,6 @@ export default function App() {
   const [msg, setMsg] = useState('')
   const busy = useRef(false)
 
-  // 5. Esports stream
-  const [streamPlaying, setStreamPlaying] = useState(true)
-  const [chatMessages, setChatMessages] = useState<string[]>([
-    'Чат матча активен. Соблюдайте правила общения!'
-  ])
-  const [esportsChatInput, setEsportsChatInput] = useState('')
-
   // 6. Games 24/7 Roulette State
   const [spinning, setSpinning] = useState(false)
   const [wheelRotation, setWheelRotation] = useState(0)
@@ -1989,16 +1982,20 @@ export default function App() {
             </div>
           )}
 
-          {/* C. ESPORTS STREAM VIEW */}
+          {/* C. ESPORTS: Twitch-каналы + ставки на Кибер-Хряк */}
           {view === 'esports' && (
             <EsportsView
-              streamPlaying={streamPlaying}
-              setStreamPlaying={setStreamPlaying}
-              chatMessages={chatMessages}
-              setChatMessages={setChatMessages}
-              esportsChatInput={esportsChatInput}
-              setEsportsChatInput={setEsportsChatInput}
               currentUser={currentUser}
+              isAdmin={isAdmin}
+              allEvents={allEvents}
+              S={S}
+              selectedBet={selectedBet}
+              selectOdd={selectOdd}
+              onOpenCreateMatch={() => {
+                setNewMatchCat(4)
+                setCreateMatchModalOpen(true)
+              }}
+              notify={notify}
             />
           )}
 

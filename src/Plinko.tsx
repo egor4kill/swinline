@@ -148,7 +148,7 @@ export default function Plinko({ bal, unit, onBet }: Props) {
         <button className="wl-round-btn" onClick={() => setStake(String(Math.max(minBet, Math.floor(bal))))}>Всё</button>
         <button className="wl-btn-orange" style={{ minHeight: 46, padding: '0 22px', fontWeight: 800, opacity: busy ? 0.6 : 1 }} onClick={launch}>{busy ? 'Бросок…' : 'Бросить Пяточка'}</button>
       </div>
-      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Выплата = ставка × икс ячейки (решает сервер). Сейчас на балансе {money(r2(bal))}.</p>
+      <p style={{ color: 'var(--tx-secondary)', fontSize: 12, marginTop: 10 }}>Выплата = ставка × икс ячейки. Сейчас на балансе {money(r2(bal))}.</p>
     </div>
   )
 }

@@ -436,11 +436,6 @@ export default function MineView({
                 : <>Спускайся в жилу и забирай <b>АР</b> на любой глубине: каждый шаг повышает множитель, но порода может осыпаться.</>)
               : <>Привязка Minecraft-аккаунта, занос и вывод <b>АР</b>. 1 алмазная руда = 1 АР. Код привязки выдаётся здесь и вводится в игре.</>}
           </p>
-          {!isGame && onPlay && (
-            <button type="button" className="wl-btn-orange mc-play-btn" onClick={onPlay}>
-              <Pickaxe size={16} /> Играть в «Шахту»
-            </button>
-          )}
         </div>
         <div className="mc-ore-hero">
           <span className="mc-ore-label">{isGame ? `Баланс ${displayUnit}` : 'Баланс шахты'}</span>

@@ -4798,3 +4798,91 @@ button:focus-visible, input:focus-visible {
     animation: none;
   }
 }
+
+/* ============================================================
+   Киберспорт: Twitch-плеер и чат
+   ============================================================ */
+.es-stream-wrap {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto 14px;
+  background: #0b0e15;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.es-stream-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: #141822;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.es-stream-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #ff6b6b;
+}
+
+.es-stream-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.es-chat-toggle {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.es-stream-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.es-stream-grid.with-chat {
+  grid-template-columns: minmax(0, 1fr) 260px;
+}
+
+.es-twitch-player {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: none;
+  display: block;
+  background: #000;
+}
+
+.es-twitch-chat {
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  border: none;
+  border-left: 1px solid var(--border);
+  display: block;
+  background: #0e1117;
+}
+
+@media (max-width: 760px) {
+  .es-stream-grid.with-chat {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .es-twitch-chat {
+    height: 260px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
