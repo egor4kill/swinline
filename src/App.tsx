@@ -88,6 +88,7 @@ const MudPuddles = lazy(() => import('./MudPuddles'))
 const RubleChart = lazy(() => import('./RubleChart'))
 const Blackjack = lazy(() => import('./Blackjack'))
 const MineView = lazy(() => import('./MineView'))
+const PickGame = lazy(() => import('./PickGame'))
 const CrashArena = lazy(() => import('./components/games/CrashArena'))
 const RouletteWheel = lazy(() => import('./components/games/RouletteWheel'))
 const WHEEL_SEC_DEG = 360 / ROULETTE_SECTORS.length
@@ -248,7 +249,7 @@ export default function App() {
 
   // 3. Navigation & Views
   const [view, setView] = useState('line') // line | live | esports | games24 | wallet | promos | results | about
-  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'mine'>('crash')
+  const [gamesTab, setGamesTab] = useState<'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'mine' | 'pick'>('crash')
   const [playCurrency, setPlayCurrency] = useState<'sv' | 'ar'>('sv')
   const [arBalance, setArBalance] = useState(0)
   const [jackpotWin, setJackpotWin] = useState<number | null>(null)
@@ -1241,6 +1242,55 @@ export default function App() {
     })
   }
 
+  // «Кирка»: ставка/ход/вывод решает сервер, клиент рисует башню и падение кирки
+  const pickStart = async (stake: number): Promise<string | null> => {
+    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
+    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
+    const cur = playCurrency
+    const s = cur === 'ar' ? Math.floor(stake) : stake
+    const { data, error } = await supabase.rpc('pick_start', { p_stake: s, p_currency: cur })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось начать спуск'}`); return null }
+    const jp = Number(data.jackpot || 0)
+    const realCur = (data.currency === 'ar' ? 'ar' : cur) as 'sv' | 'ar'
+    if (realCur === 'ar') {
+      setArBalance(Number(data.bal))
+    } else {
+      setS(prev => {
+        const next = structuredClone(prev)
+        next.log.unshift({ t: Date.now(), x: 'Ставка в «Кирке»', d: -s })
+        if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
+        next.bal = Number(data.bal)
+        return next
+      })
+    }
+    if (jp > 0) setJackpotWin(jp)
+    return String(data.round_id)
+  }
+
+  const pickPick = async (roundId: string, col: number) => {
+    const { data, error } = await supabase.rpc('pick_pick', { p_round: roundId, p_col: col })
+    if (error || !data) { notify(`❌ ${error?.message || 'Ошибка удара'}`); return null }
+    return data
+  }
+
+  const pickCash = async (roundId: string) => {
+    const { data, error } = await supabase.rpc('pick_cash', { p_round: roundId })
+    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось забрать'}`); return null }
+    return data
+  }
+
+  const pickRestore = async (): Promise<{ roundId: string; stake: number; row: number; currency: 'sv' | 'ar' } | null> => {
+    if (!currentUser) return null
+    const { data, error } = await supabase.rpc('pick_restore')
+    if (error || !data || !data.round_id) return null
+    return {
+      roundId: String(data.round_id),
+      stake: Number(data.stake),
+      row: Number(data.row),
+      currency: (data.currency === 'ar' ? 'ar' : 'sv') as 'sv' | 'ar'
+    }
+  }
+
   // Курс рубля: путь курса, исход и выплата решает сервер в момент ставки
   const rublePredict = async (side: 'up' | 'down', stake: number): Promise<RubleResult | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
@@ -1802,6 +1852,12 @@ export default function App() {
                   <span>🃏 Хрякджек</span>
                 </button>
                 <button
+                  className={`wl-round-btn ${gamesTab === 'pick' ? 'active' : ''}`}
+                  onClick={() => setGamesTab('pick')}
+                >
+                  <span>⛏ Кирка</span>
+                </button>
+                <button
                   className={`wl-round-btn ${gamesTab === 'mine' ? 'active' : ''}`}
                   onClick={() => setGamesTab('mine')}
                 >
@@ -1838,6 +1894,18 @@ export default function App() {
               {gamesTab === 'puddles' && <MudPuddles bal={playCurrency === 'ar' ? arBalance : S.bal} unit={unitOf(playCurrency)} onStart={puddlesStart} onPick={puddlesPick} onCash={puddlesCash} onRestore={puddlesRestore} />}
               {gamesTab === 'ruble' && <RubleChart bal={playCurrency === 'ar' ? arBalance : S.bal} unit={unitOf(playCurrency)} onPredict={rublePredict} />}
               {gamesTab === 'blackjack' && <Blackjack bal={playCurrency === 'ar' ? arBalance : S.bal} currency={playCurrency} unit={unitOf(playCurrency)} onBal={bjBal} notify={notify} onNeedAuth={() => setAuthModalOpen(true)} />}
+              {gamesTab === 'pick' && (
+                <PickGame
+                  bal={playCurrency === 'ar' ? arBalance : S.bal}
+                  unit={unitOf(playCurrency)}
+                  currency={playCurrency}
+                  onStart={pickStart}
+                  onPick={pickPick}
+                  onCash={pickCash}
+                  onRestore={pickRestore}
+                  onBal={bjBal}
+                />
+              )}
               {gamesTab === 'mine' && (
                 <MineView
                   mode="game"
