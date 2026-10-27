@@ -251,7 +251,7 @@ export default function PickGame({ bal, unit, currency, onStart, onPick, onCash,
 
       {notice && <p className="pick-notice">{notice}</p>}
       <p className="pick-fine">
-        В каждом ряду 1 из 3 блоков — динамит. Множитель ряда i = 1.5^i × 0.97 (теоретический возврат ~97%).
+        В каждом ряду 1 из 3 блоков — динамит. Каждый пройденный ряд повышает множитель.
       </p>
     </div>
   )

@@ -232,7 +232,7 @@ export default function BonanzaGame({ currentUser, bal, unit, currency, onSpin, 
       {error && <p className="pick-notice" style={{ color: '#ff8f8f' }}>{error}</p>}
       <p className="pick-fine">
         Собери 3+ символа на соседних барабанах слева направо. Каждая победа взрывает блоки —
-        новые падают сверху. G·O·L·D — фриспины с безлимитным множителем. RTP ~97%.
+        новые падают сверху. G·O·L·D — фриспины с безлимитным множителем.
       </p>
     </div>
   )
