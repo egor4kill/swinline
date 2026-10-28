@@ -16,7 +16,10 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
@@ -46,6 +49,7 @@ import java.util.concurrent.TimeUnit;
  * 1. Шахта: занос алмазной руды (/sw deposit) в валюту АР и вывод.
  * 2. Апгрейдер: занос любых предметов из руки (/up deposit) в инвентарь Апгрейдера
  *    на сайте и вывод выигранных наград (/up withdraw).
+ * 3. World Discovery: автоматическое обнаружение предметов, когда игроки берут/подбирают их.
  */
 public final class SwinlineMinePlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
 
@@ -62,6 +66,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
     private final Set<UUID> linked = ConcurrentHashMap.newKeySet();
     private final Set<UUID> syncInFlight = ConcurrentHashMap.newKeySet();
     private final Set<String> depositInFlight = ConcurrentHashMap.newKeySet();
+    private final Set<String> discoveredCache = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> lastLinkAttempt = new ConcurrentHashMap<>();
     private final Map<String, PendingDeposit> pendingDeposits = new ConcurrentHashMap<>();
     private final Map<UUID, Refund> refunds = new ConcurrentHashMap<>();
@@ -100,16 +105,19 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
 
         if (!isConfigured()) {
             getLogger().warning("service-key не заполнен. Вставь ключ в plugins/SwinlineMine/config.yml и перезапусти сервер.");
+        } else {
+            preloadDiscoveredItems();
         }
 
         pollTaskId = getServer().getScheduler().runTaskTimerAsynchronously(
                 this, this::poll, 20L * 5, 20L * Math.max(5, pollSeconds)).getTaskId();
 
         for (Player player : Bukkit.getOnlinePlayers()) {
+            scanPlayerInventory(player);
             syncPlayer(player, false, autoDeliver);
         }
 
-        getLogger().info("SwinlineMine 1.1.0 включён. Сайт: " + (siteUrl.isEmpty() ? "не настроен" : siteUrl));
+        getLogger().info("SwinlineMine 1.2.0 включён. Сайт: " + (siteUrl.isEmpty() ? "не настроен" : siteUrl));
     }
 
     @Override
@@ -231,12 +239,29 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
     }
 
     // ------------------------------------------------------------------
-    // События
+    // События (включая автоматическое World Discovery)
     // ------------------------------------------------------------------
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPickup(EntityPickupItemEvent event) {
+        if (event.getEntity() instanceof Player player) {
+            checkAndDiscover(player, event.getItem().getItemStack());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            checkAndDiscover(player, event.getCurrentItem());
+            checkAndDiscover(player, event.getCursor());
+        }
+    }
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
+        scanPlayerInventory(player);
+
         Refund refund = refunds.remove(player.getUniqueId());
         if (refund != null) {
             savePending();
@@ -256,6 +281,52 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         UUID playerId = event.getPlayer().getUniqueId();
         linked.remove(playerId);
         lastLinkAttempt.remove(playerId);
+    }
+
+    // ------------------------------------------------------------------
+    // World Discovery логика
+    // ------------------------------------------------------------------
+
+    private void preloadDiscoveredItems() {
+        if (!isConfigured()) return;
+        async(() -> {
+            try {
+                JsonElement res = rpcElement("get_server_discovered_items", new JsonObject());
+                if (res.isJsonArray()) {
+                    for (JsonElement item : res.getAsJsonArray()) {
+                        discoveredCache.add(item.getAsString().toLowerCase(Locale.ROOT));
+                    }
+                    getLogger().info("[World Discovery] Загружено " + discoveredCache.size() + " открытых предметов из базы.");
+                }
+            } catch (Exception ex) {
+                getLogger().warning("[World Discovery] Не удалось предзагрузить открытые предметы: " + ex.getMessage());
+            }
+        });
+    }
+
+    private void scanPlayerInventory(Player player) {
+        if (player == null || !player.isOnline()) return;
+        for (ItemStack stack : player.getInventory().getContents()) {
+            checkAndDiscover(player, stack);
+        }
+    }
+
+    private void checkAndDiscover(Player player, ItemStack item) {
+        if (item == null || item.getType() == Material.AIR) return;
+        String id = item.getType().name().toLowerCase(Locale.ROOT);
+        if (discoveredCache.add(id)) {
+            async(() -> {
+                try {
+                    JsonObject params = new JsonObject();
+                    params.addProperty("p_id", id);
+                    params.addProperty("p_player", player != null ? player.getName() : "Сервер");
+                    rpcElement("server_discover_item", params);
+                    getLogger().info("[World Discovery] " + (player != null ? player.getName() : "Сервер") + " открыл новый предмет: " + id);
+                } catch (Exception ex) {
+                    discoveredCache.remove(id);
+                }
+            });
+        }
     }
 
     // ------------------------------------------------------------------
@@ -385,6 +456,12 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 }
                 upgraderBalance(player);
             }
+            case "sync", "scan", "открыть" -> {
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    scanPlayerInventory(p);
+                }
+                sender.sendMessage(UP_PREFIX + "§aИнвентари игроков просканированы. Открыто уникальных предметов: §e" + discoveredCache.size());
+            }
             default -> sender.sendMessage(UP_PREFIX + "§cНеизвестная подкоманда. Используйте §e/up help");
         }
         return true;
@@ -396,6 +473,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         sender.sendMessage("§e/up withdraw §7— забрать выведенные с сайта предметы в инвентарь");
         sender.sendMessage("§e/up balance §7(или /up inv) — посмотреть предметы в инвентаре на сайте");
         sender.sendMessage("§e/up link <код> §7— привязать аккаунт сайта (код на сайте в разделе Профиль или Шахта)");
+        sender.sendMessage("§e/up sync §7— обновить список открытых сервером предметов прямо сейчас");
     }
 
     private void upgraderDeposit(Player player, String rawAmount) {
@@ -773,6 +851,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             sendDeposit(pending);
         }
         for (Player player : Bukkit.getOnlinePlayers()) {
+            scanPlayerInventory(player);
             if (linked.contains(player.getUniqueId())) {
                 syncPlayer(player, false, autoDeliver);
                 if (autoDeliver) {
@@ -1092,7 +1171,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         String cmd = command.getName().toLowerCase(Locale.ROOT);
         if (cmd.equals("up") || cmd.equals("upgrader") || cmd.equals("upgrade") || alias.equalsIgnoreCase("up")) {
             if (args.length == 1) {
-                return filter(List.of("deposit", "withdraw", "balance", "link", "help"), args[0]);
+                return filter(List.of("deposit", "withdraw", "balance", "sync", "link", "help"), args[0]);
             }
             if (args.length == 2 && (args[0].equalsIgnoreCase("deposit") || args[0].equalsIgnoreCase("dep"))) {
                 return filter(List.of("1", "all"), args[1]);
@@ -1107,7 +1186,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             return filter(List.of("all"), args[1]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("up")) {
-            return filter(List.of("deposit", "withdraw", "balance", "link", "help"), args[1]);
+            return filter(List.of("deposit", "withdraw", "balance", "sync", "link", "help"), args[1]);
         }
         return List.of();
     }
