@@ -1,4 +1,4 @@
-import { catalog } from './core.js?v=8';
+import { catalog } from './core.js?v=9';
 
 /**
  * Адаптер Upgrader-а к сайту: операции идут через Supabase RPC.
@@ -68,6 +68,15 @@ export class SiteAdapter {
       p_slot: slot,
     });
     if (error) throw new Error(error.message || 'Не удалось вывести предмет');
+    return data;
+  }
+
+  async withdrawAll(itemId) {
+    const { data, error } = await this.rpc('upgrader_withdraw_all', {
+      p_item_id: itemId,
+    });
+    if (error) throw new Error(error.message || 'Не удалось вывести предметы');
+    if (!data) throw new Error('Сервер не вернул результат');
     return data;
   }
 
