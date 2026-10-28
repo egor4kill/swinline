@@ -92,6 +92,7 @@
      if(!engine.state.board)engine.state.board=E.newBoard(engine.rng);
      visualBalance=engine.state.balance;
      displayBonus=engine.state.free>0;window.desiredBonus=displayBonus;
+     window.setBonusScene?.(displayBonus);
      ready=true;renderBets();renderBoard(engine.state.board);ui();
      if(B.onCurrency)B.onCurrency(engine.state.currency);
      if(B.onBalance)B.onBalance(engine.state.currency,engine.state.balance/100);
