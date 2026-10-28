@@ -1,4 +1,4 @@
-import { catalog } from './core.js?v=2';
+import { catalog } from './core.js?v=5';
 
 /**
  * Адаптер Upgrader-а к сайту: все операции идут через Supabase RPC.
@@ -15,7 +15,7 @@ export class SiteAdapter {
     if (!data) throw new Error('Сервер не вернул инвентарь');
     return {
       catalog,
-      discovered: Array.isArray(data.discovered) ? data.discovered : null,
+      discovered: Array.isArray(data.discovered) ? data.discovered : [],
       inventory: Array.isArray(data.inventory) ? data.inventory : [],
       history: Array.isArray(data.history) ? data.history : [],
       mode: 'server',

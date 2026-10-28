@@ -19,7 +19,7 @@ type UpgraderElement = HTMLElement & {
 }
 
 const BASE = import.meta.env.BASE_URL || '/'
-const UPGRADER_VERSION = '2'
+const UPGRADER_VERSION = '5'
 const MODULE_URL = `${BASE}upgrader/upgrader.js?v=${UPGRADER_VERSION}`
 const ADAPTER_URL = `${BASE}upgrader/site-adapter.js?v=${UPGRADER_VERSION}`
 

@@ -1,5 +1,5 @@
-import {catalog as defaults,valueOf,chance,formatChance} from './core.js?v=2';
-import {DemoAdapter} from './adapters.js?v=2';
+import {catalog as defaults,valueOf,chance,formatChance} from './core.js?v=5';
+import {DemoAdapter} from './adapters.js?v=5';
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:n>0&&n<1?4:1}).format(n);
 const asset=path=>new URL(path,import.meta.url).href;
@@ -8,10 +8,31 @@ const categories=[['all','Все предметы'],['blocks','Блоки'],['ma
 function icon(item,size=64){return item?`<img class="item-image" src="${esc(asset(item.image||`assets/items/${item.id}.png`))}" width="${size}" height="${size}" alt="" draggable="false" loading="lazy">`:'';}
 
 class MinecraftUpgrader extends HTMLElement{
- constructor(){super();this.attachShadow({mode:'open'});this._adapter=new DemoAdapter();Object.assign(this,{stake:'s1',target:'diamond_sword',stakeCount:1,targetCount:1,query:'',filter:'all',page:0,pageSize:40,sort:'popular',min:'',max:'',busy:false,fast:false,motion:true,message:'Выберите ставку слева и желаемый предмет справа.',angle:0});}
+ constructor(){super();this.attachShadow({mode:'open'});this._adapter=new DemoAdapter();Object.assign(this,{stake:'s1',target:'iron_pickaxe',stakeCount:1,targetCount:1,query:'',filter:'all',page:0,pageSize:40,sort:'popular',min:'',max:'',busy:false,fast:false,motion:true,message:'Выберите ставку слева и желаемый предмет справа.',angle:0});}
  set adapter(value){this._adapter=value;if(this.isConnected)this.load();} get adapter(){return this._adapter;}
  connectedCallback(){if(this.initialized)return;this.initialized=true;this.shadowRoot.innerHTML=`<link rel="stylesheet" href="${asset('./upgrader.css')}"><div class="app-view"><p class="loading">Загружаем инвентарь…</p></div>`;this.view=this.shadowRoot.querySelector('.app-view');this.load();}
- async load(){if(this.busy)return;try{const data=await this.adapter.bootstrap();this.allItems=data.catalog||defaults;this.discovered=Array.isArray(data.discovered)?new Set(data.discovered):null;this.items=this.discovered?this.allItems.filter(i=>this.discovered.has(i.id)):this.allItems;if(!this.items.length)this.items=this.allItems;this.byId=new Map(this.allItems.map(i=>[i.id,i]));this.inventory=data.inventory;this.history=data.history||[];this.mode=data.mode||'server';if(!this.items.length)throw Error('Каталог наград пока пуст.');if(!this.items.some(i=>i.id===this.target))this.target=this.items[0]?.id;if(!this.inventory.some(i=>i.slot===this.stake))this.stake=this.inventory[0]?.slot;this.render();}catch(e){this.view.innerHTML=`<p role="alert">${esc(e.message)}</p><button id="retry">Загрузить снова</button>`;this.view.querySelector('#retry').onclick=()=>this.load();}}
+ async load(){
+   if(this.busy)return;
+   try{
+     const data=await this.adapter.bootstrap();
+     this.allItems=data.catalog||defaults;
+     const discList=Array.isArray(data.discovered)?data.discovered:['dirt','cobblestone','stone','sand','gravel','oak_log','oak_planks','stick','coal','iron_ingot','crafting_table'];
+     const discSet=new Set(discList);
+     // СТРОГО скрываем всё, что ещё не открыто игроками на сервере
+     this.items=this.allItems.filter(i=>discSet.has(i.id));
+     this.byId=new Map(this.allItems.map(i=>[i.id,i]));
+     this.inventory=data.inventory||[];
+     this.history=data.history||[];
+     this.mode=data.mode||'server';
+     if(!this.items.length)throw Error('Каталог наград пуст: на сервере ещё не открыты предметы.');
+     if(!this.items.some(i=>i.id===this.target))this.target=this.items[0]?.id;
+     if(!this.inventory.some(i=>i.slot===this.stake))this.stake=this.inventory[0]?.slot;
+     this.render();
+   }catch(e){
+     this.view.innerHTML=`<p role="alert">${esc(e.message)}</p><button id="retry">Загрузить снова</button>`;
+     this.view.querySelector('#retry').onclick=()=>this.load();
+   }
+ }
  item(id){return this.byId.get(id);}
  value(id){const item=this.item(id);return item?.value??valueOf(id,this.allItems);}
  odds(){const s=this.inventory.find(i=>i.slot===this.stake);return s?chance(this.value(s.id)*(s.durability??1),this.value(this.target)):0;}
