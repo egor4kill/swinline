@@ -722,34 +722,6 @@ export default function App() {
     })
   }
 
-  // Бесплатное начисление: для вошедших — через сервер (кулдаун и лимит проверяет БД),
-  // для гостей — локальный демо-баланс (тратить его всё равно нельзя)
-  const addVirtualMoney = async (amount: number = 5000) => {
-    if (S.bal >= 100000) {
-      notify('Баланс уже превышает 100 000 SV₽! Дополнительное начисление не требуется.')
-      return
-    }
-    if (!currentUser) {
-      mutate(s => {
-        s.bal = r2(s.bal + amount)
-        s.log.unshift({ t: Date.now(), x: `Пополнение ${fmt(amount)}`, d: amount })
-      }, `+${fmt(amount)} зачислено на баланс! 🎉`)
-      return
-    }
-    const { data, error } = await supabase.rpc('self_add_free', { p_amount: amount })
-    if (error || !data) {
-      notify(`❌ ${error?.message || 'Не удалось начислить'}`)
-      return
-    }
-    setS(prev => {
-      const next = structuredClone(prev)
-      next.log.unshift({ t: Date.now(), x: `Пополнение ${fmt(amount)}`, d: amount })
-      next.bal = Number(data.bal)
-      return next
-    })
-    notify(`+${fmt(amount)} зачислено на баланс! 🎉`)
-  }
-
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     setFavorites(prev => ({ ...prev, [id]: !prev[id] }))
@@ -1769,7 +1741,6 @@ export default function App() {
         daily={daily}
         onOpenAdminCenter={() => { setAdminTab('users'); setAdminModalOpen(true) }}
         onOpenProfile={() => setProfileModalOpen(true)}
-        onAddMoney={() => addVirtualMoney(5000)}
         onLogout={handleLogout}
         onOAuthLogin={handleOAuthLogin}
       />
@@ -1999,7 +1970,6 @@ export default function App() {
               S={S}
               allEvents={allEvents}
               currentUser={currentUser}
-              addVirtualMoney={addVirtualMoney}
               claimCashback={claimCashback}
               onResetAll={handleResetAll}
             />
@@ -2058,7 +2028,7 @@ export default function App() {
       />
       <BetSlip {...{ S, activeBetsCount, allEvents, err, handlePlaceBet, isStakeValid, potentialPayout, selectedBet, setErr, setSelectedBet, setSlipOpen, setSlipTab, setStake, slipOpen, slipTab, stake, playCurrency, setPlayCurrency, arBalance, currentUser, onNeedAuth: () => setAuthModalOpen(true) }} />
       <ProfileModal {...{ S, currentUser, handleLogout, isAdmin, myStats, profileModalOpen, setProfileModalOpen }} />
-      <AdminModal {...{ CATS, S, accounts, addVirtualMoney, adminModalOpen, adminTab, allEvents, applyTemplate, currentUser, fetchSupabaseUsers, freshState, handleAdminDeleteUser, handleAdminPurgeEmpty, handleAdminReset, handleAdminToggleBlock, handleAdminTopUp, handleCancelEventAction, handleClearAllEvents, handleCreateMatch, handleSettleEventAction, handleToggleEventClosedAction, isAdmin, newMatchCat, newMatchIsLive, newMatchLeague, newMatchOdds1, newMatchOdds2, newMatchOddsX, newMatchScore, newMatchTeam1, newMatchTeam2, newMatchTime, newMatchTitle, notify, setAdminModalOpen, setAdminTab, setCreateMatchModalOpen, setDeleteEventModal, setEditEventModal, setEditIsLive, setEditLiveTime, setEditScore, setInspectingUser, setNewMatchCat, setNewMatchIsLive, setNewMatchLeague, setNewMatchOdds1, setNewMatchOdds2, setNewMatchOddsX, setNewMatchScore, setNewMatchTeam1, setNewMatchTeam2, setNewMatchTime, setNewMatchTitle, setS, setSelectedBet }} />
+      <AdminModal {...{ CATS, S, accounts, adminModalOpen, adminTab, allEvents, applyTemplate, currentUser, fetchSupabaseUsers, freshState, handleAdminDeleteUser, handleAdminPurgeEmpty, handleAdminReset, handleAdminToggleBlock, handleAdminTopUp, handleCancelEventAction, handleClearAllEvents, handleCreateMatch, handleSettleEventAction, handleToggleEventClosedAction, isAdmin, newMatchCat, newMatchIsLive, newMatchLeague, newMatchOdds1, newMatchOdds2, newMatchOddsX, newMatchScore, newMatchTeam1, newMatchTeam2, newMatchTime, newMatchTitle, notify, setAdminModalOpen, setAdminTab, setCreateMatchModalOpen, setDeleteEventModal, setEditEventModal, setEditIsLive, setEditLiveTime, setEditScore, setInspectingUser, setNewMatchCat, setNewMatchIsLive, setNewMatchLeague, setNewMatchOdds1, setNewMatchOdds2, setNewMatchOddsX, setNewMatchScore, setNewMatchTeam1, setNewMatchTeam2, setNewMatchTime, setNewMatchTitle, setS, setSelectedBet }} />
       <AuthModal {...{ authModalOpen, handleOAuthLogin, setAuthModalOpen }} />
       <InspectUserModal {...{ allEvents, inspectingUser, setInspectingUser }} />
       <DeleteEventModal {...{ deleteEventModal, handleDeleteEventConfirmed, setDeleteEventModal }} />

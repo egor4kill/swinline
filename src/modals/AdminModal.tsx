@@ -61,10 +61,10 @@ import ceoPhoto from '../assets/ceo.jpg'
 import { fmt } from '../fmt'
 import { PigLogo, UserAvatar, getTwitchAvatar } from '../components/Avatars'
 
-type Props = { CATS: any; S: any; accounts: any; addVirtualMoney: any; adminModalOpen: any; adminTab: any; allEvents: any; applyTemplate: any; currentUser: any; fetchSupabaseUsers: any; freshState: any; handleAdminDeleteUser: any; handleAdminPurgeEmpty: any; handleAdminReset: any; handleAdminToggleBlock: any; handleAdminTopUp: any; handleCancelEventAction: any; handleClearAllEvents: any; handleCreateMatch: any; handleSettleEventAction: any; handleToggleEventClosedAction: any; isAdmin: any; newMatchCat: any; newMatchIsLive: any; newMatchLeague: any; newMatchOdds1: any; newMatchOdds2: any; newMatchOddsX: any; newMatchScore: any; newMatchTeam1: any; newMatchTeam2: any; newMatchTime: any; newMatchTitle: any; notify: any; setAdminModalOpen: any; setAdminTab: any; setCreateMatchModalOpen: any; setDeleteEventModal: any; setEditEventModal: any; setEditIsLive: any; setEditLiveTime: any; setEditScore: any; setInspectingUser: any; setNewMatchCat: any; setNewMatchIsLive: any; setNewMatchLeague: any; setNewMatchOdds1: any; setNewMatchOdds2: any; setNewMatchOddsX: any; setNewMatchScore: any; setNewMatchTeam1: any; setNewMatchTeam2: any; setNewMatchTime: any; setNewMatchTitle: any; setS: any; setSelectedBet: any }
+type Props = { CATS: any; S: any; accounts: any; adminModalOpen: any; adminTab: any; allEvents: any; applyTemplate: any; currentUser: any; fetchSupabaseUsers: any; freshState: any; handleAdminDeleteUser: any; handleAdminPurgeEmpty: any; handleAdminReset: any; handleAdminToggleBlock: any; handleAdminTopUp: any; handleCancelEventAction: any; handleClearAllEvents: any; handleCreateMatch: any; handleSettleEventAction: any; handleToggleEventClosedAction: any; isAdmin: any; newMatchCat: any; newMatchIsLive: any; newMatchLeague: any; newMatchOdds1: any; newMatchOdds2: any; newMatchOddsX: any; newMatchScore: any; newMatchTeam1: any; newMatchTeam2: any; newMatchTime: any; newMatchTitle: any; notify: any; setAdminModalOpen: any; setAdminTab: any; setCreateMatchModalOpen: any; setDeleteEventModal: any; setEditEventModal: any; setEditIsLive: any; setEditLiveTime: any; setEditScore: any; setInspectingUser: any; setNewMatchCat: any; setNewMatchIsLive: any; setNewMatchLeague: any; setNewMatchOdds1: any; setNewMatchOdds2: any; setNewMatchOddsX: any; setNewMatchScore: any; setNewMatchTeam1: any; setNewMatchTeam2: any; setNewMatchTime: any; setNewMatchTitle: any; setS: any; setSelectedBet: any }
 
 export default function AdminModal(props: Props) {
-  const { CATS, S, accounts, addVirtualMoney, adminModalOpen, adminTab, allEvents, applyTemplate, currentUser, fetchSupabaseUsers, freshState, handleAdminDeleteUser, handleAdminPurgeEmpty, handleAdminReset, handleAdminToggleBlock, handleAdminTopUp, handleCancelEventAction, handleClearAllEvents, handleCreateMatch, handleSettleEventAction, handleToggleEventClosedAction, isAdmin, newMatchCat, newMatchIsLive, newMatchLeague, newMatchOdds1, newMatchOdds2, newMatchOddsX, newMatchScore, newMatchTeam1, newMatchTeam2, newMatchTime, newMatchTitle, notify, setAdminModalOpen, setAdminTab, setCreateMatchModalOpen, setDeleteEventModal, setEditEventModal, setEditIsLive, setEditLiveTime, setEditScore, setInspectingUser, setNewMatchCat, setNewMatchIsLive, setNewMatchLeague, setNewMatchOdds1, setNewMatchOdds2, setNewMatchOddsX, setNewMatchScore, setNewMatchTeam1, setNewMatchTeam2, setNewMatchTime, setNewMatchTitle, setS, setSelectedBet } = props
+  const { CATS, S, accounts, adminModalOpen, adminTab, allEvents, applyTemplate, currentUser, fetchSupabaseUsers, freshState, handleAdminDeleteUser, handleAdminPurgeEmpty, handleAdminReset, handleAdminToggleBlock, handleAdminTopUp, handleCancelEventAction, handleClearAllEvents, handleCreateMatch, handleSettleEventAction, handleToggleEventClosedAction, isAdmin, newMatchCat, newMatchIsLive, newMatchLeague, newMatchOdds1, newMatchOdds2, newMatchOddsX, newMatchScore, newMatchTeam1, newMatchTeam2, newMatchTime, newMatchTitle, notify, setAdminModalOpen, setAdminTab, setCreateMatchModalOpen, setDeleteEventModal, setEditEventModal, setEditIsLive, setEditLiveTime, setEditScore, setInspectingUser, setNewMatchCat, setNewMatchIsLive, setNewMatchLeague, setNewMatchOdds1, setNewMatchOdds2, setNewMatchOddsX, setNewMatchScore, setNewMatchTeam1, setNewMatchTeam2, setNewMatchTime, setNewMatchTitle, setS, setSelectedBet } = props
   return (
     <>
 {/* 6. ADMIN DASHBOARD MODAL */}
@@ -507,27 +507,10 @@ export default function AdminModal(props: Props) {
               Управление кассой и балансами:
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
-              <button
-                className="wl-btn-orange"
-                onClick={() => addVirtualMoney(50000)}
-              >
-                + 50 000 SV₽
-              </button>
-              <button
-                className="wl-btn-orange"
-                style={{ background: '#3b82f6' }}
-                onClick={() => addVirtualMoney(250000)}
-              >
-                + 250 000 SV₽
-              </button>
-              <button
-                className="wl-btn-green"
-                onClick={() => addVirtualMoney(1000000)}
-              >
-                + 1 000 000 SV₽
-              </button>
-            </div>
+            <p style={{ fontSize: 13, color: 'var(--tx-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+              Бесплатное пополнение отключено. Начислить конкретному игроку можно
+              через «Слежка за игроками» → «Начислить».
+            </p>
 
             <button
               className="wl-sidebar-quick-btn"

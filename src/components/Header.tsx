@@ -15,7 +15,6 @@ type HeaderProps = {
   daily: ReturnType<typeof useDaily>
   onOpenAdminCenter: () => void
   onOpenProfile: () => void
-  onAddMoney: () => void
   onLogout: () => void
   onOAuthLogin: (provider: 'github' | 'twitch' | 'discord') => void
 }
@@ -30,7 +29,6 @@ export default function Header({
   daily,
   onOpenAdminCenter,
   onOpenProfile,
-  onAddMoney,
   onLogout,
   onOAuthLogin
 }: HeaderProps) {
@@ -157,14 +155,6 @@ export default function Header({
                 title="Ежедневная награда"
               >
                 🎁 Награда
-              </button>
-
-              <button
-                className="wl-btn-orange wl-btn-topup"
-                onClick={onAddMoney}
-                title="Начислить бесплатные SV₽"
-              >
-                + Начислить
               </button>
 
               <button

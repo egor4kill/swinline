@@ -12,7 +12,6 @@ type WalletViewProps = {
   S: any
   allEvents: Ev[]
   currentUser: UserAccount | null
-  addVirtualMoney: (amount: number) => void
   claimCashback: () => void
   onResetAll: () => void
 }
@@ -24,7 +23,6 @@ export default function WalletView({
   S,
   allEvents,
   currentUser,
-  addVirtualMoney,
   claimCashback,
   onResetAll
 }: WalletViewProps) {
@@ -80,12 +78,6 @@ export default function WalletView({
           {fmt(balance)}
         </div>
         <div className="wl-wallet-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="wl-btn-orange" onClick={() => addVirtualMoney(5000)}>
-            + 5 000 SV₽
-          </button>
-          <button className="wl-btn-orange" style={{ background: '#3b82f6' }} onClick={() => addVirtualMoney(25000)}>
-            + 25 000 SV₽
-          </button>
           <button className="wl-btn-orange" style={{ background: '#7c3aed' }} onClick={claimCashback}>
             💰 Забрать кэшбэк
           </button>
