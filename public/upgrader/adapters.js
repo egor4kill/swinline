@@ -1,4 +1,4 @@
-import {catalog,initialInventory,settle} from './core.js?v=5';
+import {catalog,initialInventory,settle} from './core.js?v=7';
 // Demo state is intentionally client-owned. Never use this adapter for real items.
 export class DemoAdapter{
  constructor(){this.key='uebki-upgrader-demo-v2';this.memory={inventory:initialInventory(),history:[]};}

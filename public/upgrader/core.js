@@ -1,5 +1,6 @@
-import vanilla from './vanilla-catalog.json?v=2' with {type:'json'};
-import economy from './economy-profile.json?v=2' with {type:'json'};
+import vanilla from './vanilla-catalog.js?v=7';
+import economy from './economy-profile.js?v=7';
+
 export const catalog = vanilla;
 export function valueOf(id, items = catalog, chain = new Set()) {
   const item = items.find(i => i.id === id);

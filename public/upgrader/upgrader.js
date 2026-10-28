@@ -1,5 +1,5 @@
-import {catalog as defaults,valueOf,chance,formatChance} from './core.js?v=6';
-import {DemoAdapter} from './adapters.js?v=6';
+import {catalog as defaults,valueOf,chance,formatChance} from './core.js?v=7';
+import {DemoAdapter} from './adapters.js?v=7';
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:n>0&&n<1?4:1}).format(n);
 const asset=path=>new URL(path,import.meta.url).href;

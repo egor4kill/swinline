@@ -19,7 +19,7 @@ type UpgraderElement = HTMLElement & {
 }
 
 const BASE = import.meta.env.BASE_URL || '/'
-const UPGRADER_VERSION = '6'
+const UPGRADER_VERSION = '7'
 const MODULE_URL = `${BASE}upgrader/upgrader.js?v=${UPGRADER_VERSION}`
 const ADAPTER_URL = `${BASE}upgrader/site-adapter.js?v=${UPGRADER_VERSION}`
 
@@ -29,18 +29,26 @@ function loadModule(): Promise<void> {
   if (modulePromise) return modulePromise
   modulePromise = (async () => {
     if (!customElements.get('minecraft-upgrader')) {
-      await new Promise<void>((resolve, reject) => {
-        const script = document.createElement('script')
-        script.type = 'module'
-        script.src = MODULE_URL
-        script.onload = () => resolve()
-        script.onerror = () => reject(new Error('Не удалось загрузить модуль Upgrader'))
-        document.head.appendChild(script)
-      })
+      try {
+        await import(/* @vite-ignore */ MODULE_URL)
+      } catch (importErr) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script')
+          script.type = 'module'
+          script.src = MODULE_URL
+          script.onload = () => resolve()
+          script.onerror = (e) => {
+            console.error('Failed to load upgrader script tag:', MODULE_URL, e)
+            reject(importErr || new Error('Не удалось загрузить модуль Upgrader'))
+          }
+          document.head.appendChild(script)
+        })
+      }
     }
     await customElements.whenDefined('minecraft-upgrader')
   })().catch(error => {
     modulePromise = null
+    console.error('loadModule failed:', error)
     throw error
   })
   return modulePromise
