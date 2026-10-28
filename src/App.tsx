@@ -1927,7 +1927,7 @@ export default function App() {
                   </div>
                   <iframe
                     className="ol-embed-frame"
-                    src="./olympus/index.html?v=3"
+                    src="./olympus/index.html?v=4"
                     title="Олимп — слот SWINLINE"
                     allow="autoplay; fullscreen; encrypted-media"
                   />

@@ -1,7 +1,7 @@
 (function(root){
   const config = {
-    id:'olympus-local-v1', columns:6, rows:5, initialBalance:1000000,
-    bets:[20,50,100,200,500,1000,2000,5000,10000], defaultBet:200,
+    id:'olympus-swinline-v1', columns:6, rows:5, initialBalance:0,
+    bets:[20,50,100,200,500,1000,2000,5000,10000], defaultBet:1000,
     bonusCost:100, freeSpins:15, retriggerSpins:5, maxWin:15000, freeOrbWeight:5,
     symbols:[
       {id:'crown',name:'Корона',weight:4,pays:[10,25,50]},
