@@ -1,4 +1,4 @@
-import { catalog } from './core.js';
+import { catalog } from './core.js?v=2';
 
 /**
  * Адаптер Upgrader-а к сайту: все операции идут через Supabase RPC.

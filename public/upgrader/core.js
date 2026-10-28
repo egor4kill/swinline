@@ -1,5 +1,5 @@
-import vanilla from './vanilla-catalog.json' with {type:'json'};
-import economy from './economy-profile.json' with {type:'json'};
+import vanilla from './vanilla-catalog.json?v=2' with {type:'json'};
+import economy from './economy-profile.json?v=2' with {type:'json'};
 export const catalog=vanilla;
 export function valueOf(id,items=catalog,chain=new Set()) { const item=items.find(i=>i.id===id);if(!item||chain.has(id))throw Error('Некорректный рецепт: '+id);if(item.value!==undefined)return item.value;if(item.raw!==undefined)return item.raw;const next=new Set(chain).add(id);return Object.entries(item.recipe).reduce((sum,[part,n])=>sum+valueOf(part,items,next)*n,0)/(item.output||1); }
 export function chance(stake,reward){if(!Number.isFinite(stake)||!Number.isFinite(reward)||stake<=0||reward<=0)throw Error('Некорректная стоимость');return Math.min(economy.maxChance,economy.houseFactor*stake/reward);}

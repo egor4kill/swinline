@@ -1,10 +1,10 @@
-import {catalog as defaults,valueOf,chance,formatChance} from './core.js';
-import {DemoAdapter} from './adapters.js';
+import {catalog as defaults,valueOf,chance,formatChance} from './core.js?v=2';
+import {DemoAdapter} from './adapters.js?v=2';
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:n>0&&n<1?4:1}).format(n);
 const asset=path=>new URL(path,import.meta.url).href;
 const chevron='<svg viewBox="0 0 40 42" aria-hidden="true"><path d="M3 18 20 3l17 15v10L20 13 3 28z"/><path d="m3 31 17-15 17 15v9L20 26 3 40z" opacity=".45"/></svg>';
-const categories=[['all','Все предметы'],['blocks','Блоки'],['materials','Материалы'],['weapons','Оружие'],['tools','Инструменты'],['armor','Броня'],['food','Еда'],['spawn','Яйца призыва'],['special','Особые предметы']];
+const categories=[['all','Все предметы'],['blocks','Блоки'],['materials','Материалы'],['weapons','Оружие'],['tools','Инструменты'],['armor','Броня'],['food','Еда'],['special','Особые предметы']];
 function icon(item,size=64){return item?`<img class="item-image" src="${esc(asset(item.image||`assets/items/${item.id}.png`))}" width="${size}" height="${size}" alt="" draggable="false" loading="lazy">`:'';}
 
 class MinecraftUpgrader extends HTMLElement{
