@@ -2,7 +2,7 @@
   "version": 4,
   "name": "Survival resource balance",
   "description": "Relative gameplay values, not shop prices. Recipe outputs inherit ingredient cost. Common bulk resources are much cheaper than minerals and progression loot.",
-  "houseFactor": 0.9,
+  "houseFactor": 1.0,
   "maxChance": 0.9,
   "baseValues": {
     "stick": 0.125,

@@ -15,6 +15,7 @@ export class SiteAdapter {
     if (!data) throw new Error('Сервер не вернул инвентарь');
     return {
       catalog,
+      discovered: Array.isArray(data.discovered) ? data.discovered : null,
       inventory: Array.isArray(data.inventory) ? data.inventory : [],
       history: Array.isArray(data.history) ? data.history : [],
       mode: 'server',
@@ -24,9 +25,9 @@ export class SiteAdapter {
   async upgrade(request) {
     const { data, error } = await this.rpc('upgrader_upgrade', {
       p_slot: request.slot,
-      p_stake_count: request.stakeCount,
+      p_stake_count: 1,
       p_target: request.target,
-      p_target_count: request.targetCount,
+      p_target_count: 1,
       p_request_id: request.requestId,
     });
     if (error) throw new Error(error.message || 'Сервер не подтвердил операцию');
