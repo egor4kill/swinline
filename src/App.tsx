@@ -275,6 +275,34 @@ export default function App() {
   // Свежая ссылка на состояние для колбэков Realtime и БД
   const sRef = useRef<any>(null)
   sRef.current = S
+
+  // Мост для портированного «Олимпа»: iframe на том же origin играет
+  // на серверных SV₽/АР, а не на локальных условных кредитах.
+  useEffect(() => {
+    const bridge = {
+      rpc: (fn: any, args?: any) => supabase.rpc(fn, args),
+      initialCurrency: playCurrency,
+      onCurrency: (cur: 'sv' | 'ar') => setPlayCurrency(cur),
+      onBalance: (cur: 'sv' | 'ar', bal: number) => {
+        if (cur === 'ar') {
+          setArBalance(Number(bal) || 0)
+        } else {
+          setS(prev => {
+            const next = structuredClone(prev)
+            next.bal = Number(bal) || 0
+            return next
+          })
+        }
+      },
+      onNeedAuth: () => setAuthModalOpen(true),
+    }
+    ;(window as any).__SWINLINE_OLYMPUS__ = bridge
+    return () => {
+      if ((window as any).__SWINLINE_OLYMPUS__ === bridge) {
+        delete (window as any).__SWINLINE_OLYMPUS__
+      }
+    }
+  }, [playCurrency])
   const [selectedBet, setSelectedBet] = useState<{ evId: string; outcomeIdx: number; outcomeTitle: string; odds: number } | null>(null)
   const [stake, setStake] = useState('500')
   const [slipOpen, setSlipOpen] = useState(false)
@@ -1892,16 +1920,15 @@ export default function App() {
               {gamesTab === 'olympus' && (
                 <div className="ol-embed">
                   <div className="ol-embed-bar">
-                    <span className="ol-embed-title">ОЛИМП · оригинальный проект</span>
+                    <span className="ol-embed-title">ОЛИМП · SV₽ / АР</span>
                     <div className="ol-embed-actions">
-                      <a className="ol-embed-link" href="./olympus/index.html?v=2" target="_blank" rel="noreferrer">Открыть отдельно</a>
                       <button type="button" className="ol-embed-close" aria-label="Закрыть Олимп" onClick={() => setGamesTab('crash')}>✕</button>
                     </div>
                   </div>
                   <iframe
                     className="ol-embed-frame"
-                    src="./olympus/index.html?v=2"
-                    title="Олимп — оригинальный слот"
+                    src="./olympus/index.html?v=3"
+                    title="Олимп — слот SWINLINE"
                     allow="autoplay; fullscreen; encrypted-media"
                   />
                 </div>

@@ -54,9 +54,9 @@
   class Engine{
     constructor(state=fresh(),rng=secureRandom){if(!validate(state))throw new Error('Invalid saved state');this.state=structuredClone(state);this.rng=rng;}
     setBet(bet){if(this.state.free)throw new Error('Ставка зафиксирована до конца бонуса');if(!C.bets.includes(bet))throw new Error('Недопустимая ставка');this.state.bet=bet;this.state.roundWin=0;}
-    buy(){const s=this.state;if(s.free)throw new Error('Бонус уже идёт');const cost=s.bet*C.bonusCost;if(s.balance<cost)throw new Error('Недостаточно условных кредитов');s.balance-=cost;s.stats.wagered+=cost;s.stats.bought++;s.free=C.freeSpins;s.roundWin=0;s.bonusWin=0;s.bonusMultiplier=0;return cost;}
+    buy(){const s=this.state;if(s.free)throw new Error('Бонус уже идёт');const cost=s.bet*C.bonusCost;if(s.balance<cost)throw new Error('Недостаточно средств');s.balance-=cost;s.stats.wagered+=cost;s.stats.bought++;s.free=C.freeSpins;s.roundWin=0;s.bonusWin=0;s.bonusMultiplier=0;return cost;}
     spin(){
-      const s=this.state,isFree=s.free>0;if(!isFree&&s.balance<s.bet)throw new Error('Недостаточно условных кредитов. Пополните баланс или уменьшите ставку.');
+      const s=this.state,isFree=s.free>0;if(!isFree&&s.balance<s.bet)throw new Error('Недостаточно средств. Уменьшите ставку.');
       // Calculate before mutation. A resolver failure cannot debit the wallet.
       const r=resolve(this.rng,s.bet,s.bonusMultiplier,isFree);
       if(isFree){s.free--;s.stats.free++;}else{s.balance-=s.bet;s.stats.wagered+=s.bet;s.stats.paid++;s.roundWin=0;s.bonusWin=0;s.bonusMultiplier=0;}

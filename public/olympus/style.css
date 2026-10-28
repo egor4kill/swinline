@@ -23,3 +23,14 @@
 @media(prefers-reduced-motion:reduce){.cell.orb img,.controls:has(#spin:disabled) .spin-button svg{animation:none!important}.cell.winning img{transform:none}}
 #symbol-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:7}.cell.original-animating>img{opacity:0}
 @media(max-width:480px){#symbol-canvas{width:100%;left:0}}
+.wallet select{background:none;border:1px solid #78577f;border-radius:5px;color:#ffe18a;font-size:11px;font-weight:700;padding:2px 4px;margin-left:6px;vertical-align:middle}
+.wallet select:disabled{color:#c6abc9}
+.gate{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;background:#10071bef}
+.gate[hidden]{display:none}
+.gate-card{width:min(460px,94vw);padding:26px 22px;background:#281831;border:1px solid #b4935f;border-radius:10px;text-align:center;box-shadow:0 20px 70px #0d061b99}
+.gate-card h1{margin-bottom:12px;font-size:24px}
+.gate-card p{line-height:1.6;color:#d6c3dc;margin:0 0 20px}
+.gate-actions{display:flex;flex-direction:column;gap:10px;align-items:center}
+.gate-card button,.gate-link{display:inline-block;padding:10px 16px;border:1px solid #ad8b5f;border-radius:4px;background:#543561;color:#f6e9d5;text-decoration:none;font-size:14px;cursor:pointer}
+.gate-card button[hidden]{display:none}
+@media(max-width:480px){.wallet select{font-size:10px;padding:1px 3px;margin-left:3px}.gate-card{padding:22px 16px}}

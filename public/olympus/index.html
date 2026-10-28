@@ -2,18 +2,18 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#211128"><title>Olympus 1000 — локальная игра</title>
-  <link rel="icon" href="assets/blue.png"><link rel="stylesheet" href="style.css">
+  <meta name="theme-color" content="#211128"><title>Олимп — SWINLINE</title>
+  <link rel="icon" href="assets/blue.png"><link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
-  <header class="app-header"><span class="app-name">OLYMPUS <b>LOCAL</b></span><span class="local-state"><i></i>Без подключения к провайдеру</span><button id="rules" class="text-button">Правила и выплаты</button></header>
+  <header class="app-header"><span class="app-name">OLYMPUS <b>SWINLINE</b></span><span class="local-state"><i></i>SV₽ / АР</span><button id="rules" class="text-button">Правила и выплаты</button></header>
   <main>
     <div class="stage" id="stage">
       <canvas id="scene" aria-hidden="true"></canvas>
       <img class="logo" src="assets/logo.png" alt="Gates of Olympus 1000">
       <div class="game-top"><span id="mode">ОСНОВНАЯ ИГРА</span><span id="free-counter"></span></div>
       <aside class="feature-rail">
-        <div class="buy-panel"><span>15 ФРИСПИНОВ</span><button id="buy">КУПИТЬ<br><strong id="buy-price">200</strong></button><small>Условные кредиты</small></div>
+        <div class="buy-panel"><span>15 ФРИСПИНОВ</span><button id="buy">КУПИТЬ<br><strong id="buy-price">200</strong></button><small id="buy-unit">SV₽</small></div>
         <div class="multiplier-panel"><span>МНОЖИТЕЛЬ</span><strong id="multiplier">×1</strong><small id="multiplier-note">В выигрышном каскаде</small></div>
         <button class="speed-button" id="turbo" aria-pressed="false">Турбо: выкл.</button>
       </aside>
@@ -22,14 +22,24 @@
       <div class="celebration" id="celebration" hidden><div class="celebration-inner"><span id="celebration-title"></span><strong id="celebration-value"></strong><small>OLYMPUS 1000</small></div></div>
     </div>
     <section class="controls" aria-label="Управление игрой">
-      <div class="wallet"><span>БАЛАНС</span><strong id="balance"></strong><small>условных кредитов</small></div>
+      <div class="wallet"><span>БАЛАНС <select id="currency" aria-label="Валюта"><option value="sv">SV₽</option><option value="ar">АР</option></select></span><strong id="balance"></strong><small id="balance-unit">SV₽</small></div>
       <div class="bet"><label for="bet">СТАВКА</label><div><button id="minus" aria-label="Уменьшить ставку">−</button><select id="bet" aria-label="Ставка"></select><button id="plus" aria-label="Увеличить ставку">+</button></div></div>
       <div class="win"><span>ВЫИГРЫШ</span><strong id="win">0,00</strong><small id="bonus-total">за последнее вращение</small></div>
       <button id="spin" class="spin-button"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M31 14A13 13 0 1 0 32 26M31 5v10H21"/></svg><span>КРУТИТЬ</span></button>
       <button id="auto" class="utility-button">Авто · 25</button><div class="audio-controls"><button id="sound" class="utility-button" aria-pressed="true">Звук: вкл.</button><button id="music" class="text-button" aria-pressed="true">Музыка: вкл.</button><label class="volume-label" for="volume">Громкость <input type="range" id="volume" min="0" max="100" value="55" aria-label="Громкость"></label></div>
     </section>
-    <footer><span>Локальный симулятор · собственная математика · без денежных ставок</span><div><button id="history" class="text-button">История</button><button id="refill" class="text-button">Новая сессия</button></div></footer>
+    <footer><span>Игра на SV₽ и АР · виртуальные деньги</span><div><button id="history" class="text-button">История</button><button id="refill" class="text-button">Обновить</button></div></footer>
   </main>
+  <div id="gate" class="gate" hidden>
+    <div class="gate-card">
+      <h1 id="gate-title">Олимп доступен на SWINLINE</h1>
+      <p id="gate-text">Игра использует баланс SV₽ и АР.</p>
+      <div class="gate-actions">
+        <button id="gate-login" type="button" hidden>Войти через Twitch</button>
+        <a id="gate-link" class="gate-link" href="../#/games24/olympus">Открыть на сайте</a>
+      </div>
+    </div>
+  </div>
   <dialog id="dialog"><div class="dialog-head"><h1 id="dialog-title"></h1><button id="close-dialog" aria-label="Закрыть">×</button></div><div id="dialog-body"></div></dialog>
-  <script src="config.js"></script><script src="engine.js"></script><script src="scene-data.js"></script><script src="scene.js"></script><script src="audio-data.js"></script><script src="audio.js"></script><script src="motion.js"></script><script src="app.js?v=2"></script>
+  <script src="config.js?v=3"></script><script src="engine.js?v=3"></script><script src="scene-data.js"></script><script src="scene.js"></script><script src="audio-data.js"></script><script src="audio.js"></script><script src="motion.js"></script><script src="app.js?v=3"></script>
 </body></html>

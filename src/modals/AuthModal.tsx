@@ -69,7 +69,7 @@ export default function AuthModal(props: Props) {
     <>
 {/* AUTH MODAL (TWITCH-FIRST) */}
 {authModalOpen && (
-  <div className="wl-modal-overlay" onClick={() => setAuthModalOpen(false)}>
+  <div className="wl-modal-overlay" style={{ zIndex: 10050 }} onClick={() => setAuthModalOpen(false)}>
     <div className="wl-modal-card" style={{ maxWidth: 420, textAlign: 'center', padding: '24px 20px' }} onClick={e => e.stopPropagation()}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <span style={{ fontWeight: 800, fontSize: 18, color: '#fff' }}>
