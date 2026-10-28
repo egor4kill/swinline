@@ -1894,13 +1894,13 @@ export default function App() {
                   <div className="ol-embed-bar">
                     <span className="ol-embed-title">ОЛИМП · оригинальный проект</span>
                     <div className="ol-embed-actions">
-                      <a className="ol-embed-link" href="./olympus/index.html" target="_blank" rel="noreferrer">Открыть отдельно</a>
+                      <a className="ol-embed-link" href="./olympus/index.html?v=2" target="_blank" rel="noreferrer">Открыть отдельно</a>
                       <button type="button" className="ol-embed-close" aria-label="Закрыть Олимп" onClick={() => setGamesTab('crash')}>✕</button>
                     </div>
                   </div>
                   <iframe
                     className="ol-embed-frame"
-                    src="./olympus/index.html"
+                    src="./olympus/index.html?v=2"
                     title="Олимп — оригинальный слот"
                     allow="autoplay; fullscreen; encrypted-media"
                   />
