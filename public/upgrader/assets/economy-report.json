@@ -1,0 +1,114 @@
+{
+  "profileVersion": 4,
+  "recipePriced": 1058,
+  "iterations": 2,
+  "examples": [
+    {
+      "stake": "oak_log",
+      "count": 64,
+      "target": "netherite_sword",
+      "chancePercent": 1.323482
+    },
+    {
+      "stake": "oak_planks",
+      "count": 64,
+      "target": "netherite_sword",
+      "chancePercent": 0.33087
+    },
+    {
+      "stake": "birch_log",
+      "count": 64,
+      "target": "netherite_sword",
+      "chancePercent": 1.323482
+    },
+    {
+      "stake": "dirt",
+      "count": 64,
+      "target": "netherite_sword",
+      "chancePercent": 0.020679
+    },
+    {
+      "stake": "iron_ingot",
+      "count": 64,
+      "target": "netherite_sword",
+      "chancePercent": 21.17571
+    },
+    {
+      "stake": "diamond",
+      "count": 1,
+      "target": "netherite_sword",
+      "chancePercent": 5.293928
+    },
+    {
+      "stake": "diamond_sword",
+      "count": 1,
+      "target": "netherite_sword",
+      "chancePercent": 10.59044
+    },
+    {
+      "stake": "cooked_beef",
+      "count": 1,
+      "target": "diamond_horse_armor",
+      "chancePercent": 0.025112
+    }
+  ],
+  "selectedRecipes": {
+    "oak_planks": {
+      "recipe": "oak_planks",
+      "inputs": [
+        {
+          "id": "oak_log",
+          "count": 1
+        }
+      ],
+      "output": 4,
+      "consumedCopies": 0
+    },
+    "stick": null,
+    "netherite_upgrade_smithing_template": {
+      "recipe": "netherite_upgrade_smithing_template",
+      "inputs": [
+        {
+          "id": "diamond",
+          "count": 7
+        },
+        {
+          "id": "netherrack",
+          "count": 1
+        }
+      ],
+      "output": 2,
+      "consumedCopies": 1
+    },
+    "netherite_sword": {
+      "recipe": "netherite_sword_smithing",
+      "inputs": [
+        {
+          "id": "netherite_upgrade_smithing_template",
+          "count": 1
+        },
+        {
+          "id": "diamond_sword",
+          "count": 1
+        },
+        {
+          "id": "netherite_ingot",
+          "count": 1
+        }
+      ],
+      "output": 1,
+      "consumedCopies": 0
+    }
+  },
+  "values": {
+    "oak_log": 1,
+    "birch_log": 1,
+    "oak_planks": 0.25,
+    "stick": 0.125,
+    "diamond": 256,
+    "diamond_sword": 512.125,
+    "netherite_ingot": 2048,
+    "netherite_upgrade_smithing_template": 1792.03125,
+    "netherite_sword": 4352.15625
+  }
+}

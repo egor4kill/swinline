@@ -197,7 +197,7 @@ export default function MobileNav({
               <button type="button" className="wl-more-item" onClick={() => go('minecraft')}>
                 <Gem size={19} />
                 <span>Minecraft</span>
-                <small>привязка и вывод</small>
+                <small>привязка, вывод и апгрейдер</small>
                 <ChevronRight size={17} />
               </button>
               <button type="button" className="wl-more-item" onClick={() => go('promos')}>

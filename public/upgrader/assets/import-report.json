@@ -1,0 +1,16 @@
+{
+  "version": "26.3",
+  "definitions": 1658,
+  "catalog": 1657,
+  "renders": {
+    "layered": 759,
+    "model": 817,
+    "texture": 74,
+    "entity-head": 7
+  },
+  "missing": [],
+  "recipePriced": 1058,
+  "source": "Official Minecraft client 26.3; assets belong to Mojang/Microsoft",
+  "jarSHA256": "4508d006323f24fa02876310c192d739af56516eb259000ac50f0909a68c9a2d",
+  "economyProfileVersion": 4
+}

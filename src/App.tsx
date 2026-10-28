@@ -88,6 +88,7 @@ const MudPuddles = lazy(() => import('./MudPuddles'))
 const RubleChart = lazy(() => import('./RubleChart'))
 const Blackjack = lazy(() => import('./Blackjack'))
 const MineView = lazy(() => import('./MineView'))
+const MinecraftView = lazy(() => import('./MinecraftView'))
 const PickGame = lazy(() => import('./PickGame'))
 const BonanzaGame = lazy(() => import('./BonanzaGame'))
 import GameCards from './components/GameCards'
@@ -2009,11 +2010,10 @@ export default function App() {
             <PromosView notify={notify} />
           )}
 
-          {/* H. MINECRAFT — привязка аккаунта и вывод АР */}
+          {/* H. MINECRAFT — привязка/вывод АР + апгрейдер предметов */}
           {view === 'minecraft' && (
             <Suspense fallback={<div className="wl-game-loading">Загрузка…</div>}>
-              <MineView
-                mode="link"
+              <MinecraftView
                 currentUser={currentUser}
                 notify={notify}
                 onNeedAuth={() => setAuthModalOpen(true)}

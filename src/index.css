@@ -5615,3 +5615,255 @@ button:focus-visible, input:focus-visible {
   .ol-embed-title { font-size: 10px; letter-spacing: 0.5px; }
   .ol-embed-link { font-size: 10px; padding: 6px 8px; }
 }
+
+/* ============================================================
+   Minecraft Upgrader — отдельная вкладка раздела Minecraft.
+   Внутри компонента свой Shadow DOM; здесь только обвязка.
+   ============================================================ */
+
+.mc-hub {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.mc-hub-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 1060px;
+  margin: 0 auto 16px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(19, 23, 34, 0.72);
+}
+
+.mc-hub-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--tx-muted);
+  min-height: 44px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.mc-hub-tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mc-hub-tab[aria-selected="true"] {
+  color: var(--mc-cyan);
+  background: var(--mc-cyan-soft);
+  border-color: var(--mc-cyan-line);
+}
+
+.mc-hub-tab:focus-visible {
+  outline: 2px solid var(--mc-cyan);
+  outline-offset: 2px;
+}
+
+.mc-upgrader-shell {
+  max-width: 1400px;
+  margin: 0 auto;
+  border: 1px solid #26272d;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #101113;
+}
+
+.mc-upgrader-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  background: #191a1e;
+  border-bottom: 1px solid #26272d;
+}
+
+.mc-upgrader-copy {
+  min-width: 0;
+}
+
+.mc-upgrader-kicker {
+  display: block;
+  color: #ffda00;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.mc-upgrader-copy p {
+  margin: 3px 0 0;
+  color: #92939c;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.mc-upgrader-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.mc-upgrader-reset,
+.mc-upgrader-danger,
+.mc-upgrader-ghost {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border-radius: 7px;
+  border: 1px solid #3a3b42;
+  background: #222328;
+  color: #d8d9de;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mc-upgrader-reset:hover,
+.mc-upgrader-ghost:hover {
+  border-color: #65666f;
+  color: #fff;
+}
+
+.mc-upgrader-danger {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+}
+
+.mc-upgrader-danger:disabled,
+.mc-upgrader-ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.mc-upgrader-confirm {
+  color: #fca5a5;
+  font-size: 11px;
+}
+
+.mc-upgrader-host {
+  min-height: 420px;
+}
+
+.mc-upgrader-host minecraft-upgrader {
+  display: block;
+  width: 100%;
+}
+
+.mc-upgrader-state {
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: #92939c;
+  font-size: 13px;
+  text-align: center;
+}
+
+.mc-upgrader-state-error {
+  flex-direction: column;
+  color: #fca5a5;
+}
+
+.mc-upgrader-state-error button {
+  margin-top: 4px;
+}
+
+.mc-upgrader-gate {
+  max-width: 560px;
+  margin: 18px auto 0;
+  padding: 34px 24px;
+  text-align: center;
+}
+
+.mc-upgrader-gate-icon {
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  color: var(--mc-cyan);
+  border: 1px solid var(--mc-cyan-line);
+  border-radius: 14px;
+  background: var(--mc-cyan-soft);
+}
+
+.mc-upgrader-gate h2 {
+  margin: 0 0 8px;
+  font-size: 21px;
+}
+
+.mc-upgrader-gate p {
+  max-width: 420px;
+  margin: 0 auto 18px;
+  color: var(--tx-muted);
+  line-height: 1.55;
+}
+
+.mc-upgrader-gate-btn {
+  min-height: 44px;
+}
+
+.mc-spin {
+  animation: mc-spin 0.9s linear infinite;
+}
+
+@media (max-width: 640px) {
+  .mc-hub-tabs {
+    margin-bottom: 12px;
+    border-radius: 10px;
+  }
+
+  .mc-hub-tab {
+    flex: 1 1 0;
+    justify-content: center;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .mc-upgrader-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .mc-upgrader-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .mc-upgrader-shell {
+    border-radius: 12px;
+  }
+
+  .mc-upgrader-host {
+    min-height: 320px;
+  }
+
+  .mc-upgrader-copy p {
+    font-size: 10px;
+  }
+}
