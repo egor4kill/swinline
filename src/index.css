@@ -5529,3 +5529,89 @@ button:focus-visible, input:focus-visible {
   .ol-cell.ol-hit, .ol-cell.ol-drop { animation: none; }
   .ol-flash::after { animation: none; opacity: 0; }
 }
+
+/* ============================================================
+   Полноэкранная встройка оригинального проекта «Олимп».
+   Игра живёт отдельной страницей /olympus/index.html.
+   ============================================================ */
+.ol-embed {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  background: #07050a;
+}
+
+.ol-embed-bar {
+  flex: 0 0 auto;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: env(safe-area-inset-top) 12px 0;
+  background: #1b1026;
+  border-bottom: 1px solid #4a2c0a;
+}
+
+.ol-embed-title {
+  font-family: var(--font-d);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #ffd76a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ol-embed-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ol-embed-link {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd76a;
+  text-decoration: none;
+  border: 1px solid #7a5a24;
+  border-radius: 7px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.ol-embed-link:hover {
+  background: #2a1a10;
+}
+
+.ol-embed-close {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 18px;
+  border-radius: 8px;
+}
+
+.ol-embed-close:hover {
+  background: #3a2410;
+}
+
+.ol-embed-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  display: block;
+  background: #07050a;
+}
+
+@media (max-width: 380px) {
+  .ol-embed-title { font-size: 10px; letter-spacing: 0.5px; }
+  .ol-embed-link { font-size: 10px; padding: 6px 8px; }
+}

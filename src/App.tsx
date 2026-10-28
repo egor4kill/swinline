@@ -90,7 +90,6 @@ const Blackjack = lazy(() => import('./Blackjack'))
 const MineView = lazy(() => import('./MineView'))
 const PickGame = lazy(() => import('./PickGame'))
 const BonanzaGame = lazy(() => import('./BonanzaGame'))
-const OlympusGame = lazy(() => import('./OlympusGame'))
 import GameCards from './components/GameCards'
 const CrashArena = lazy(() => import('./components/games/CrashArena'))
 const RouletteWheel = lazy(() => import('./components/games/RouletteWheel'))
@@ -1268,34 +1267,6 @@ export default function App() {
     return data
   }
 
-  // «Олимп»: сервер считает весь раунд (каскады, шары, фриспины), клиент проигрывает раскадровку
-  const olympusSpin = async (stake: number, buy: boolean): Promise<any> => {
-    if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
-    if (currentUser.isBlocked) { notify('Ваш аккаунт заблокирован администратором!'); return null }
-    const cur = playCurrency
-    const s = cur === 'ar' ? Math.floor(stake) : stake
-    const { data, error } = await supabase.rpc('olympus_spin', { p_stake: s, p_currency: cur, p_buy: buy })
-    if (error || !data) { notify(`❌ ${error?.message || 'Не удалось крутить'}`); return null }
-    const jp = Number(data.jackpot || 0)
-    const win = Number(data.win || 0)
-    const cost = Number(data.cost || 0)
-    const realCur = (data.currency === 'ar' ? 'ar' : cur) as 'sv' | 'ar'
-    if (realCur === 'ar') {
-      setArBalance(Number(data.bal))
-    } else {
-      setS(prev => {
-        const next = structuredClone(prev)
-        next.log.unshift({ t: Date.now(), x: buy ? 'Покупка бонуса «Олимп»' : 'Ставка в «Олимпе»', d: -cost })
-        if (win > 0) next.log.unshift({ t: Date.now(), x: `Выигрыш в «Олимпе» (x${(win / Math.max(1, s)).toFixed(2)})`, d: win })
-        if (jp > 0) next.log.unshift({ t: Date.now(), x: '🎰 ХРЯК-ПОТ! Ты сорвал весь горшок!', d: jp })
-        next.bal = Number(data.bal)
-        return next
-      })
-    }
-    if (jp > 0) setJackpotWin(jp)
-    return data
-  }
-
   // «Кирка»: ставка/ход/вывод решает сервер, клиент рисует башню и падение кирки
   const pickStart = async (stake: number): Promise<string | null> => {
     if (!currentUser) { setAuthModalOpen(true); notify('Для игры необходимо войти через Twitch!'); return null }
@@ -1919,14 +1890,21 @@ export default function App() {
                 />
               )}
               {gamesTab === 'olympus' && (
-                <OlympusGame
-                  currentUser={currentUser}
-                  bal={playCurrency === 'ar' ? arBalance : S.bal}
-                  unit={unitOf(playCurrency)}
-                  currency={playCurrency}
-                  onSpin={olympusSpin}
-                  notify={notify}
-                />
+                <div className="ol-embed">
+                  <div className="ol-embed-bar">
+                    <span className="ol-embed-title">ОЛИМП · оригинальный проект</span>
+                    <div className="ol-embed-actions">
+                      <a className="ol-embed-link" href="./olympus/index.html" target="_blank" rel="noreferrer">Открыть отдельно</a>
+                      <button type="button" className="ol-embed-close" aria-label="Закрыть Олимп" onClick={() => setGamesTab('crash')}>✕</button>
+                    </div>
+                  </div>
+                  <iframe
+                    className="ol-embed-frame"
+                    src="./olympus/index.html"
+                    title="Олимп — оригинальный слот"
+                    allow="autoplay; fullscreen; encrypted-media"
+                  />
+                </div>
               )}
               {gamesTab === 'mine' && (
                 <MineView
