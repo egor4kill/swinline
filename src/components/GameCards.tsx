@@ -17,7 +17,7 @@ function customImageFor(id: string): string | undefined {
   return entry?.[1]
 }
 
-type GameTab = 'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'pick' | 'mine' | 'bonanza'
+type GameTab = 'crash' | 'roulette' | 'plinko' | 'puddles' | 'ruble' | 'blackjack' | 'pick' | 'mine' | 'bonanza' | 'olympus'
 
 type Card = {
   id: GameTab
@@ -60,6 +60,20 @@ const CARDS: Card[] = [
         <span className="gc-float gold" style={{ top: '16%', right: '26%' }}>G</span>
         <span className="gc-float gold" style={{ bottom: '18%', left: '22%' }}>D</span>
         <span className="gc-big" style={{ color: '#ffd76a' }}>BONANZA</span>
+      </>
+    )
+  },
+  {
+    id: 'olympus',
+    name: 'Олимп',
+    sub: '8+ символов',
+    bg: 'linear-gradient(165deg, #2a1550 0%, #0b0618 70%)',
+    art: (
+      <>
+        <span className="gc-temple"><i /><i /><i /></span>
+        <span className="gc-float" style={{ top: '8%', right: '12%' }}>⚡</span>
+        <span className="gc-float gold" style={{ bottom: '16%', left: '12%' }}>x1000</span>
+        <span className="gc-big" style={{ color: '#ffd76a' }}>OLYMPUS</span>
       </>
     )
   },

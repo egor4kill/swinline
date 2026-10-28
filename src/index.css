@@ -5176,3 +5176,356 @@ button:focus-visible, input:focus-visible {
   object-fit: cover;
   display: block;
 }
+
+/* ============================================================
+   «Олимп»: 6×5, каскады, шары-множители, фриспины.
+   Оригинальная графика: мраморные колонки, золотая рама,
+   ночное небо, самоцветы и молнии. Только CSS/SVG.
+   ============================================================ */
+.ol-root {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.ol-temple {
+  position: relative;
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  border: 2px solid #b8862f;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% -10%, #4c2a7a 0%, #241238 45%, #0b0614 100%);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65), inset 0 0 50px rgba(0, 0, 0, 0.55);
+}
+
+.ol-sky {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(255, 232, 160, 0.5) 0 1px, transparent 2px),
+    radial-gradient(circle at 74% 14%, rgba(255, 232, 160, 0.4) 0 1px, transparent 2px),
+    radial-gradient(circle at 38% 8%, rgba(255, 232, 160, 0.35) 0 1px, transparent 2px),
+    radial-gradient(circle at 88% 34%, rgba(255, 232, 160, 0.3) 0 1px, transparent 2px),
+    radial-gradient(circle at 8% 44%, rgba(255, 232, 160, 0.25) 0 1px, transparent 2px);
+  pointer-events: none;
+}
+
+.ol-column {
+  position: absolute;
+  top: 54px;
+  bottom: 12px;
+  width: 13px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #8a6a3a 0%, #efe0bd 35%, #fff6dd 50%, #d9c393 70%, #8a6a3a 100%);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.55);
+  opacity: 0.55;
+}
+
+.ol-column::before,
+.ol-column::after {
+  content: '';
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  height: 7px;
+  background: linear-gradient(90deg, #8a6a3a, #f3e3b8, #8a6a3a);
+  border-radius: 2px;
+}
+
+.ol-column::before { top: -4px; }
+.ol-column::after { bottom: -4px; }
+.ol-column.left { left: 5px; }
+.ol-column.right { right: 5px; }
+
+.ol-pediment {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.ol-title {
+  display: block;
+  font-family: var(--font-d);
+  font-size: clamp(20px, 6vw, 26px);
+  font-weight: 800;
+  letter-spacing: 5px;
+  background: linear-gradient(180deg, #fff3c4, #f5c542 50%, #a86a12);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 3px 16px rgba(245, 197, 66, 0.35);
+}
+
+.ol-subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 2.5px;
+  color: #c9a95a;
+}
+
+.ol-hud {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+
+.ol-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  color: #e8d5a3;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid #7a5a24;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.ol-badge.free {
+  color: #1c1002;
+  background: linear-gradient(160deg, #fbbf24, #d97706);
+  border-color: #fde68a;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
+}
+
+.ol-badge.orb {
+  color: #d8b4fe;
+  border-color: #7c3aed;
+}
+
+.ol-mult {
+  font-family: var(--font-d);
+  font-size: 13px;
+  font-weight: 800;
+  color: #1c1002;
+  background: linear-gradient(160deg, #fde68a, #f59e0b);
+  border-radius: 999px;
+  padding: 3px 11px;
+  box-shadow: 0 0 16px rgba(251, 191, 36, 0.6);
+}
+
+.ol-board {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(10, 6, 22, 0.82);
+  border: 2px solid #7a5a24;
+  box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.7);
+}
+
+.ol-flash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background: radial-gradient(ellipse at center, rgba(255, 224, 130, 0.22), transparent 70%);
+  animation: ol-flash 0.6s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes ol-flash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.ol-cell {
+  position: relative;
+  height: 44px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: linear-gradient(180deg, #2a1a44, #170e2a);
+  border: 1px solid #3d2a5e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.ol-ic.gold { color: #ffd76a; }
+.ol-ic.pale { color: #e8d5a3; }
+.ol-ic.blue { color: #93c5fd; }
+
+.ol-diamond {
+  width: 17px;
+  height: 17px;
+  transform: rotate(45deg);
+  border-radius: 3px;
+  display: block;
+  position: relative;
+  box-shadow: inset -3px -3px 5px rgba(0, 0, 0, 0.45), inset 2px 2px 4px rgba(255, 255, 255, 0.35);
+}
+
+.ol-diamond::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.ol-gem.g5 .ol-diamond { background: linear-gradient(135deg, #ff6b6b, #c0392b); }
+.ol-gem.g6 .ol-diamond { background: linear-gradient(135deg, #d8b4fe, #8e44ad); }
+.ol-gem.g7 .ol-diamond { background: linear-gradient(135deg, #ffe08a, #d4a017); }
+.ol-gem.g8 .ol-diamond { background: linear-gradient(135deg, #86efac, #27ae60); }
+.ol-gem.g9 .ol-diamond { background: linear-gradient(135deg, #93c5fd, #2980b9); }
+
+.ol-scatter {
+  background: linear-gradient(180deg, #4a2c0a, #2a1605);
+  border-color: #d4a017;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.45);
+}
+
+.ol-scatter-ic { color: #ffd76a; filter: drop-shadow(0 0 6px rgba(255, 215, 106, 0.7)); }
+
+.ol-orbcell {
+  background: radial-gradient(circle at 50% 40%, #fef3c7, #f59e0b 45%, #7c2d12 100%);
+  border-color: #fde68a;
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.7);
+}
+
+.ol-orb {
+  font-family: var(--font-d);
+  font-size: 11px;
+  font-weight: 800;
+  color: #1c1002;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.ol-cell.ol-hit {
+  border-color: #ffe08a;
+  box-shadow: 0 0 14px rgba(255, 224, 138, 0.75);
+  animation: ol-hit 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes ol-hit {
+  from { filter: brightness(1); }
+  to { filter: brightness(1.5); }
+}
+
+.ol-cell.ol-drop {
+  animation: ol-drop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes ol-drop {
+  from { transform: translateY(-24px); opacity: 0.25; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.ol-meters {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: #b9a8d6;
+}
+
+.ol-meters b { color: #fff; }
+.ol-sumwin b { color: #7fe0ad; }
+.ol-sumbonus {
+  font-weight: 800;
+  color: #ffd76a;
+  text-shadow: 0 0 8px rgba(255, 215, 106, 0.5);
+}
+
+.ol-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ol-spin {
+  width: 100%;
+  min-height: 48px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.ol-buy {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid #d4a017;
+  background: linear-gradient(180deg, #3a2410, #241505);
+  color: #ffd76a;
+  font-size: 11.5px;
+  font-weight: 800;
+  padding: 0 8px;
+}
+
+.ol-buy:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* миниатюра «Олимпа» в витрине */
+.gc-temple {
+  position: absolute;
+  left: 12%;
+  top: 20%;
+  width: 38px;
+  height: 48px;
+  display: flex;
+  justify-content: space-between;
+  border-top: 4px solid #e0b357;
+  padding: 0 2px;
+}
+
+.gc-temple::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  right: -5px;
+  top: -9px;
+  height: 5px;
+  background: linear-gradient(180deg, #fde68a, #b8862f);
+  border-radius: 2px;
+}
+
+.gc-temple i {
+  display: block;
+  width: 6px;
+  margin-top: 5px;
+  height: 38px;
+  background: linear-gradient(90deg, #8a6a3a, #f3e3b8, #8a6a3a);
+  border-radius: 1px;
+}
+
+@media (max-width: 420px) {
+  .ol-cell { height: 38px; }
+  .ol-cell svg { width: 20px; height: 20px; }
+  .ol-diamond { width: 14px; height: 14px; }
+  .ol-orb { font-size: 9.5px; }
+  .ol-board { gap: 3px; padding: 6px; }
+  .ol-title { letter-spacing: 3px; }
+  .ol-actions { grid-template-columns: 1fr; }
+  .ol-buy { font-size: 12.5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ol-cell.ol-hit, .ol-cell.ol-drop { animation: none; }
+  .ol-flash::after { animation: none; opacity: 0; }
+}
