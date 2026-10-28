@@ -1,10 +1,10 @@
 package ru.swinline.mine;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.google.gson.Gson;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
@@ -20,6 +20,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -42,15 +43,14 @@ import java.util.concurrent.TimeUnit;
 /**
  * Мост между Minecraft-сервером и сайтом SWINLINE.
  *
- * Игрок привязывает аккаунт одноразовым кодом с сайта, заносит алмазную руду
- * командой /sw deposit и забирает вывод командой /sw withdraw (или автоматически
- * при входе). Сайт остаётся единственным источником правды: плагин только
- * перекладывает предметы и вызывает сервисные RPC, которые нельзя вызвать
- * клиентским ключом.
+ * 1. Шахта: занос алмазной руды (/sw deposit) в валюту АР и вывод.
+ * 2. Апгрейдер: занос любых предметов из руки (/up deposit) в инвентарь Апгрейдера
+ *    на сайте и вывод выигранных наград (/up withdraw).
  */
 public final class SwinlineMinePlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
 
     private static final String PREFIX = "§8[§bШахта§8] §r";
+    private static final String UP_PREFIX = "§8[§6Апгрейдер§8] §r";
     private static final String UNIT = "АР";
     private static final String KEY_PLACEHOLDER = "PASTE_SERVICE_ROLE_KEY_HERE";
 
@@ -85,10 +85,17 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         loadPending();
 
         getServer().getPluginManager().registerEvents(this, this);
+
         PluginCommand command = getCommand("sw");
         if (command != null) {
             command.setExecutor(this);
             command.setTabCompleter(this);
+        }
+
+        PluginCommand upCommand = getCommand("up");
+        if (upCommand != null) {
+            upCommand.setExecutor(this);
+            upCommand.setTabCompleter(this);
         }
 
         if (!isConfigured()) {
@@ -102,7 +109,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             syncPlayer(player, false, autoDeliver);
         }
 
-        getLogger().info("SwinlineMine включён. Сайт: " + (siteUrl.isEmpty() ? "не настроен" : siteUrl));
+        getLogger().info("SwinlineMine 1.1.0 включён. Сайт: " + (siteUrl.isEmpty() ? "не настроен" : siteUrl));
     }
 
     @Override
@@ -239,6 +246,9 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             });
         }
         syncPlayer(player, false, autoDeliver);
+        if (autoDeliver) {
+            deliverUpgraderWithdrawals(player);
+        }
     }
 
     @EventHandler
@@ -254,6 +264,11 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        String cmd = command.getName().toLowerCase(Locale.ROOT);
+        if (cmd.equals("up") || cmd.equals("upgrader") || cmd.equals("upgrade") || label.equalsIgnoreCase("up")) {
+            return onUpgraderCommand(sender, args);
+        }
+
         if (args.length == 0) {
             help(sender);
             return true;
@@ -262,6 +277,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         switch (args[0].toLowerCase(Locale.ROOT)) {
             case "help", "?" -> help(sender);
             case "ping" -> ping(sender);
+            case "up", "upgrader" -> onUpgraderCommand(sender, dropFirst(args));
             case "link", "привязать" -> {
                 if (!(sender instanceof Player player)) {
                     err(sender, "Привязать аккаунт может только игрок.");
@@ -308,24 +324,274 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 msg(player, "Проверяю готовые выводы...");
                 syncPlayer(player, true, true);
             }
-            default -> err(sender, "Не знаю такую команду. /sw help");
+            default -> err(sender, "Не знаю такую команду. /sw help или /up help");
         }
         return true;
     }
 
     private void help(CommandSender sender) {
         sender.sendMessage(PREFIX + "§eШахта SWINLINE");
-        sender.sendMessage("§e/sw link <код> §7— привязать аккаунт сайта (код в разделе «Шахта» на сайте)");
+        sender.sendMessage("§e/sw link <код> §7— привязать аккаунт сайта (код в профиле или разделе «Шахта»)");
         sender.sendMessage("§e/sw deposit <кол-во|all> §7— занести руду на сайт (1 руда = 1 АР)");
         sender.sendMessage("§e/sw balance §7— сколько АР на сайте и есть ли готовые выводы");
         sender.sendMessage("§e/sw withdraw §7— забрать готовые выводы (АР → руда в инвентарь)");
         sender.sendMessage("§e/sw ping §7— проверить связь с сайтом");
+        sender.sendMessage("§6/up §7— команды Апгрейдера предметов (отправка любых предметов на сайт)");
+    }
+
+    // ------------------------------------------------------------------
+    // Команды Апгрейдера предметов (/up)
+    // ------------------------------------------------------------------
+
+    private boolean onUpgraderCommand(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            upgraderHelp(sender);
+            return true;
+        }
+
+        switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "help", "?" -> upgraderHelp(sender);
+            case "ping" -> ping(sender);
+            case "link", "привязать" -> {
+                if (!(sender instanceof Player player)) {
+                    err(sender, "Привязать аккаунт может только игрок.");
+                    return true;
+                }
+                if (args.length < 2) {
+                    sender.sendMessage(UP_PREFIX + "§cИспользование: /up link КОД");
+                    return true;
+                }
+                if (!requireConfigured(sender)) return true;
+                link(player, args[1]);
+            }
+            case "deposit", "dep", "занести", "положить" -> {
+                if (!(sender instanceof Player player)) {
+                    err(sender, "Заносить предметы может только игрок.");
+                    return true;
+                }
+                upgraderDeposit(player, args.length > 1 ? args[1] : null);
+            }
+            case "withdraw", "wd", "вывод", "забрать", "claim" -> {
+                if (!(sender instanceof Player player)) {
+                    err(sender, "Вывод предметов доступен только игроку.");
+                    return true;
+                }
+                upgraderWithdraw(player);
+            }
+            case "balance", "bal", "inv", "list", "инвентарь" -> {
+                if (!(sender instanceof Player player)) {
+                    err(sender, "Инвентарь доступен только игроку.");
+                    return true;
+                }
+                upgraderBalance(player);
+            }
+            default -> sender.sendMessage(UP_PREFIX + "§cНеизвестная подкоманда. Используйте §e/up help");
+        }
+        return true;
+    }
+
+    private void upgraderHelp(CommandSender sender) {
+        sender.sendMessage("§8[§6Апгрейдер SWINLINE§8] §eКоманды:");
+        sender.sendMessage("§e/up deposit [кол-во|all] §7— отправить предмет из руки на сайт в Апгрейдер");
+        sender.sendMessage("§e/up withdraw §7— забрать выведенные с сайта предметы в инвентарь");
+        sender.sendMessage("§e/up balance §7(или /up inv) — посмотреть предметы в инвентаре на сайте");
+        sender.sendMessage("§e/up link <код> §7— привязать аккаунт сайта (код на сайте в разделе Профиль или Шахта)");
+    }
+
+    private void upgraderDeposit(Player player, String rawAmount) {
+        if (!requireConfigured(player)) {
+            return;
+        }
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (held == null || held.getType() == Material.AIR) {
+            player.sendMessage(UP_PREFIX + "§cВозьмите в руку предмет, который хотите отправить на сайт!");
+            return;
+        }
+
+        Material mat = held.getType();
+        int have = held.getAmount();
+        int amount = 1;
+        if (rawAmount != null) {
+            if (rawAmount.equalsIgnoreCase("all")) {
+                amount = have;
+            } else {
+                try {
+                    amount = Integer.parseInt(rawAmount);
+                } catch (NumberFormatException ex) {
+                    player.sendMessage(UP_PREFIX + "§cКоличество должно быть целым числом или all.");
+                    return;
+                }
+            }
+        }
+        if (amount <= 0) {
+            player.sendMessage(UP_PREFIX + "§cКоличество должно быть больше 0.");
+            return;
+        }
+        if (amount > have) {
+            player.sendMessage(UP_PREFIX + "§cВ руке только §e" + have + "§c шт. этого предмета.");
+            return;
+        }
+
+        Double durability = null;
+        if (held.getItemMeta() instanceof Damageable dmg && dmg.hasDamage()) {
+            int maxDur = mat.getMaxDurability();
+            if (maxDur > 0) {
+                durability = Math.max(0.01, 1.0 - ((double) dmg.getDamage() / maxDur));
+            }
+        }
+
+        final Double finalDurability = durability;
+        final int finalAmount = amount;
+        final String itemId = mat.name().toLowerCase(Locale.ROOT);
+
+        // Снимаем из руки игрока
+        if (finalAmount >= have) {
+            player.getInventory().setItemInMainHand(null);
+        } else {
+            held.setAmount(have - finalAmount);
+            player.getInventory().setItemInMainHand(held);
+        }
+
+        player.sendMessage(UP_PREFIX + "§7Отправляем §e" + itemId + " §7(x" + finalAmount + ") на сайт...");
+
+        async(() -> {
+            try {
+                JsonObject params = new JsonObject();
+                params.addProperty("p_mc_uuid", player.getUniqueId().toString());
+                params.addProperty("p_mc_name", player.getName());
+                params.addProperty("p_item_id", itemId);
+                params.addProperty("p_count", finalAmount);
+                if (finalDurability != null) {
+                    params.addProperty("p_durability", finalDurability);
+                }
+
+                rpc("upgrader_plugin_deposit", params);
+                runTask(() -> player.sendMessage(UP_PREFIX + "§a✓ Предмет §e" + itemId + " §a(x" + finalAmount + ") зачислен в ваш инвентарь на сайте!"));
+            } catch (SiteException ex) {
+                // При ошибке возвращаем предмет игроку
+                runTask(() -> {
+                    giveItem(player, mat, finalAmount, finalDurability);
+                    player.sendMessage(UP_PREFIX + "§cНе удалось занести предмет: " + ex.getMessage());
+                });
+            }
+        });
+    }
+
+    private void upgraderWithdraw(Player player) {
+        if (!requireConfigured(player)) {
+            return;
+        }
+        player.sendMessage(UP_PREFIX + "§7Проверяем выведенные с сайта предметы...");
+        async(() -> {
+            try {
+                JsonObject params = new JsonObject();
+                params.addProperty("p_mc_uuid", player.getUniqueId().toString());
+                JsonElement element = rpcElement("upgrader_plugin_claim_withdrawals", params);
+                if (!element.isJsonArray()) {
+                    runTask(() -> player.sendMessage(UP_PREFIX + "§cНеверный ответ от сайта."));
+                    return;
+                }
+                JsonArray items = element.getAsJsonArray();
+                if (items.size() == 0) {
+                    runTask(() -> player.sendMessage(UP_PREFIX + "§7Нет предметов, ожидающих выдачи. Нажмите «Вывести в игру» в инвентаре на сайте."));
+                    return;
+                }
+                runTask(() -> {
+                    for (JsonElement itemElem : items) {
+                        if (!itemElem.isJsonObject()) continue;
+                        JsonObject obj = itemElem.getAsJsonObject();
+                        String id = obj.has("item_id") ? obj.get("item_id").getAsString() : "";
+                        int count = obj.has("count") ? obj.get("count").getAsInt() : 1;
+                        Double dur = obj.has("durability") && !obj.get("durability").isJsonNull() ? obj.get("durability").getAsDouble() : null;
+
+                        Material mat = Material.matchMaterial(id.toUpperCase(Locale.ROOT));
+                        if (mat == null) {
+                            getLogger().warning("Неизвестный материал для выдачи: " + id);
+                            continue;
+                        }
+                        giveItem(player, mat, count, dur);
+                        player.sendMessage(UP_PREFIX + "§a✓ Получен предмет с сайта: §e" + id + " §a(x" + count + ")");
+                    }
+                });
+            } catch (SiteException ex) {
+                runTask(() -> player.sendMessage(UP_PREFIX + "§cОшибка: " + ex.getMessage()));
+            }
+        });
+    }
+
+    private void upgraderBalance(Player player) {
+        if (!requireConfigured(player)) {
+            return;
+        }
+        player.sendMessage(UP_PREFIX + "§7Запрашиваем ваш инвентарь на сайте...");
+        async(() -> {
+            try {
+                JsonObject params = new JsonObject();
+                params.addProperty("p_mc_uuid", player.getUniqueId().toString());
+                JsonObject res = rpc("upgrader_plugin_get_inventory", params);
+                boolean isLinked = res.has("linked") && res.get("linked").getAsBoolean();
+                if (!isLinked) {
+                    runTask(() -> player.sendMessage(UP_PREFIX + "§cАккаунт не привязан. Получите код на сайте и введите §e/up link КОД"));
+                    return;
+                }
+                JsonArray inv = res.has("inventory") && res.get("inventory").isJsonArray()
+                        ? res.getAsJsonArray("inventory") : new JsonArray();
+                if (inv.size() == 0) {
+                    runTask(() -> player.sendMessage(UP_PREFIX + "§7Инвентарь на сайте пуст. Возьмите предмет в руку и введите §e/up deposit"));
+                    return;
+                }
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < inv.size(); i++) {
+                    JsonObject item = inv.get(i).getAsJsonObject();
+                    if (i > 0) sb.append("§7, ");
+                    sb.append("§e").append(item.get("id").getAsString()).append("§7(x").append(item.get("count").getAsInt()).append(")");
+                }
+                runTask(() -> {
+                    player.sendMessage(UP_PREFIX + "§fИнвентарь на сайте (§e" + inv.size() + " слотов§f):");
+                    player.sendMessage("§7" + sb.toString());
+                });
+            } catch (SiteException ex) {
+                runTask(() -> player.sendMessage(UP_PREFIX + "§cОшибка: " + ex.getMessage()));
+            }
+        });
+    }
+
+    private void deliverUpgraderWithdrawals(Player player) {
+        if (!isConfigured() || !player.isOnline()) return;
+        async(() -> {
+            try {
+                JsonObject params = new JsonObject();
+                params.addProperty("p_mc_uuid", player.getUniqueId().toString());
+                JsonElement element = rpcElement("upgrader_plugin_claim_withdrawals", params);
+                if (element.isJsonArray()) {
+                    JsonArray items = element.getAsJsonArray();
+                    if (items.size() > 0) {
+                        runTask(() -> {
+                            for (JsonElement itemElem : items) {
+                                if (!itemElem.isJsonObject()) continue;
+                                JsonObject obj = itemElem.getAsJsonObject();
+                                String id = obj.has("item_id") ? obj.get("item_id").getAsString() : "";
+                                int count = obj.has("count") ? obj.get("count").getAsInt() : 1;
+                                Double dur = obj.has("durability") && !obj.get("durability").isJsonNull() ? obj.get("durability").getAsDouble() : null;
+
+                                Material mat = Material.matchMaterial(id.toUpperCase(Locale.ROOT));
+                                if (mat != null) {
+                                    giveItem(player, mat, count, dur);
+                                    player.sendMessage(UP_PREFIX + "§a✓ Автодоставка с сайта: §e" + id + " §a(x" + count + ")");
+                                }
+                            }
+                        });
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     private void link(Player player, String rawCode) {
         String code = rawCode.trim().toUpperCase(Locale.ROOT);
         if (code.length() != 6) {
-            err(player, "Код состоит из 6 символов. Возьми его на сайте в разделе «Шахта».");
+            err(player, "Код состоит из 6 символов. Возьми его на сайте в профиле или разделе «Шахта».");
             return;
         }
         long now = System.currentTimeMillis();
@@ -344,7 +610,10 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 JsonObject result = rpc("mc_plugin_link", params);
                 double ore = result.has("ore") ? result.get("ore").getAsDouble() : 0;
                 linked.add(player.getUniqueId());
-                runTask(() -> ok(player, "Аккаунт привязан к сайту. " + UNIT + " на сайте: §e" + ar(ore) + "§a."));
+                runTask(() -> {
+                    ok(player, "Аккаунт привязан к сайту. " + UNIT + " на сайте: §e" + ar(ore) + "§a.");
+                    player.sendMessage(UP_PREFIX + "§aАпгрейдер готов к работе! Используйте §e/up deposit §aчтобы отправить предмет из руки на сайт.");
+                });
             } catch (SiteException ex) {
                 runTask(() -> err(player, ex.getMessage()));
             }
@@ -383,8 +652,6 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
             return;
         }
 
-        // После рестарта кэш привязки пуст — сначала уточняем у сайта, чтобы
-        // не снимать предметы с игрока, который ещё не привязан.
         msg(player, "Проверяю привязку...");
         async(() -> {
             try {
@@ -411,7 +678,6 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         }
         int removed = removeOre(player, amount);
         if (removed != amount) {
-            // Инвентарь изменился между проверкой и снятием — возвращаем снятое.
             if (removed > 0) {
                 giveOre(player, removed, "отмена заноса");
             }
@@ -506,12 +772,12 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         for (PendingDeposit pending : new ArrayList<>(pendingDeposits.values())) {
             sendDeposit(pending);
         }
-        if (!autoDeliver) {
-            return;
-        }
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (linked.contains(player.getUniqueId())) {
-                syncPlayer(player, false, true);
+                syncPlayer(player, false, autoDeliver);
+                if (autoDeliver) {
+                    deliverUpgraderWithdrawals(player);
+                }
             }
         }
     }
@@ -549,7 +815,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                         ? result.getAsJsonArray("withdrawals") : new JsonArray();
 
                 if (announce) {
-                    runTask(() -> msg(player, "АР на сайте: §e" + ar(ore) + "§7. Готовых выводов: §e"
+                    runTask(() -> msg(player, "АР на сайте: §e" + ar(ore) + "§7. Готовых выводов руды: §e"
                             + withdrawals.size() + "§7."));
                 }
 
@@ -663,19 +929,30 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
     }
 
     private void giveOre(Player player, int amount, String reason) {
+        giveItem(player, oreMaterial, amount, null);
+        if (debug) {
+            getLogger().info("Выдано " + amount + " x " + oreMaterial + " игроку " + player.getName() + " (" + reason + ")");
+        }
+    }
+
+    private void giveItem(Player player, Material material, int amount, Double durability) {
         int remaining = amount;
-        int maxStack = Math.max(1, oreMaterial.getMaxStackSize());
+        int maxStack = Math.max(1, material.getMaxStackSize());
         while (remaining > 0) {
             int stackSize = Math.min(maxStack, remaining);
-            ItemStack item = new ItemStack(oreMaterial, stackSize);
+            ItemStack item = new ItemStack(material, stackSize);
+            if (durability != null && item.getItemMeta() instanceof Damageable dmg) {
+                int maxDur = material.getMaxDurability();
+                if (maxDur > 0) {
+                    dmg.setDamage((int) Math.round((1.0 - durability) * maxDur));
+                    item.setItemMeta(dmg);
+                }
+            }
             Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
             for (ItemStack drop : leftover.values()) {
                 player.getWorld().dropItemNaturally(player.getLocation(), drop);
             }
             remaining -= stackSize;
-        }
-        if (debug) {
-            getLogger().info("Выдано " + amount + " x " + oreMaterial + " игроку " + player.getName() + " (" + reason + ")");
         }
     }
 
@@ -694,7 +971,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
     // HTTP / PostgREST
     // ------------------------------------------------------------------
 
-    private JsonObject rpc(String function, JsonObject params) throws SiteException {
+    private JsonElement rpcElement(String function, JsonObject params) throws SiteException {
         if (!isConfigured()) {
             throw new SiteException(notConfiguredMessage(), true);
         }
@@ -733,7 +1010,7 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                     }
                 }
                 if (status == 404 || body.contains("PGRST202")) {
-                    message = "SQL «Шахты» ещё не применён на сайте (раздел 16)";
+                    message = "SQL функция " + function + " не найдена на сайте";
                 }
                 if (debug) {
                     getLogger().warning("RPC " + function + " -> " + status + " " + body);
@@ -741,17 +1018,21 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
                 throw new SiteException(message, definitive);
             }
 
-            JsonElement element = JsonParser.parseString(body);
-            if (!element.isJsonObject()) {
-                throw new SiteException("сайт вернул неожиданный ответ", false);
-            }
-            return element.getAsJsonObject();
+            return JsonParser.parseString(body);
         } catch (java.io.IOException ex) {
             throw new SiteException("нет связи с сайтом", false);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new SiteException("запрос прерван", false);
         }
+    }
+
+    private JsonObject rpc(String function, JsonObject params) throws SiteException {
+        JsonElement element = rpcElement(function, params);
+        if (!element.isJsonObject()) {
+            throw new SiteException("сайт вернул неожиданный ответ", false);
+        }
+        return element.getAsJsonObject();
     }
 
     // ------------------------------------------------------------------
@@ -799,13 +1080,34 @@ public final class SwinlineMinePlugin extends JavaPlugin implements Listener, Co
         sender.sendMessage(PREFIX + "§c" + message);
     }
 
+    private static String[] dropFirst(String[] arr) {
+        if (arr.length <= 1) return new String[0];
+        String[] result = new String[arr.length - 1];
+        System.arraycopy(arr, 1, result, 0, result.length);
+        return result;
+    }
+
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        String cmd = command.getName().toLowerCase(Locale.ROOT);
+        if (cmd.equals("up") || cmd.equals("upgrader") || cmd.equals("upgrade") || alias.equalsIgnoreCase("up")) {
+            if (args.length == 1) {
+                return filter(List.of("deposit", "withdraw", "balance", "link", "help"), args[0]);
+            }
+            if (args.length == 2 && (args[0].equalsIgnoreCase("deposit") || args[0].equalsIgnoreCase("dep"))) {
+                return filter(List.of("1", "all"), args[1]);
+            }
+            return List.of();
+        }
+
         if (args.length == 1) {
-            return filter(List.of("link", "deposit", "balance", "withdraw", "ping", "help"), args[0]);
+            return filter(List.of("link", "deposit", "balance", "withdraw", "up", "ping", "help"), args[0]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("deposit")) {
             return filter(List.of("all"), args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("up")) {
+            return filter(List.of("deposit", "withdraw", "balance", "link", "help"), args[1]);
         }
         return List.of();
     }

@@ -1,9 +1,9 @@
 name: SwinlineMine
-version: '1.0.0'
+version: '1.1.0'
 main: ru.swinline.mine.SwinlineMinePlugin
 api-version: '26.3'
 author: SWINLINE
-description: Алмазная руда из Minecraft на сайт SWINLINE — занос, вывод и игра
+description: Алмазная руда и Апгрейдер из Minecraft на сайт SWINLINE — занос, вывод и игра
 commands:
   sw:
     description: Шахта SWINLINE — привязка, занос и вывод алмазной руды
@@ -11,7 +11,13 @@ commands:
     aliases: [swinline, shahta]
     permission: swinline.use
     permission-message: §cКоманда доступна всем игрокам (swinline.use).
+  up:
+    description: Апгрейдер SWINLINE — отправка предметов из руки на сайт и вывод
+    usage: /up <deposit|withdraw|balance|link|help>
+    aliases: [upgrader, upgrade]
+    permission: swinline.use
+    permission-message: §cКоманда доступна всем игрокам (swinline.use).
 permissions:
   swinline.use:
-    description: Доступ к командам шахты
+    description: Доступ к командам шахты и апгрейдера
     default: true

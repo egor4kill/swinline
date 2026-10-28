@@ -1,5 +1,5 @@
-import vanilla from './vanilla-catalog.js?v=7';
-import economy from './economy-profile.js?v=7';
+import vanilla from './vanilla-catalog.js?v=8';
+import economy from './economy-profile.js?v=8';
 
 export const catalog = vanilla;
 export function valueOf(id, items = catalog, chain = new Set()) {

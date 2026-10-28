@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Loader2, RotateCcw, Sparkles } from 'lucide-react'
+import { AlertTriangle, Check, Copy, ExternalLink, Loader2, Sparkles } from 'lucide-react'
 import { supabase } from './supabase'
 import type { UserAccount } from './data'
 
@@ -19,7 +19,7 @@ type UpgraderElement = HTMLElement & {
 }
 
 const BASE = import.meta.env.BASE_URL || '/'
-const UPGRADER_VERSION = '7'
+const UPGRADER_VERSION = '8'
 const MODULE_URL = `${BASE}upgrader/upgrader.js?v=${UPGRADER_VERSION}`
 const ADAPTER_URL = `${BASE}upgrader/site-adapter.js?v=${UPGRADER_VERSION}`
 
@@ -62,8 +62,28 @@ export default function MinecraftUpgrader({ currentUser, notify, onNeedAuth }: P
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
-  const [confirmReset, setConfirmReset] = useState(false)
-  const [resetting, setResetting] = useState(false)
+  const [mcNick, setMcNick] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!currentUser?.id) return
+    let active = true
+    ;(async () => {
+      try {
+        const { data } = await supabase
+          .from('mc_links')
+          .select('mc_name')
+          .eq('user_id', currentUser.id)
+          .maybeSingle()
+        if (active && data?.mc_name) {
+          setMcNick(data.mc_name)
+        }
+      } catch {
+        // Игнорируем ошибку чтения привязки
+      }
+    })()
+    return () => { active = false }
+  }, [currentUser?.id])
 
   useEffect(() => {
     if (!currentUser) return
@@ -72,7 +92,6 @@ export default function MinecraftUpgrader({ currentUser, notify, onNeedAuth }: P
     let cancelled = false
     setStatus('loading')
     setError('')
-    setConfirmReset(false)
 
     ;(async () => {
       try {
@@ -102,14 +121,21 @@ export default function MinecraftUpgrader({ currentUser, notify, onNeedAuth }: P
     }
   }, [currentUser?.id, reloadKey])
 
+  const copyCommand = (cmd: string) => {
+    navigator.clipboard.writeText(cmd)
+    setCopied(true)
+    notify(`Скопировано: ${cmd}`)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   if (!currentUser) {
     return (
       <section className="mc-card mc-upgrader-gate">
         <div className="mc-upgrader-gate-icon"><Sparkles size={28} /></div>
         <h2>Апгрейдер Minecraft</h2>
         <p>
-          Игровой инвентарь привязан к аккаунту SWINLINE. Войди через Twitch,
-          чтобы получить стартовый набор и улучшать предметы.
+          Инвентарь привязан к серверу выживания Minecraft. Войди через Twitch,
+          чтобы улучшать свои игровые предметы.
         </p>
         <button className="wl-btn-orange mc-upgrader-gate-btn" onClick={onNeedAuth}>
           Войти через Twitch
@@ -118,53 +144,36 @@ export default function MinecraftUpgrader({ currentUser, notify, onNeedAuth }: P
     )
   }
 
-  const reset = async () => {
-    if (resetting) return
-    if (elementRef.current?.busy) {
-      notify('Дождитесь окончания вращения')
-      return
-    }
-    setResetting(true)
-    const { error: resetError } = await (supabase.rpc as any)('upgrader_reset', {})
-    setResetting(false)
-    if (resetError) {
-      notify(resetError.message || 'Не удалось сбросить инвентарь')
-      return
-    }
-    setConfirmReset(false)
-    notify('Стартовый набор восстановлен')
-    await elementRef.current?.load()
-    if (elementRef.current) {
-      elementRef.current.message = 'Стартовый набор восстановлен. Можно пробовать снова.'
-      elementRef.current.resultKind = ''
-      elementRef.current.render()
-    }
-  }
-
   return (
     <div className="mc-upgrader-shell">
       <div className="mc-upgrader-toolbar">
         <div className="mc-upgrader-copy">
           <span className="mc-upgrader-kicker">MINECRAFT · UPGRADER</span>
-          <p>Инвентарь привязан к аккаунту SWINLINE. Это отдельная мини-игра: АР и SV₽ не списываются.</p>
+          <p>
+            {mcNick ? (
+              <>Привязанный ник: <b>{mcNick}</b>. Положить предмет из руки: <code>/up deposit</code></>
+            ) : (
+              <>Привяжите свой Minecraft-ник командой <code>/sw link КОД</code> (код в профиле или Шахте).</>
+            )}
+          </p>
         </div>
         <div className="mc-upgrader-actions">
-          {confirmReset ? (
-            <>
-              <span className="mc-upgrader-confirm">Добытые предметы пропадут</span>
-              <button className="mc-upgrader-danger" onClick={reset} disabled={resetting}>
-                {resetting ? <Loader2 size={14} className="mc-spin" /> : null}
-                Да, сбросить
-              </button>
-              <button className="mc-upgrader-ghost" onClick={() => setConfirmReset(false)} disabled={resetting}>
-                Отмена
-              </button>
-            </>
-          ) : (
-            <button className="mc-upgrader-reset" onClick={() => setConfirmReset(true)} disabled={status !== 'ready'}>
-              <RotateCcw size={14} /> Сбросить набор
-            </button>
-          )}
+          <button
+            className="mc-upgrader-ghost"
+            title="Скопировать команду заноса предмета из руки"
+            onClick={() => copyCommand('/up deposit')}
+          >
+            {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+            <span>/up deposit</span>
+          </button>
+          <button
+            className="mc-upgrader-ghost"
+            title="Скопировать команду выдачи выведенных предметов"
+            onClick={() => copyCommand('/up withdraw')}
+          >
+            <Copy size={14} />
+            <span>/up withdraw</span>
+          </button>
         </div>
       </div>
 

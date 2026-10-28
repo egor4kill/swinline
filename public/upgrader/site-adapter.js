@@ -1,4 +1,4 @@
-import { catalog } from './core.js?v=7';
+import { catalog } from './core.js?v=8';
 
 /**
  * Адаптер Upgrader-а к сайту: операции идут через Supabase RPC.
@@ -60,6 +60,14 @@ export class SiteAdapter {
     });
     if (error) throw new Error(error.message || 'Сервер не подтвердил операцию');
     if (!data) throw new Error('Сервер не вернул результат');
+    return data;
+  }
+
+  async withdraw(slot) {
+    const { data, error } = await this.rpc('upgrader_withdraw', {
+      p_slot: slot,
+    });
+    if (error) throw new Error(error.message || 'Не удалось вывести предмет');
     return data;
   }
 
