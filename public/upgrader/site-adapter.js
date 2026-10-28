@@ -1,12 +1,14 @@
-import { catalog } from './core.js?v=5';
+import { catalog } from './core.js?v=6';
 
 /**
- * Адаптер Upgrader-а к сайту: все операции идут через Supabase RPC.
- * Инвентарь и исход броска хранит сервер (upgrader_profiles/upgrader_upgrade).
+ * Адаптер Upgrader-а к сайту: операции идут через Supabase RPC.
+ * Поддерживает Supabase Realtime для моментального появления новых открытых предметов.
  */
 export class SiteAdapter {
-  constructor(rpc) {
+  constructor(rpc, client) {
     this.rpc = rpc;
+    this.client = client;
+    this.channel = null;
   }
 
   async bootstrap() {
@@ -20,6 +22,32 @@ export class SiteAdapter {
       history: Array.isArray(data.history) ? data.history : [],
       mode: 'server',
     };
+  }
+
+  subscribeDiscovery(onItemDiscovered) {
+    if (!this.client || typeof this.client.channel !== 'function') return () => {};
+    try {
+      this.channel = this.client
+        .channel('realtime:server_discovered_items')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'server_discovered_items' },
+          payload => {
+            if (payload?.new?.id) {
+              onItemDiscovered(payload.new.id, payload.new.discovered_by);
+            }
+          }
+        )
+        .subscribe();
+      return () => {
+        if (this.channel) {
+          try { this.client.removeChannel(this.channel); } catch {}
+          this.channel = null;
+        }
+      };
+    } catch {
+      return () => {};
+    }
   }
 
   async upgrade(request) {

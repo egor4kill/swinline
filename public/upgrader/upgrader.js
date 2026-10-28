@@ -1,5 +1,5 @@
-import {catalog as defaults,valueOf,chance,formatChance} from './core.js?v=5';
-import {DemoAdapter} from './adapters.js?v=5';
+import {catalog as defaults,valueOf,chance,formatChance} from './core.js?v=6';
+import {DemoAdapter} from './adapters.js?v=6';
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:n>0&&n<1?4:1}).format(n);
 const asset=path=>new URL(path,import.meta.url).href;
@@ -11,6 +11,7 @@ class MinecraftUpgrader extends HTMLElement{
  constructor(){super();this.attachShadow({mode:'open'});this._adapter=new DemoAdapter();Object.assign(this,{stake:'s1',target:'iron_pickaxe',stakeCount:1,targetCount:1,query:'',filter:'all',page:0,pageSize:40,sort:'popular',min:'',max:'',busy:false,fast:false,motion:true,message:'Выберите ставку слева и желаемый предмет справа.',angle:0});}
  set adapter(value){this._adapter=value;if(this.isConnected)this.load();} get adapter(){return this._adapter;}
  connectedCallback(){if(this.initialized)return;this.initialized=true;this.shadowRoot.innerHTML=`<link rel="stylesheet" href="${asset('./upgrader.css')}"><div class="app-view"><p class="loading">Загружаем инвентарь…</p></div>`;this.view=this.shadowRoot.querySelector('.app-view');this.load();}
+ disconnectedCallback(){if(this._unsub){this._unsub();this._unsub=null;}}
  async load(){
    if(this.busy)return;
    try{
@@ -28,6 +29,22 @@ class MinecraftUpgrader extends HTMLElement{
      if(!this.items.some(i=>i.id===this.target))this.target=this.items[0]?.id;
      if(!this.inventory.some(i=>i.slot===this.stake))this.stake=this.inventory[0]?.slot;
      this.render();
+     if(typeof this.adapter?.subscribeDiscovery==='function'){
+       this._unsub?.();
+       this._unsub=this.adapter.subscribeDiscovery((id,by)=>{
+         const item=this.allItems.find(i=>i.id===id);
+         if(item&&!this.items.some(i=>i.id===id)){
+           this.items.push(item);
+           this.renderCatalog();
+           const counter=this.shadowRoot.querySelector('.version span');
+           if(counter)counter.textContent=`${fmt(this.items.length)} открыто на сервере`;
+           this.message=`🎉 Новый предмет открыт (${esc(by)}): ${item.name||id}!`;
+           this.resultKind='success';
+           const status=this.shadowRoot.querySelector('.result-bar');
+           if(status){status.className='result-bar success';status.querySelector('span:nth-child(2)').textContent=this.message;}
+         }
+       });
+     }
    }catch(e){
      this.view.innerHTML=`<p role="alert">${esc(e.message)}</p><button id="retry">Загрузить снова</button>`;
      this.view.querySelector('#retry').onclick=()=>this.load();

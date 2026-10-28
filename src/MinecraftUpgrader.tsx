@@ -19,7 +19,7 @@ type UpgraderElement = HTMLElement & {
 }
 
 const BASE = import.meta.env.BASE_URL || '/'
-const UPGRADER_VERSION = '5'
+const UPGRADER_VERSION = '6'
 const MODULE_URL = `${BASE}upgrader/upgrader.js?v=${UPGRADER_VERSION}`
 const ADAPTER_URL = `${BASE}upgrader/site-adapter.js?v=${UPGRADER_VERSION}`
 
@@ -71,11 +71,11 @@ export default function MinecraftUpgrader({ currentUser, notify, onNeedAuth }: P
         await loadModule()
         if (cancelled) return
         const { SiteAdapter } = (await import(/* @vite-ignore */ ADAPTER_URL)) as {
-          SiteAdapter: new (call: typeof rpc) => unknown
+          SiteAdapter: new (call: typeof rpc, client?: any) => unknown
         }
         if (cancelled) return
         const element = document.createElement('minecraft-upgrader') as UpgraderElement
-        element.adapter = new SiteAdapter(rpc)
+        element.adapter = new SiteAdapter(rpc, supabase)
         elementRef.current = element
         host.replaceChildren(element)
         setStatus('ready')
