@@ -4892,20 +4892,75 @@ button:focus-visible, input:focus-visible {
    Вся рисовка CSS/SVG: кривая краша, колесо, пеги, плитки,
    карты, лава — без сторонних картинок.
    ============================================================ */
+.game-cards-wrapper {
+  position: relative;
+  margin: 0 -20px 16px;
+}
+
 .game-cards-row {
   display: flex;
   gap: 10px;
   overflow-x: auto;
-  margin: 0 -20px 16px;
-  padding: 2px 20px 4px;
+  margin: 0;
+  padding: 2px 20px 8px;
   scroll-snap-type: x mandatory;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 122, 26, 0.3) transparent;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  user-select: none;
 }
 
 .game-cards-row::-webkit-scrollbar {
-  display: none;
+  height: 4px;
+}
+
+.game-cards-row::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.game-cards-row::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.game-cards-row::-webkit-scrollbar-thumb:hover {
+  background: var(--org);
+}
+
+.game-cards-arrow {
+  position: absolute;
+  top: 48px;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(18, 19, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  transition: all 0.15s ease;
+}
+
+.game-cards-arrow:hover {
+  background: #252832;
+  border-color: var(--org);
+  color: var(--org);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.game-cards-arrow.left {
+  left: 6px;
+}
+
+.game-cards-arrow.right {
+  right: 6px;
 }
 
 .game-card {
@@ -5156,9 +5211,14 @@ button:focus-visible, input:focus-visible {
 }
 
 @media (max-width: 767px) {
-  .game-cards-row {
+  .game-cards-wrapper {
     margin: 0 -12px 14px;
-    padding: 2px 12px 4px;
+  }
+  .game-cards-row {
+    padding: 2px 12px 6px;
+  }
+  .game-cards-arrow {
+    display: none;
   }
   .game-card {
     flex: 0 0 132px;

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 // Свои картинки: положи файл в src/assets/games/ с именем <id игры>.png|jpg|webp
 // (см. README в той папке) — он заменит CSS-миниатюру автоматически.
@@ -45,6 +46,19 @@ const CARDS: Card[] = [
         </svg>
         <span className="gc-float" style={{ top: '8%', right: '8%' }}>🐷🚀</span>
         <span className="gc-big">3.75x</span>
+      </>
+    )
+  },
+  {
+    id: 'blackjack',
+    name: 'Свинджек',
+    sub: 'карты 21',
+    bg: 'linear-gradient(165deg, #0f3320 0%, #07160c 70%)',
+    art: (
+      <>
+        <span className="gc-card gc-card-a"><b>A</b><i>♠</i></span>
+        <span className="gc-card gc-card-b"><b>A</b><i>♥</i></span>
+        <span className="gc-big">21</span>
       </>
     )
   },
@@ -142,19 +156,6 @@ const CARDS: Card[] = [
     )
   },
   {
-    id: 'blackjack',
-    name: 'Хрякджек',
-    sub: 'карты',
-    bg: 'linear-gradient(165deg, #0f3320 0%, #07160c 70%)',
-    art: (
-      <>
-        <span className="gc-card gc-card-a"><b>A</b><i>♠</i></span>
-        <span className="gc-card gc-card-b"><b>A</b><i>♥</i></span>
-        <span className="gc-big">21</span>
-      </>
-    )
-  },
-  {
     id: 'pick',
     name: 'Кирка',
     sub: 'башня',
@@ -192,27 +193,145 @@ type Props = {
 }
 
 export default function GameCards({ gamesTab, setGamesTab }: Props) {
+  const rowRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+  const isDragging = useRef(false)
+  const startX = useRef(0)
+  const initialScroll = useRef(0)
+  const hasMoved = useRef(false)
+
+  const updateScrollState = () => {
+    const el = rowRef.current
+    if (!el) return
+    setCanScrollLeft(el.scrollLeft > 6)
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 6)
+  }
+
+  useEffect(() => {
+    updateScrollState()
+    const el = rowRef.current
+    if (!el) return
+    el.addEventListener('scroll', updateScrollState, { passive: true })
+    window.addEventListener('resize', updateScrollState)
+    return () => {
+      el.removeEventListener('scroll', updateScrollState)
+      window.removeEventListener('resize', updateScrollState)
+    }
+  }, [])
+
+  // Автоскролл к активной карточке
+  useEffect(() => {
+    const el = rowRef.current
+    if (!el) return
+    const active = el.querySelector<HTMLElement>('.game-card.active')
+    if (active) {
+      active.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }
+    updateScrollState()
+  }, [gamesTab])
+
+  const scrollBy = (dir: 'left' | 'right') => {
+    const el = rowRef.current
+    if (!el) return
+    const delta = (el.clientWidth * 0.7) * (dir === 'left' ? -1 : 1)
+    el.scrollBy({ left: delta, behavior: 'smooth' })
+  }
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = rowRef.current
+    if (!el) return
+    // Перенаправляем вертикальный скролл мыши в горизонтальный скролл карточек
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      if ((e.deltaY > 0 && canScrollRight) || (e.deltaY < 0 && canScrollLeft)) {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY * 1.2
+      }
+    }
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const el = rowRef.current
+    if (!el) return
+    isDragging.current = true
+    startX.current = e.pageX
+    initialScroll.current = el.scrollLeft
+    hasMoved.current = false
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging.current) return
+    const el = rowRef.current
+    if (!el) return
+    const diff = e.pageX - startX.current
+    if (Math.abs(diff) > 4) {
+      hasMoved.current = true
+    }
+    el.scrollLeft = initialScroll.current - diff
+  }
+
+  const handleMouseUp = () => {
+    isDragging.current = false
+  }
+
   return (
-    <div className="game-cards-row" role="tablist" aria-label="Игры 24/7">
-      {CARDS.map(c => (
+    <div className="game-cards-wrapper">
+      {canScrollLeft && (
         <button
-          key={c.id}
           type="button"
-          role="tab"
-          aria-selected={gamesTab === c.id}
-          className={`game-card ${gamesTab === c.id ? 'active' : ''}`}
-          onClick={() => setGamesTab(c.id)}
+          className="game-cards-arrow left"
+          aria-label="Прокрутить игры влево"
+          onClick={() => scrollBy('left')}
         >
-          <span className="game-card-art" style={{ background: c.bg }}>
-            {customImageFor(c.id)
-              ? <img src={customImageFor(c.id)} alt={c.name} className="game-card-img" loading="lazy" />
-              : c.art}
-            {gamesTab === c.id && <i className="game-card-live" />}
-          </span>
-          <span className="game-card-name">{c.name}</span>
-          <span className="game-card-sub">{c.sub}</span>
+          <ChevronLeft size={20} />
         </button>
-      ))}
+      )}
+
+      <div
+        ref={rowRef}
+        className="game-cards-row"
+        role="tablist"
+        aria-label="Игры 24/7"
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        {CARDS.map(c => (
+          <button
+            key={c.id}
+            type="button"
+            role="tab"
+            aria-selected={gamesTab === c.id}
+            className={`game-card ${gamesTab === c.id ? 'active' : ''}`}
+            onClick={() => {
+              if (hasMoved.current) return
+              setGamesTab(c.id)
+            }}
+          >
+            <span className="game-card-art" style={{ background: c.bg }}>
+              {customImageFor(c.id)
+                ? <img src={customImageFor(c.id)} alt={c.name} className="game-card-img" loading="lazy" />
+                : c.art}
+              {gamesTab === c.id && <i className="game-card-live" />}
+            </span>
+            <span className="game-card-name">{c.name}</span>
+            <span className="game-card-sub">{c.sub}</span>
+          </button>
+        ))}
+      </div>
+
+      {canScrollRight && (
+        <button
+          type="button"
+          className="game-cards-arrow right"
+          aria-label="Прокрутить игры вправо"
+          onClick={() => scrollBy('right')}
+        >
+          <ChevronRight size={20} />
+        </button>
+      )}
     </div>
   )
 }
